@@ -47,6 +47,44 @@ function buildTicker() {
 
 buildTicker();
 
+/* ── Custom Cursor ────────────────────────────────────────── */
+(function initCursor() {
+  const dot  = document.getElementById('cursor-dot');
+  const ring = document.getElementById('cursor-ring');
+  if (!dot || !ring) return;
+
+  let mx = -100, my = -100, rx = -100, ry = -100, shown = false;
+
+  document.addEventListener('mousemove', e => {
+    mx = e.clientX;
+    my = e.clientY;
+    dot.style.left = mx + 'px';
+    dot.style.top  = my + 'px';
+    if (!shown) {
+      shown = true;
+      dot.style.opacity  = '1';
+      ring.style.opacity = '1';
+    }
+  });
+
+  (function loop() {
+    rx += (mx - rx) * 0.10;
+    ry += (my - ry) * 0.10;
+    ring.style.left = Math.round(rx) + 'px';
+    ring.style.top  = Math.round(ry) + 'px';
+    requestAnimationFrame(loop);
+  })();
+
+  const sel = 'a, button, .proj-card, .ach-card, .int-card, .speak-card, .learn-card, .sk-col, .hm-cell, input, textarea';
+  document.querySelectorAll(sel).forEach(el => {
+    el.addEventListener('mouseenter', () => { dot.classList.add('hov'); ring.classList.add('hov'); });
+    el.addEventListener('mouseleave', () => { dot.classList.remove('hov'); ring.classList.remove('hov'); });
+  });
+
+  document.addEventListener('mouseleave', () => { dot.style.opacity = '0'; ring.style.opacity = '0'; shown = false; });
+  document.addEventListener('mouseenter', () => { /* shows on next mousemove */ });
+})();
+
 /* ── Hero Canvas Particles ────────────────────────────────── */
 (function initCanvas() {
   const canvas = document.getElementById('hero-canvas');
@@ -150,16 +188,24 @@ function animateCounters() {
 }
 
 /* ── Navbar ───────────────────────────────────────────────── */
-const navbar = document.getElementById('navbar');
-const navLinks = document.querySelectorAll('.nav-link');
-const sections = document.querySelectorAll('section[id]');
+const navbar    = document.getElementById('navbar');
+const tickerBar = document.getElementById('ticker-bar');
+const navLinks  = document.querySelectorAll('.nav-link');
+const sections  = document.querySelectorAll('section[id]');
+let lastScrollY = 0;
 
 function onScroll() {
-  navbar.classList.toggle('pinned', window.scrollY > 30);
+  const sy = window.scrollY;
+  navbar.classList.toggle('pinned', sy > 30);
+
+  const heroSection = document.getElementById('hero');
+  const pastHero = heroSection && sy > heroSection.offsetHeight * 0.85;
+  tickerBar.classList.toggle('ticker-hidden', pastHero);
+  navbar.classList.toggle('ticker-gone', pastHero);
+  lastScrollY = sy;
+
   let cur = '';
-  sections.forEach(s => {
-    if (window.scrollY >= s.offsetTop - 120) cur = s.id;
-  });
+  sections.forEach(s => { if (sy >= s.offsetTop - 120) cur = s.id; });
   navLinks.forEach(l => l.classList.toggle('active', l.getAttribute('href') === `#${cur}`));
 }
 
@@ -211,7 +257,7 @@ const heroObserver = new IntersectionObserver((entries) => {
   });
 }, { threshold: 0.5 });
 
-document.querySelectorAll('.int-card, .about-card, .proj-card, .ach-card, .learn-card, .ci-card, .chart-card, .sh, .sk-col, .hero-content, .hero-terminal').forEach(el => {
+document.querySelectorAll('.int-card, .about-card, .proj-card, .ach-card, .learn-card, .speak-card, .speak-quote, .ci-card, .chart-card, .sh, .sk-col, .hero-content, .hero-terminal').forEach(el => {
   el.classList.add('fade-up');
   observer.observe(el);
 });
@@ -406,6 +452,36 @@ Chart.defaults.font.size = 11;
       },
     },
   });
+})();
+
+/* ── Market Heatmap ───────────────────────────────────────── */
+(function buildHeatmap() {
+  const container = document.getElementById('heatmap');
+  if (!container) return;
+  const sectors = [
+    { name: 'Technology',   pct: +3.2 },
+    { name: 'Financials',   pct: +1.8 },
+    { name: 'Energy',       pct: -0.9 },
+    { name: 'Health Care',  pct: +0.5 },
+    { name: 'Consumer',     pct: +2.1 },
+    { name: 'Utilities',    pct: -1.4 },
+    { name: 'Industrials',  pct: +1.1 },
+    { name: 'Materials',    pct: -0.3 },
+    { name: 'Real Estate',  pct: -2.1 },
+    { name: 'Comm Svcs',    pct: +2.7 },
+  ];
+  container.innerHTML = sectors.map(s => {
+    const intensity = Math.min(Math.abs(s.pct) / 4, 1);
+    const bg = s.pct >= 0
+      ? `rgba(16,185,129,${0.18 + intensity * 0.52})`
+      : `rgba(239,68,68,${0.18 + intensity * 0.52})`;
+    const border = s.pct >= 0 ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)';
+    const sign = s.pct >= 0 ? '+' : '';
+    return `<div class="hm-cell" style="background:${bg};border:1px solid ${border}" title="${s.name}: ${sign}${s.pct}%">
+      <span class="hm-name">${s.name}</span>
+      <span class="hm-pct">${sign}${s.pct}%</span>
+    </div>`;
+  }).join('');
 })();
 
 /* ── Contact Form ─────────────────────────────────────────── */

@@ -13,7 +13,19 @@
 </head>
 <body>
 
+  <!-- Animated background orbs -->
+  <div class="bg-orbs">
+    <div class="bg-orb orb-1"></div>
+    <div class="bg-orb orb-2"></div>
+    <div class="bg-orb orb-3"></div>
+  </div>
+
+  <!-- Custom cursor -->
+  <div class="cursor-dot" id="cursor-dot"></div>
+  <div class="cursor-ring" id="cursor-ring"></div>
+
   <!-- Live Stock Ticker -->
+  <div class="ticker-spacer"></div>
   <div class="ticker-bar" id="ticker-bar">
     <div class="ticker-track" id="ticker-track"><!-- JS populated --></div>
   </div>
@@ -33,6 +45,7 @@
         <li><a href="#projects" class="nav-link">Projects</a></li>
         <li><a href="#analytics" class="nav-link">Analytics</a></li>
         <li><a href="#achievements" class="nav-link">Achievements</a></li>
+        <li><a href="#speaking" class="nav-link">Speaking</a></li>
         <li><a href="#learning" class="nav-link">Learning</a></li>
         <li><a href="#contact" class="nav-link">Contact</a></li>
         <li><a href="#resume" class="btn-nav">Résumé</a></li>
@@ -70,17 +83,23 @@
         </div>
         <div class="hero-stats">
           <div class="h-stat">
-            <span class="h-num" data-target="5">0</span><span class="h-plus">+</span>
+            <div class="h-top">
+              <span class="h-num" data-target="5">0</span><span class="h-plus">+</span>
+            </div>
             <span class="h-lbl">Projects</span>
           </div>
           <div class="stat-sep"></div>
           <div class="h-stat">
-            <span class="h-num" data-target="3">0</span>
+            <div class="h-top">
+              <span class="h-num" data-target="3">0</span>
+            </div>
             <span class="h-lbl">Languages</span>
           </div>
           <div class="stat-sep"></div>
           <div class="h-stat">
-            <span class="h-num" data-target="12">0</span><span class="h-plus">+</span>
+            <div class="h-top">
+              <span class="h-num" data-target="12">0</span><span class="h-plus">+</span>
+            </div>
             <span class="h-lbl">Libraries</span>
           </div>
         </div>
@@ -286,7 +305,7 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
             </ul>
           </div>
           <div class="pc-foot">
-            <a href="#" class="pl-btn">
+            <a href="https://github.com/Kingbob609420/economic-data-dashboard" class="pl-btn" target="_blank" rel="noopener">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>GitHub
             </a>
             <a href="#" class="pl-btn demo">
@@ -312,7 +331,7 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
             </ul>
           </div>
           <div class="pc-foot">
-            <a href="#" class="pl-btn">
+            <a href="https://github.com/Kingbob609420/stock-analysis-tool" class="pl-btn" target="_blank" rel="noopener">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>GitHub
             </a>
             <a href="#" class="pl-btn demo">
@@ -338,7 +357,7 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
             </ul>
           </div>
           <div class="pc-foot">
-            <a href="#" class="pl-btn">
+            <a href="https://github.com/Kingbob609420/ai-market-predictor" class="pl-btn" target="_blank" rel="noopener">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>GitHub
             </a>
           </div>
@@ -361,7 +380,7 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
             </ul>
           </div>
           <div class="pc-foot">
-            <a href="#" class="pl-btn">
+            <a href="https://github.com/Kingbob609420/market-sentiment-analyzer" class="pl-btn" target="_blank" rel="noopener">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>GitHub
             </a>
             <a href="#" class="pl-btn demo">
@@ -387,7 +406,7 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
             </ul>
           </div>
           <div class="pc-foot">
-            <a href="#" class="pl-btn">
+            <a href="https://github.com/Kingbob609420/portfolio-optimizer" class="pl-btn" target="_blank" rel="noopener">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>GitHub
             </a>
             <a href="#" class="pl-btn demo">
@@ -437,6 +456,13 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
           </div>
           <canvas id="vix-chart" height="200"></canvas>
         </div>
+        <div class="chart-card glass chart-wide">
+          <div class="cc-head">
+            <h3>S&amp;P 500 Sector Heatmap</h3>
+            <p>Simulated weekly sector performance snapshot — green = gaining, red = declining</p>
+          </div>
+          <div class="heatmap-grid" id="heatmap"></div>
+        </div>
       </div>
     </div>
   </section>
@@ -465,13 +491,13 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
           <div class="ach-icon">💻</div>
           <h3>Hackathon Participant</h3>
           <p>Built financial data tools under time constraints — competing in coding challenges and pitching to judges.</p>
-          <span class="ach-yr">2024</span>
+          <span class="ach-yr">Present</span>
         </div>
         <div class="ach-card glass">
           <div class="ach-icon">🎤</div>
           <h3>Public Speaker</h3>
           <p>Presented data-driven financial research to panels of educators, peers, and community stakeholders.</p>
-          <span class="ach-yr">2023–24</span>
+          <span class="ach-yr">2023–2026</span>
         </div>
         <div class="ach-card glass">
           <div class="ach-icon">🔬</div>
@@ -483,8 +509,48 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
           <div class="ach-icon">👥</div>
           <h3>Team Leader</h3>
           <p>Led multi-person data science and finance projects from concept through final presentation.</p>
-          <span class="ach-yr">2023–24</span>
+          <span class="ach-yr">2023–2026</span>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Public Speaking ──────────────────────────────────────── -->
+  <section class="section" id="speaking">
+    <div class="sc">
+      <div class="sh">
+        <span class="s-tag">06 / Speaking</span>
+        <h2 class="s-title">Communication &amp; Leadership</h2>
+        <p class="s-sub">Turning complex data into clear, compelling narratives for any audience.</p>
+      </div>
+      <div class="speaking-grid">
+        <div class="speak-card glass">
+          <div class="speak-icon">🎤</div>
+          <h3>Research Presentations</h3>
+          <p>Presented independent economic research on inflation trends and consumer spending to panels of educators and community stakeholders — translating dense data into clear, visual narratives.</p>
+          <div class="speak-tags"><span>Economic Research</span><span>Data Storytelling</span></div>
+        </div>
+        <div class="speak-card glass">
+          <div class="speak-icon">💻</div>
+          <h3>Hackathon Pitches</h3>
+          <p>Pitched financial data tools and AI solutions under competitive time constraints to technical judges — demonstrating product value, technical architecture, and real-world impact in under 5 minutes.</p>
+          <div class="speak-tags"><span>Product Pitching</span><span>Technical Demo</span></div>
+        </div>
+        <div class="speak-card glass">
+          <div class="speak-icon">📊</div>
+          <h3>Project Walkthroughs</h3>
+          <p>Regularly explain complex quantitative tools — from portfolio optimizers to ML models — to audiences without technical backgrounds, making finance and AI accessible through story-driven demonstrations.</p>
+          <div class="speak-tags"><span>Technical Explanation</span><span>Accessibility</span></div>
+        </div>
+        <div class="speak-card glass">
+          <div class="speak-icon">👥</div>
+          <h3>Team Collaboration</h3>
+          <p>Led multi-person data science teams from ideation through delivery — facilitating stand-ups, aligning on goals, and keeping stakeholders informed with concise progress reports and demos.</p>
+          <div class="speak-tags"><span>Leadership</span><span>Coordination</span></div>
+        </div>
+      </div>
+      <div class="speak-quote glass">
+        <p>"The ability to communicate complex ideas simply is the most underrated skill in quantitative finance."</p>
       </div>
     </div>
   </section>
@@ -493,7 +559,7 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
   <section class="section alt" id="learning">
     <div class="sc">
       <div class="sh">
-        <span class="s-tag">06 / Learning</span>
+        <span class="s-tag">07 / Learning</span>
         <h2 class="s-title">Continuous Growth</h2>
         <p class="s-sub">Self-directed learning across finance, ML, and quantitative methods.</p>
       </div>
@@ -554,23 +620,23 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
   <section class="section" id="resume">
     <div class="sc">
       <div class="sh">
-        <span class="s-tag">07 / Résumé</span>
+        <span class="s-tag">08 / Résumé</span>
         <h2 class="s-title">My Résumé</h2>
       </div>
       <div class="resume-wrap glass">
         <div class="resume-preview">
-          <div class="rp-placeholder">
-            <div class="rp-icon">📄</div>
-            <p>Résumé Preview</p>
-            <p class="rp-note">Add <code>resume.pdf</code> to the project folder to enable preview &amp; download</p>
-          </div>
+          <iframe src="resume.pdf" title="Atharv Sharma Résumé" style="width:100%;height:100%;min-height:420px;border:none;border-radius:6px;"></iframe>
         </div>
         <div class="resume-actions">
-          <a href="resume.pdf" class="btn btn-primary" download>
+          <a href="resume.pdf" class="btn btn-primary" download="Atharv_Sharma_Resume.pdf">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Download PDF
           </a>
-          <p class="resume-note">Last updated: [Month Year]</p>
+          <a href="resume.pdf" class="btn btn-secondary" target="_blank" rel="noopener">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            Open Full View
+          </a>
+          <p class="resume-note">Atharv Sharma · 2026</p>
         </div>
       </div>
     </div>
@@ -580,7 +646,7 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
   <section class="section alt" id="contact">
     <div class="sc">
       <div class="sh">
-        <span class="s-tag">08 / Contact</span>
+        <span class="s-tag">09 / Contact</span>
         <h2 class="s-title">Let's Connect</h2>
         <p class="s-sub">Open to internships, research collaborations, and project conversations.</p>
       </div>
@@ -588,7 +654,7 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
         <div class="contact-info">
           <div class="ci-card glass">
             <div class="ci-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
-            <div><span class="ci-lbl">Email</span><a href="mailto:atharv@example.com" class="ci-val">atharv@example.com</a></div>
+            <div><span class="ci-lbl">Email</span><a href="mailto:atharv.eck@gmail.com" class="ci-val">atharv.eck@gmail.com</a></div>
           </div>
           <div class="ci-card glass">
             <div class="ci-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg></div>
@@ -596,7 +662,7 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
           </div>
           <div class="ci-card glass">
             <div class="ci-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/></svg></div>
-            <div><span class="ci-lbl">LinkedIn</span><a href="#" class="ci-val">Add your LinkedIn URL</a></div>
+            <div><span class="ci-lbl">LinkedIn</span><a href="https://www.linkedin.com/in/atharv-sharma-150232408/" class="ci-val" target="_blank" rel="noopener">linkedin.com/in/atharv-sharma</a></div>
           </div>
           <div class="ci-quote glass">
             <p>"The goal of investing is to find situations where it is safe not to diversify." — Charlie Munger</p>
