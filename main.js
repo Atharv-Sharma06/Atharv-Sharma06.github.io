@@ -85,93 +85,6 @@ buildTicker();
   document.addEventListener('mouseenter', () => { /* shows on next mousemove */ });
 })();
 
-/* ── Hero Canvas Particles ────────────────────────────────── */
-(function initCanvas() {
-  const canvas = document.getElementById('hero-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  let W, H, particles = [];
-
-  function resize() {
-    W = canvas.width  = window.innerWidth;
-    H = canvas.height = canvas.parentElement.offsetHeight;
-  }
-  resize();
-  window.addEventListener('resize', () => { resize(); init(); });
-
-  function Particle() {
-    this.x  = Math.random() * W;
-    this.y  = Math.random() * H;
-    this.vx = (Math.random() - .5) * .4;
-    this.vy = (Math.random() - .5) * .4;
-    this.r  = Math.random() * 1.8 + .6;
-    this.alpha = Math.random() * .5 + .15;
-  }
-
-  function init() {
-    const count = Math.floor(W * H / 14000);
-    particles = Array.from({ length: count }, () => new Particle());
-  }
-
-  function draw() {
-    ctx.clearRect(0, 0, W, H);
-    particles.forEach(p => {
-      p.x += p.vx; p.y += p.vy;
-      if (p.x < 0 || p.x > W) p.vx *= -1;
-      if (p.y < 0 || p.y > H) p.vy *= -1;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(59,130,246,${p.alpha})`;
-      ctx.fill();
-    });
-    for (let i = 0; i < particles.length; i++) {
-      for (let j = i + 1; j < particles.length; j++) {
-        const dx = particles[i].x - particles[j].x;
-        const dy = particles[i].y - particles[j].y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < 120) {
-          ctx.beginPath();
-          ctx.moveTo(particles[i].x, particles[i].y);
-          ctx.lineTo(particles[j].x, particles[j].y);
-          ctx.strokeStyle = `rgba(59,130,246,${.12 * (1 - dist/120)})`;
-          ctx.lineWidth = .6;
-          ctx.stroke();
-        }
-      }
-    }
-    requestAnimationFrame(draw);
-  }
-
-  init();
-  draw();
-})();
-
-/* ── Typing Animation ─────────────────────────────────────── */
-(function typing() {
-  const el = document.getElementById('type-target');
-  if (!el) return;
-  const phrases = [
-    'Quantitative Analyst',
-    'Finance & AI Enthusiast',
-    'Student Developer',
-    'Data Science Explorer',
-    'Python Developer',
-  ];
-  let pi = 0, ci = 0, deleting = false;
-
-  function tick() {
-    const phrase = phrases[pi];
-    if (!deleting) {
-      el.textContent = phrase.slice(0, ++ci);
-      if (ci === phrase.length) { deleting = true; setTimeout(tick, 1800); return; }
-    } else {
-      el.textContent = phrase.slice(0, --ci);
-      if (ci === 0) { deleting = false; pi = (pi + 1) % phrases.length; }
-    }
-    setTimeout(tick, deleting ? 55 : 90);
-  }
-  tick();
-})();
 
 /* ── Counter animation ────────────────────────────────────── */
 function animateCounters() {
@@ -237,16 +150,6 @@ const observer = new IntersectionObserver((entries) => {
   });
 }, { threshold: 0.1 });
 
-const skillObserver = new IntersectionObserver((entries) => {
-  entries.forEach(entry => {
-    if (entry.isIntersecting) {
-      entry.target.querySelectorAll('.sk-fill').forEach(bar => {
-        bar.style.width = bar.dataset.w + '%';
-      });
-      skillObserver.unobserve(entry.target);
-    }
-  });
-}, { threshold: 0.3 });
 
 const heroObserver = new IntersectionObserver((entries) => {
   entries.forEach(entry => {
@@ -262,7 +165,6 @@ document.querySelectorAll('.int-card, .about-card, .proj-card, .ach-card, .learn
   observer.observe(el);
 });
 
-document.querySelectorAll('.sk-col').forEach(col => skillObserver.observe(col));
 
 const heroStats = document.querySelector('.hero-stats');
 if (heroStats) heroObserver.observe(heroStats);

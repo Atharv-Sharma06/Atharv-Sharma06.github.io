@@ -13,13 +13,6 @@
 </head>
 <body>
 
-  <!-- Animated background orbs -->
-  <div class="bg-orbs">
-    <div class="bg-orb orb-1"></div>
-    <div class="bg-orb orb-2"></div>
-    <div class="bg-orb orb-3"></div>
-  </div>
-
   <!-- Custom cursor -->
   <div class="cursor-dot" id="cursor-dot"></div>
   <div class="cursor-ring" id="cursor-ring"></div>
@@ -55,7 +48,6 @@
 
   <!-- ── Hero ─────────────────────────────────────────────── -->
   <section class="hero" id="hero">
-    <canvas id="hero-canvas"></canvas>
     <div class="hero-inner">
       <div class="hero-content">
         <div class="hero-badge">
@@ -63,9 +55,7 @@
           Open to Internships &amp; Research Opportunities
         </div>
         <h1 class="hero-name">Hi, I'm <span class="grad-text">Atharv</span></h1>
-        <p class="hero-type">
-          <span class="type-pre">Aspiring </span><span id="type-target"></span><span class="caret">|</span>
-        </p>
+        <p class="hero-type">Quantitative Analyst &amp; Student Developer</p>
         <p class="hero-intro">
           A student developer at the crossroads of <strong>finance</strong>, <strong>artificial intelligence</strong>,
           and <strong>data science</strong>. I build quantitative tools that turn market noise into clear, actionable insight.
@@ -152,12 +142,11 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
         <div class="about-card glass">
           <div class="about-avatar-wrap">
             <div class="about-avatar">A</div>
-            <div class="about-avatar-ring"></div>
           </div>
           <div class="about-bio">
-            <p>I'm <strong>Atharv</strong>, a student developer with a deep passion for the intersection of <strong>finance</strong>, <strong>artificial intelligence</strong>, and <strong>data science</strong>. I believe the future of investing lies in quantitative analysis and machine learning.</p>
-            <p>I'm motivated by the challenge of making complex financial data accessible and actionable — building tools that give everyday investors the same analytical edge as institutional traders.</p>
-            <p>Whether it's analyzing economic indicators, backtesting trading strategies, or building AI-powered prediction models, I love turning raw data into meaningful decisions.</p>
+            <p>I'm <strong>Atharv</strong>, a student developer focused on <strong>quantitative finance</strong> and <strong>data science</strong>. I write Python tools that pull, clean, and analyze financial data.</p>
+            <p>I'm drawn to the gap between how institutional desks and everyday investors access financial data. I build tools to close it — not because it sounds good on a portfolio, but because it's a genuinely hard problem.</p>
+            <p>Right now I'm focused on economic data analysis, backtesting trading strategies, and applying ML to price data.</p>
           </div>
         </div>
         <div class="about-interests">
@@ -194,36 +183,46 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
     <div class="sc">
       <div class="sh">
         <span class="s-tag">02 / Skills</span>
-        <h2 class="s-title">Technical Arsenal</h2>
+        <h2 class="s-title">Skills</h2>
       </div>
       <div class="skills-grid">
 
         <div class="sk-col glass">
           <h3 class="sk-title"><span>⚙️</span> Technical</h3>
-          <div class="sk-bars">
-            <div class="sk-item"><div class="sk-meta"><span>Python</span><span>90%</span></div><div class="sk-track"><div class="sk-fill" data-w="90" style="--ac:#3b82f6"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>Pandas / NumPy</span><span>85%</span></div><div class="sk-track"><div class="sk-fill" data-w="85" style="--ac:#8b5cf6"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>Data Visualization</span><span>82%</span></div><div class="sk-track"><div class="sk-fill" data-w="82" style="--ac:#10b981"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>Streamlit</span><span>78%</span></div><div class="sk-track"><div class="sk-fill" data-w="78" style="--ac:#f59e0b"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>APIs / Web Scraping</span><span>75%</span></div><div class="sk-track"><div class="sk-fill" data-w="75" style="--ac:#ef4444"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>Git / GitHub</span><span>80%</span></div><div class="sk-track"><div class="sk-fill" data-w="80" style="--ac:#3b82f6"></div></div></div>
-          </div>
-          <div class="sk-tags">
-            <span>Excel</span><span>JavaScript</span><span>SQL</span><span>Matplotlib</span><span>Plotly</span><span>scikit-learn</span><span>TensorFlow</span>
+          <div class="sk-tags-lg">
+            <span>Python</span>
+            <span>Pandas</span>
+            <span>NumPy</span>
+            <span>Streamlit</span>
+            <span>APIs</span>
+            <span>Web Scraping</span>
+            <span>Git / GitHub</span>
+            <span>JavaScript</span>
+            <span>SQL</span>
+            <span>Matplotlib</span>
+            <span>Plotly</span>
+            <span>scikit-learn</span>
+            <span>TensorFlow</span>
+            <span>Data Visualization</span>
           </div>
         </div>
 
         <div class="sk-col glass">
           <h3 class="sk-title"><span>📊</span> Finance / Quant</h3>
-          <div class="sk-bars">
-            <div class="sk-item"><div class="sk-meta"><span>Stock Analysis</span><span>85%</span></div><div class="sk-track"><div class="sk-fill" data-w="85" style="--ac:#10b981"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>Economic Research</span><span>80%</span></div><div class="sk-track"><div class="sk-fill" data-w="80" style="--ac:#3b82f6"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>Trend Analysis</span><span>78%</span></div><div class="sk-track"><div class="sk-fill" data-w="78" style="--ac:#8b5cf6"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>Financial Data Analysis</span><span>83%</span></div><div class="sk-track"><div class="sk-fill" data-w="83" style="--ac:#f59e0b"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>Quantitative Thinking</span><span>86%</span></div><div class="sk-track"><div class="sk-fill" data-w="86" style="--ac:#10b981"></div></div></div>
-          </div>
-          <div class="sk-tags">
-            <span>Backtesting</span><span>yfinance</span><span>FRED API</span><span>Portfolio Theory</span><span>Volatility</span><span>Options Basics</span>
+          <div class="sk-tags-lg">
+            <span>Stock Analysis</span>
+            <span>Economic Research</span>
+            <span>Trend Analysis</span>
+            <span>Financial Data Analysis</span>
+            <span>Quantitative Thinking</span>
+            <span>Backtesting</span>
+            <span>yfinance</span>
+            <span>FRED API</span>
+            <span>Portfolio Theory</span>
+            <span>Volatility</span>
+            <span>Options Basics</span>
+            <span>Sharpe Ratio</span>
+            <span>Monte Carlo</span>
           </div>
         </div>
 
@@ -278,7 +277,7 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
       <div class="sh">
         <span class="s-tag">03 / Projects</span>
         <h2 class="s-title">Featured Work</h2>
-        <p class="s-sub">Quantitative tools built to solve real financial problems.</p>
+        <p class="s-sub">Tools I built to analyze markets, model risk, and surface data-driven insights.</p>
       </div>
       <div class="proj-filters">
         <button class="pf-btn active" data-f="all">All</button>
@@ -308,9 +307,6 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
             <a href="https://github.com/Kingbob609420/economic-data-dashboard" class="pl-btn" target="_blank" rel="noopener">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>GitHub
             </a>
-            <a href="#" class="pl-btn demo">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Live Demo
-            </a>
           </div>
         </article>
 
@@ -322,20 +318,17 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
           <div class="pc-body">
             <div class="pc-tags"><span>Python</span><span>yfinance</span><span>Matplotlib</span><span>Pandas</span></div>
             <h3>Stock Analysis Tool</h3>
-            <p>Comprehensive stock analysis platform with trend detection, volatility metrics, SMA/EMA crossovers, and AI-generated insight summaries — making technical analysis accessible for beginner investors.</p>
+            <p>Stock analysis tool built on yfinance — trend detection, volatility metrics, SMA/EMA crossovers, and annotated chart output for any ticker.</p>
             <ul class="pc-feats">
-              <li>Trend &amp; volatility analysis with RSI/MACD</li>
+              <li>RSI/MACD trend &amp; momentum analysis</li>
               <li>SMA/EMA moving average calculations</li>
-              <li>Multi-stock portfolio performance comparison</li>
-              <li>AI-generated market insight summaries</li>
+              <li>Multi-stock performance comparison</li>
+              <li>Annotated Matplotlib chart export</li>
             </ul>
           </div>
           <div class="pc-foot">
             <a href="https://github.com/Kingbob609420/stock-analysis-tool" class="pl-btn" target="_blank" rel="noopener">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>GitHub
-            </a>
-            <a href="#" class="pl-btn demo">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Live Demo
             </a>
           </div>
         </article>
@@ -371,9 +364,9 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
           <div class="pc-body">
             <div class="pc-tags"><span>Python</span><span>NLP</span><span>VADER</span><span>News API</span></div>
             <h3>Market Sentiment Analyzer</h3>
-            <p>Real-time sentiment analysis of financial news and social media to gauge market mood, correlate sentiment scores with price movements, and surface contrarian signals.</p>
+            <p>Sentiment analysis of financial news and Reddit using VADER to score market mood, correlate with price movements, and flag contrarian signals.</p>
             <ul class="pc-feats">
-              <li>Real-time news &amp; Reddit sentiment scoring</li>
+              <li>News API &amp; Reddit sentiment scoring via VADER</li>
               <li>Sentiment-price correlation analysis</li>
               <li>Fear &amp; Greed Index dashboard</li>
               <li>Contrarian signal detection alerts</li>
@@ -382,9 +375,6 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
           <div class="pc-foot">
             <a href="https://github.com/Kingbob609420/market-sentiment-analyzer" class="pl-btn" target="_blank" rel="noopener">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>GitHub
-            </a>
-            <a href="#" class="pl-btn demo">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Live Demo
             </a>
           </div>
         </article>
@@ -408,9 +398,6 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
           <div class="pc-foot">
             <a href="https://github.com/Kingbob609420/portfolio-optimizer" class="pl-btn" target="_blank" rel="noopener">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>GitHub
-            </a>
-            <a href="#" class="pl-btn demo">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Live Demo
             </a>
           </div>
         </article>
@@ -648,7 +635,7 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
       <div class="sh">
         <span class="s-tag">09 / Contact</span>
         <h2 class="s-title">Let's Connect</h2>
-        <p class="s-sub">Open to internships, research collaborations, and project conversations.</p>
+        <p class="s-sub">If you're working on something interesting in finance or AI, I want to hear about it.</p>
       </div>
       <div class="contact-grid">
         <div class="contact-info">
