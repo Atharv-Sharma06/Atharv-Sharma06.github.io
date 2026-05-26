@@ -408,6 +408,21 @@ if (form) {
   });
 }
 
+/* ── Copy email ───────────────────────────────────────────── */
+const copyBtn = document.getElementById('copy-email');
+if (copyBtn) {
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText('atharv.eck@gmail.com').then(() => {
+      copyBtn.textContent = 'Copied!';
+      copyBtn.classList.add('copied');
+      setTimeout(() => {
+        copyBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        copyBtn.classList.remove('copied');
+      }, 1800);
+    });
+  });
+}
+
 /* ── Footer year ──────────────────────────────────────────── */
 const yrEl = document.getElementById('yr');
 if (yrEl) yrEl.textContent = new Date().getFullYear();
