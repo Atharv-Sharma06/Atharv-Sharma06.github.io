@@ -627,7 +627,6 @@ em { color: var(--muted); font-style: italic; }
 
 .int-card:hover { transform: translateY(-4px); border-color: rgba(59,130,246,.3); }
 
-.int-icon { font-size: 1.6rem; margin-bottom: 10px; }
 
 .int-card h4 { font-size: 0.9rem; font-weight: 700; margin-bottom: 6px; }
 
@@ -703,7 +702,6 @@ em { color: var(--muted); font-style: italic; }
   align-items: flex-start;
 }
 
-.soft-icon { font-size: 1.3rem; line-height: 1; margin-top: 2px; flex-shrink: 0; }
 
 .soft-info strong { font-size: 0.88rem; font-weight: 700; display: block; margin-bottom: 3px; }
 
@@ -760,18 +758,13 @@ em { color: var(--muted); font-style: italic; }
 .proj-card.hidden { display: none; }
 
 .pc-top {
-  height: 120px;
+  height: 48px;
   background: hsl(var(--ph,220) 60% 16%);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-  position: relative;
-  overflow: hidden;
+  justify-content: flex-end;
+  padding: 0 16px;
 }
-
-
-.pc-emoji { font-size: 2.8rem; position: relative; z-index: 1; }
 
 .pc-status {
   display: flex;
@@ -907,7 +900,6 @@ em { color: var(--muted); font-style: italic; }
 
 .ach-card:hover { transform: translateY(-5px); border-color: rgba(59,130,246,.3); }
 
-.ach-icon { font-size: 2.2rem; margin-bottom: 14px; }
 
 .ach-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 8px; }
 
@@ -942,7 +934,6 @@ em { color: var(--muted); font-style: italic; }
 
 .learn-card:hover { transform: translateY(-3px); border-color: rgba(59,130,246,.3); }
 
-.lc-icon { font-size: 1.8rem; flex-shrink: 0; line-height: 1; margin-top: 2px; }
 
 .lc-top {
   display: flex;
@@ -1154,7 +1145,6 @@ a.ci-val:hover { color: var(--blue); }
 
 .speak-card:hover { transform: translateY(-5px); border-color: rgba(139,92,246,.35); }
 
-.speak-icon { font-size: 2rem; margin-bottom: 14px; }
 
 .speak-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 10px; }
 
