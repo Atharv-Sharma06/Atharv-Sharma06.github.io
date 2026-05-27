@@ -423,8 +423,18 @@ em { color: var(--muted); font-style: italic; }
   font-size: clamp(1.1rem, 2.5vw, 1.4rem);
   font-weight: 600;
   color: var(--muted);
-  margin-bottom: 18px;
+  margin-bottom: 8px;
   min-height: 2rem;
+}
+
+.hero-location {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-bottom: 18px;
+  opacity: 0.75;
 }
 
 
