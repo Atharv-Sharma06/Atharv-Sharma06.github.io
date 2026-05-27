@@ -426,3 +426,59 @@ if (copyBtn) {
 /* ── Footer year ──────────────────────────────────────────── */
 const yrEl = document.getElementById('yr');
 if (yrEl) yrEl.textContent = new Date().getFullYear();
+
+/* ── GitHub Activity ──────────────────────────────────────── */
+function timeAgo(date) {
+  const s = Math.floor((Date.now() - date) / 1000);
+  if (s < 60)  return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60)  return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24)  return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+(async function loadGitHubActivity() {
+  const list    = document.getElementById('commit-list');
+  const reposEl = document.getElementById('gh-repos');
+  if (!list && !reposEl) return;
+
+  try {
+    const [eventsRes, userRes] = await Promise.all([
+      fetch('https://api.github.com/users/Kingbob609420/events?per_page=30'),
+      fetch('https://api.github.com/users/Kingbob609420'),
+    ]);
+    const events = await eventsRes.json();
+    const user   = await userRes.json();
+
+    if (reposEl && user.public_repos !== undefined) {
+      reposEl.textContent = user.public_repos;
+    }
+
+    if (list) {
+      const pushes = Array.isArray(events)
+        ? events.filter(e => e.type === 'PushEvent').slice(0, 7)
+        : [];
+
+      if (!pushes.length) {
+        list.innerHTML = '<li class="commit-empty">No recent push activity</li>';
+        return;
+      }
+
+      list.innerHTML = pushes.map(e => {
+        const repo   = e.repo.name.split('/')[1];
+        const commit = e.payload.commits?.slice(-1)[0];
+        if (!commit) return '';
+        const msg = commit.message.split('\n')[0].slice(0, 58);
+        const ago = timeAgo(new Date(e.created_at));
+        return `<li class="commit-item">
+          <span class="ci-repo">${repo}</span>
+          <span class="ci-msg">${msg}</span>
+          <span class="ci-time">${ago}</span>
+        </li>`;
+      }).filter(Boolean).join('');
+    }
+  } catch {
+    if (list) list.innerHTML = '<li class="commit-empty">Activity unavailable</li>';
+  }
+})();
