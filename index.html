@@ -13,11 +13,11 @@
 </head>
 <body>
 
-  <!-- Animated background orbs -->
-  <div class="bg-orbs">
-    <div class="bg-orb orb-1"></div>
-    <div class="bg-orb orb-2"></div>
-    <div class="bg-orb orb-3"></div>
+  <!-- Background animation -->
+  <div class="bg-orbs" aria-hidden="true">
+    <div class="bg-orb"></div>
+    <div class="bg-orb"></div>
+    <div class="bg-orb"></div>
   </div>
 
   <!-- Custom cursor -->
@@ -47,7 +47,6 @@
         <li><a href="#achievements" class="nav-link">Achievements</a></li>
         <li><a href="#speaking" class="nav-link">Speaking</a></li>
         <li><a href="#learning" class="nav-link">Learning</a></li>
-        <li><a href="#contact" class="nav-link">Contact</a></li>
         <li><a href="#resume" class="btn-nav">Résumé</a></li>
       </ul>
     </div>
@@ -55,20 +54,20 @@
 
   <!-- ── Hero ─────────────────────────────────────────────── -->
   <section class="hero" id="hero">
-    <canvas id="hero-canvas"></canvas>
+    <svg class="hero-chart" viewBox="0 0 1400 180" preserveAspectRatio="none" aria-hidden="true">
+      <path class="hero-chart-path" d="M0,170 L40,155 L80,163 L120,140 L160,150 L200,128 L240,138 L280,115 L320,127 L360,102 L400,115 L440,90 L480,104 L520,78 L560,93 L600,65 L640,80 L680,52 L720,68 L760,40 L800,56 L840,28 L880,45 L920,18 L960,35 L1000,10 L1040,28 L1080,5 L1120,22 L1160,8 L1200,18 L1240,4 L1280,14 L1320,3 L1360,10 L1400,2" />
+    </svg>
     <div class="hero-inner">
       <div class="hero-content">
-        <div class="hero-badge">
-          <span class="pulse-dot"></span>
-          Open to Internships &amp; Research Opportunities
-        </div>
-        <h1 class="hero-name">Hi, I'm <span class="grad-text">Atharv</span></h1>
-        <p class="hero-type">
-          <span class="type-pre">Aspiring </span><span id="type-target"></span><span class="caret">|</span>
+        <h1 class="hero-name">Hey, I'm <span class="grad-text">Atharv.</span></h1>
+        <p class="hero-type">Quant finance developer. Python tools for market data, backtesting, and portfolio analysis.</p>
+        <p class="hero-location">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          Fort Mill, SC
         </p>
+        <p class="hero-now"><span class="now-label">Now —</span> LSTM price modeling, efficient frontier optimization, economic data dashboards.</p>
         <p class="hero-intro">
-          A student developer at the crossroads of <strong>finance</strong>, <strong>artificial intelligence</strong>,
-          and <strong>data science</strong>. I build quantitative tools that turn market noise into clear, actionable insight.
+          I work at the intersection of <strong>Python</strong>, <strong>financial APIs</strong>, and <strong>quantitative methods</strong> — building toward quant and data roles at trading desks and research firms.
         </p>
         <div class="hero-ctas">
           <a href="#projects" class="btn btn-primary">
@@ -79,29 +78,10 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
             Résumé
           </a>
-          <a href="#contact" class="btn btn-ghost">Contact Me</a>
-        </div>
-        <div class="hero-stats">
-          <div class="h-stat">
-            <div class="h-top">
-              <span class="h-num" data-target="5">0</span><span class="h-plus">+</span>
-            </div>
-            <span class="h-lbl">Projects</span>
-          </div>
-          <div class="stat-sep"></div>
-          <div class="h-stat">
-            <div class="h-top">
-              <span class="h-num" data-target="3">0</span>
-            </div>
-            <span class="h-lbl">Languages</span>
-          </div>
-          <div class="stat-sep"></div>
-          <div class="h-stat">
-            <div class="h-top">
-              <span class="h-num" data-target="12">0</span><span class="h-plus">+</span>
-            </div>
-            <span class="h-lbl">Libraries</span>
-          </div>
+          <a href="https://github.com/Kingbob609420" class="btn btn-ghost" target="_blank" rel="noopener">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+            GitHub
+          </a>
         </div>
       </div>
       <div class="hero-terminal">
@@ -132,7 +112,12 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
 <span class="tc-comment"># SPY:  1.15  ✓ Benchmark</span>
 <span class="tc-comment"># NVDA: 2.31  ✓ Exceptional</span>
 
-<span class="tc-fn">print</span>(<span class="tc-str">"Portfolio optimized."</span>) <span id="term-cursor" class="tc-cursor">█</span></pre>
+<span class="tc-fn">print</span>(<span class="tc-str">"Portfolio optimized."</span>)
+
+<span class="tc-comment"># ── Contact ──────────────────────</span>
+<span class="tc-comment"># Email: <strong>atharv.eck@gmail.com</strong></span>
+<span class="tc-comment"># Phone: <strong>(803) 203-8096</strong></span>
+<span id="term-cursor" class="tc-cursor">█</span></pre>
         </div>
       </div>
     </div>
@@ -152,34 +137,29 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
         <div class="about-card glass">
           <div class="about-avatar-wrap">
             <div class="about-avatar">A</div>
-            <div class="about-avatar-ring"></div>
           </div>
           <div class="about-bio">
-            <p>I'm <strong>Atharv</strong>, a student developer with a deep passion for the intersection of <strong>finance</strong>, <strong>artificial intelligence</strong>, and <strong>data science</strong>. I believe the future of investing lies in quantitative analysis and machine learning.</p>
-            <p>I'm motivated by the challenge of making complex financial data accessible and actionable — building tools that give everyday investors the same analytical edge as institutional traders.</p>
-            <p>Whether it's analyzing economic indicators, backtesting trading strategies, or building AI-powered prediction models, I love turning raw data into meaningful decisions.</p>
+            <p>I'm <strong>Atharv</strong>, a student developer focused on <strong>quantitative finance</strong> and <strong>data science</strong>. I write Python tools that pull, clean, and analyze financial data.</p>
+            <p>I'm drawn to the gap between how institutional desks and everyday investors access financial data. I build tools to close it — not because it sounds good on a portfolio, but because it's a genuinely hard problem.</p>
+            <p>Right now I'm focused on economic data analysis, backtesting trading strategies, and applying ML to price data.</p>
           </div>
         </div>
         <div class="about-interests">
           <h3 class="interests-title">What Drives Me</h3>
           <div class="int-grid">
             <div class="int-card glass">
-              <span class="int-icon">📈</span>
               <h4>Quantitative Finance</h4>
               <p>Applying math and data science to understand market dynamics and develop trading edge.</p>
             </div>
             <div class="int-card glass">
-              <span class="int-icon">🤖</span>
-              <h4>Artificial Intelligence</h4>
-              <p>ML models for market prediction, NLP for sentiment, and AI-driven financial insights.</p>
+              <h4>Machine Learning</h4>
+              <p>ML models for market prediction, NLP for sentiment, and data-driven financial analysis.</p>
             </div>
             <div class="int-card glass">
-              <span class="int-icon">📊</span>
               <h4>Data Science</h4>
-              <p>Transforming messy financial datasets into clear visualizations and compelling stories.</p>
+              <p>Turning messy financial datasets into clear charts and reproducible analysis.</p>
             </div>
             <div class="int-card glass">
-              <span class="int-icon">💡</span>
               <h4>Problem Solving</h4>
               <p>I gravitate toward hard problems where analytical thinking and code create real impact.</p>
             </div>
@@ -189,77 +169,168 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
     </div>
   </section>
 
+  <!-- ── Activity ─────────────────────────────────────────── -->
+  <section class="section alt" id="activity">
+    <div class="sc">
+      <div class="sh fade-up">
+        <span class="s-tag">Activity</span>
+        <h2 class="s-title">What I'm up to</h2>
+      </div>
+      <div class="dash-grid fade-up">
+
+        <div class="dash-commits glass">
+          <div class="dash-head">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+            <span class="dh-title">Recent Commits</span>
+            <a href="https://github.com/Kingbob609420" target="_blank" rel="noopener" class="dh-link">@Kingbob609420</a>
+          </div>
+          <ul class="commit-list" id="commit-list">
+            <li class="commit-loading">Fetching activity…</li>
+          </ul>
+        </div>
+
+        <div class="dash-sidebar">
+          <div class="dash-stat glass">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            <span class="ds-val">Fort Mill, SC</span>
+            <span class="ds-lbl">Location</span>
+          </div>
+          <div class="dash-stat glass dash-status">
+            <span class="pulse-dot"></span>
+            <span class="ds-val">Open</span>
+            <span class="ds-lbl">Internships &amp; Research</span>
+          </div>
+          <div class="dash-stat glass">
+            <span class="ds-val" id="gh-repos">—</span>
+            <span class="ds-lbl">Public Repos</span>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="now-grid fade-up">
+
+        <div class="now-card glass">
+          <div class="now-head">Building</div>
+          <div class="now-items">
+            <div class="now-item">
+              <span class="now-dot now-dot-white"></span>
+              <div>
+                <span class="now-title">AI Safety Research</span>
+                <span class="now-sub">Prompt injection attack vectors &amp; defense strategies</span>
+              </div>
+            </div>
+            <div class="now-item">
+              <span class="now-dot now-dot-muted"></span>
+              <div>
+                <span class="now-title">Finance Analysis App</span>
+                <span class="now-sub">Stock trend detection, return calculations, volatility modeling</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="now-card glass">
+          <div class="now-head">Learning</div>
+          <div class="now-tags">
+            <span>ML Concepts</span>
+            <span>AI Safety</span>
+            <span>LLM Systems</span>
+            <span>AI-Based Analysis</span>
+            <span>Advanced Tutorials</span>
+          </div>
+        </div>
+
+        <div class="now-card glass">
+          <div class="now-head">Watching</div>
+          <div class="now-tickers">
+            <div class="nt-row"><span class="nt-sym">SPY</span><span class="nt-lbl">S&amp;P 500</span></div>
+            <div class="nt-row"><span class="nt-sym">QQQ</span><span class="nt-lbl">Nasdaq 100</span></div>
+            <div class="nt-row"><span class="nt-sym">VIX</span><span class="nt-lbl">Volatility Index</span></div>
+            <div class="nt-row"><span class="nt-sym">TNX</span><span class="nt-lbl">10-Year Yield</span></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
   <!-- ── Skills ────────────────────────────────────────────── -->
-  <section class="section alt" id="skills">
+  <section class="section" id="skills">
     <div class="sc">
       <div class="sh">
         <span class="s-tag">02 / Skills</span>
-        <h2 class="s-title">Technical Arsenal</h2>
+        <h2 class="s-title">Skills</h2>
       </div>
       <div class="skills-grid">
 
         <div class="sk-col glass">
-          <h3 class="sk-title"><span>⚙️</span> Technical</h3>
-          <div class="sk-bars">
-            <div class="sk-item"><div class="sk-meta"><span>Python</span><span>90%</span></div><div class="sk-track"><div class="sk-fill" data-w="90" style="--ac:#3b82f6"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>Pandas / NumPy</span><span>85%</span></div><div class="sk-track"><div class="sk-fill" data-w="85" style="--ac:#8b5cf6"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>Data Visualization</span><span>82%</span></div><div class="sk-track"><div class="sk-fill" data-w="82" style="--ac:#10b981"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>Streamlit</span><span>78%</span></div><div class="sk-track"><div class="sk-fill" data-w="78" style="--ac:#f59e0b"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>APIs / Web Scraping</span><span>75%</span></div><div class="sk-track"><div class="sk-fill" data-w="75" style="--ac:#ef4444"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>Git / GitHub</span><span>80%</span></div><div class="sk-track"><div class="sk-fill" data-w="80" style="--ac:#3b82f6"></div></div></div>
-          </div>
-          <div class="sk-tags">
-            <span>Excel</span><span>JavaScript</span><span>SQL</span><span>Matplotlib</span><span>Plotly</span><span>scikit-learn</span><span>TensorFlow</span>
-          </div>
-        </div>
-
-        <div class="sk-col glass">
-          <h3 class="sk-title"><span>📊</span> Finance / Quant</h3>
-          <div class="sk-bars">
-            <div class="sk-item"><div class="sk-meta"><span>Stock Analysis</span><span>85%</span></div><div class="sk-track"><div class="sk-fill" data-w="85" style="--ac:#10b981"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>Economic Research</span><span>80%</span></div><div class="sk-track"><div class="sk-fill" data-w="80" style="--ac:#3b82f6"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>Trend Analysis</span><span>78%</span></div><div class="sk-track"><div class="sk-fill" data-w="78" style="--ac:#8b5cf6"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>Financial Data Analysis</span><span>83%</span></div><div class="sk-track"><div class="sk-fill" data-w="83" style="--ac:#f59e0b"></div></div></div>
-            <div class="sk-item"><div class="sk-meta"><span>Quantitative Thinking</span><span>86%</span></div><div class="sk-track"><div class="sk-fill" data-w="86" style="--ac:#10b981"></div></div></div>
-          </div>
-          <div class="sk-tags">
-            <span>Backtesting</span><span>yfinance</span><span>FRED API</span><span>Portfolio Theory</span><span>Volatility</span><span>Options Basics</span>
+          <h3 class="sk-title">Technical</h3>
+          <div class="sk-tags-lg">
+            <span>Python</span>
+            <span>Pandas</span>
+            <span>NumPy</span>
+            <span>Streamlit</span>
+            <span>APIs</span>
+            <span>Web Scraping</span>
+            <span>Git / GitHub</span>
+            <span>JavaScript</span>
+            <span>SQL</span>
+            <span>Matplotlib</span>
+            <span>Plotly</span>
+            <span>scikit-learn</span>
+            <span>TensorFlow</span>
+            <span>Data Visualization</span>
           </div>
         </div>
 
         <div class="sk-col glass">
-          <h3 class="sk-title"><span>🎯</span> Soft Skills</h3>
+          <h3 class="sk-title">Finance / Quant</h3>
+          <div class="sk-tags-lg">
+            <span>Stock Analysis</span>
+            <span>Economic Research</span>
+            <span>Trend Analysis</span>
+            <span>Financial Data Analysis</span>
+            <span>Quantitative Thinking</span>
+            <span>Backtesting</span>
+            <span>yfinance</span>
+            <span>FRED API</span>
+            <span>Portfolio Theory</span>
+            <span>Volatility</span>
+            <span>Options Basics</span>
+            <span>Sharpe Ratio</span>
+            <span>Monte Carlo</span>
+          </div>
+        </div>
+
+        <div class="sk-col glass">
+          <h3 class="sk-title">Soft Skills</h3>
           <div class="soft-list">
             <div class="soft-item">
-              <div class="soft-icon">🎤</div>
               <div class="soft-info">
                 <strong>Public Speaking</strong>
                 <p>Presenting complex data stories to diverse audiences confidently</p>
               </div>
             </div>
             <div class="soft-item">
-              <div class="soft-icon">🔬</div>
               <div class="soft-info">
-                <strong>Research Skills</strong>
+                <strong>Research</strong>
                 <p>Deep-diving into economic literature, papers, and market data</p>
               </div>
             </div>
             <div class="soft-item">
-              <div class="soft-icon">👥</div>
               <div class="soft-info">
                 <strong>Leadership</strong>
                 <p>Driving collaborative projects and coordinating team efforts</p>
               </div>
             </div>
             <div class="soft-item">
-              <div class="soft-icon">🧩</div>
               <div class="soft-info">
                 <strong>Problem Solving</strong>
                 <p>Analytical, first-principles approach to breaking down hard challenges</p>
               </div>
             </div>
             <div class="soft-item">
-              <div class="soft-icon">💬</div>
               <div class="soft-info">
                 <strong>Communication</strong>
                 <p>Clear communication across technical and non-technical audiences</p>
@@ -278,7 +349,7 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
       <div class="sh">
         <span class="s-tag">03 / Projects</span>
         <h2 class="s-title">Featured Work</h2>
-        <p class="s-sub">Quantitative tools built to solve real financial problems.</p>
+        <p class="s-sub">Tools I built to analyze markets, model risk, and surface data-driven insights.</p>
       </div>
       <div class="proj-filters">
         <button class="pf-btn active" data-f="all">All</button>
@@ -290,7 +361,6 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
 
         <article class="proj-card glass" data-cat="finance">
           <div class="pc-top" style="--ph:210">
-            <span class="pc-emoji">📊</span>
             <div class="pc-status"><span class="sd green"></span>Live</div>
           </div>
           <div class="pc-body">
@@ -308,41 +378,33 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
             <a href="https://github.com/Kingbob609420/economic-data-dashboard" class="pl-btn" target="_blank" rel="noopener">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>GitHub
             </a>
-            <a href="#" class="pl-btn demo">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Live Demo
-            </a>
           </div>
         </article>
 
         <article class="proj-card glass" data-cat="finance">
           <div class="pc-top" style="--ph:145">
-            <span class="pc-emoji">📈</span>
             <div class="pc-status"><span class="sd green"></span>Live</div>
           </div>
           <div class="pc-body">
             <div class="pc-tags"><span>Python</span><span>yfinance</span><span>Matplotlib</span><span>Pandas</span></div>
             <h3>Stock Analysis Tool</h3>
-            <p>Comprehensive stock analysis platform with trend detection, volatility metrics, SMA/EMA crossovers, and AI-generated insight summaries — making technical analysis accessible for beginner investors.</p>
+            <p>Stock analysis tool built on yfinance — trend detection, volatility metrics, SMA/EMA crossovers, and annotated chart output for any ticker.</p>
             <ul class="pc-feats">
-              <li>Trend &amp; volatility analysis with RSI/MACD</li>
+              <li>RSI/MACD trend &amp; momentum analysis</li>
               <li>SMA/EMA moving average calculations</li>
-              <li>Multi-stock portfolio performance comparison</li>
-              <li>AI-generated market insight summaries</li>
+              <li>Multi-stock performance comparison</li>
+              <li>Annotated Matplotlib chart export</li>
             </ul>
           </div>
           <div class="pc-foot">
             <a href="https://github.com/Kingbob609420/stock-analysis-tool" class="pl-btn" target="_blank" rel="noopener">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>GitHub
             </a>
-            <a href="#" class="pl-btn demo">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Live Demo
-            </a>
           </div>
         </article>
 
         <article class="proj-card glass" data-cat="aiml">
           <div class="pc-top" style="--ph:270">
-            <span class="pc-emoji">🤖</span>
             <div class="pc-status"><span class="sd yellow"></span>In Progress</div>
           </div>
           <div class="pc-body">
@@ -365,15 +427,14 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
 
         <article class="proj-card glass" data-cat="aiml">
           <div class="pc-top" style="--ph:20">
-            <span class="pc-emoji">💬</span>
             <div class="pc-status"><span class="sd green"></span>Live</div>
           </div>
           <div class="pc-body">
             <div class="pc-tags"><span>Python</span><span>NLP</span><span>VADER</span><span>News API</span></div>
             <h3>Market Sentiment Analyzer</h3>
-            <p>Real-time sentiment analysis of financial news and social media to gauge market mood, correlate sentiment scores with price movements, and surface contrarian signals.</p>
+            <p>Sentiment analysis of financial news and Reddit using VADER to score market mood, correlate with price movements, and flag contrarian signals.</p>
             <ul class="pc-feats">
-              <li>Real-time news &amp; Reddit sentiment scoring</li>
+              <li>News API &amp; Reddit sentiment scoring via VADER</li>
               <li>Sentiment-price correlation analysis</li>
               <li>Fear &amp; Greed Index dashboard</li>
               <li>Contrarian signal detection alerts</li>
@@ -383,15 +444,11 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
             <a href="https://github.com/Kingbob609420/market-sentiment-analyzer" class="pl-btn" target="_blank" rel="noopener">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>GitHub
             </a>
-            <a href="#" class="pl-btn demo">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Live Demo
-            </a>
           </div>
         </article>
 
         <article class="proj-card glass" data-cat="finance tools">
           <div class="pc-top" style="--ph:185">
-            <span class="pc-emoji">🧮</span>
             <div class="pc-status"><span class="sd green"></span>Live</div>
           </div>
           <div class="pc-body">
@@ -408,9 +465,6 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
           <div class="pc-foot">
             <a href="https://github.com/Kingbob609420/portfolio-optimizer" class="pl-btn" target="_blank" rel="noopener">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>GitHub
-            </a>
-            <a href="#" class="pl-btn demo">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15,3 21,3 21,9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Live Demo
             </a>
           </div>
         </article>
@@ -476,37 +530,31 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
       </div>
       <div class="ach-grid">
         <div class="ach-card glass">
-          <div class="ach-icon">🏆</div>
           <h3>Beta Club</h3>
           <p>Member of the National Beta Club — recognizing academic excellence, leadership, and commitment to service.</p>
           <span class="ach-yr">Present</span>
         </div>
         <div class="ach-card glass">
-          <div class="ach-icon">⭐</div>
           <h3>Honor Roll</h3>
           <p>Consistent placement on the academic honor roll, maintaining high GPA across rigorous coursework.</p>
           <span class="ach-yr">Present</span>
         </div>
         <div class="ach-card glass">
-          <div class="ach-icon">💻</div>
           <h3>Hackathon Participant</h3>
           <p>Built financial data tools under time constraints — competing in coding challenges and pitching to judges.</p>
           <span class="ach-yr">Present</span>
         </div>
         <div class="ach-card glass">
-          <div class="ach-icon">🎤</div>
           <h3>Public Speaker</h3>
           <p>Presented data-driven financial research to panels of educators, peers, and community stakeholders.</p>
           <span class="ach-yr">2023–2026</span>
         </div>
         <div class="ach-card glass">
-          <div class="ach-icon">🔬</div>
           <h3>Research Excellence</h3>
           <p>Independent economic research on inflation trends and correlation with consumer spending patterns.</p>
           <span class="ach-yr">2024</span>
         </div>
         <div class="ach-card glass">
-          <div class="ach-icon">👥</div>
           <h3>Team Leader</h3>
           <p>Led multi-person data science and finance projects from concept through final presentation.</p>
           <span class="ach-yr">2023–2026</span>
@@ -525,25 +573,21 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
       </div>
       <div class="speaking-grid">
         <div class="speak-card glass">
-          <div class="speak-icon">🎤</div>
           <h3>Research Presentations</h3>
           <p>Presented independent economic research on inflation trends and consumer spending to panels of educators and community stakeholders — translating dense data into clear, visual narratives.</p>
           <div class="speak-tags"><span>Economic Research</span><span>Data Storytelling</span></div>
         </div>
         <div class="speak-card glass">
-          <div class="speak-icon">💻</div>
           <h3>Hackathon Pitches</h3>
           <p>Pitched financial data tools and AI solutions under competitive time constraints to technical judges — demonstrating product value, technical architecture, and real-world impact in under 5 minutes.</p>
           <div class="speak-tags"><span>Product Pitching</span><span>Technical Demo</span></div>
         </div>
         <div class="speak-card glass">
-          <div class="speak-icon">📊</div>
           <h3>Project Walkthroughs</h3>
           <p>Regularly explain complex quantitative tools — from portfolio optimizers to ML models — to audiences without technical backgrounds, making finance and AI accessible through story-driven demonstrations.</p>
           <div class="speak-tags"><span>Technical Explanation</span><span>Accessibility</span></div>
         </div>
         <div class="speak-card glass">
-          <div class="speak-icon">👥</div>
           <h3>Team Collaboration</h3>
           <p>Led multi-person data science teams from ideation through delivery — facilitating stand-ups, aligning on goals, and keeping stakeholders informed with concise progress reports and demos.</p>
           <div class="speak-tags"><span>Leadership</span><span>Coordination</span></div>
@@ -565,7 +609,6 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
       </div>
       <div class="learn-grid">
         <div class="learn-card glass">
-          <div class="lc-icon">📚</div>
           <div class="lc-body">
             <div class="lc-top"><h4>Python for Finance</h4><span class="lb done">Completed</span></div>
             <p class="lc-src">Udemy / Self-Study</p>
@@ -573,7 +616,6 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
           </div>
         </div>
         <div class="learn-card glass">
-          <div class="lc-icon">🤖</div>
           <div class="lc-body">
             <div class="lc-top"><h4>Machine Learning Fundamentals</h4><span class="lb done">Completed</span></div>
             <p class="lc-src">Coursera — Andrew Ng</p>
@@ -581,7 +623,6 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
           </div>
         </div>
         <div class="learn-card glass">
-          <div class="lc-icon">📊</div>
           <div class="lc-body">
             <div class="lc-top"><h4>CFA Investment Foundations</h4><span class="lb wip">In Progress</span></div>
             <p class="lc-src">CFA Institute</p>
@@ -589,7 +630,6 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
           </div>
         </div>
         <div class="learn-card glass">
-          <div class="lc-icon">🧠</div>
           <div class="lc-body">
             <div class="lc-top"><h4>Deep Learning Specialization</h4><span class="lb wip">In Progress</span></div>
             <p class="lc-src">DeepLearning.AI</p>
@@ -597,7 +637,6 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
           </div>
         </div>
         <div class="learn-card glass">
-          <div class="lc-icon">📖</div>
           <div class="lc-body">
             <div class="lc-top"><h4>Books &amp; Research Papers</h4><span class="lb ongoing">Ongoing</span></div>
             <p class="lc-src">Self-Study</p>
@@ -605,7 +644,6 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
           </div>
         </div>
         <div class="learn-card glass">
-          <div class="lc-icon">🌐</div>
           <div class="lc-body">
             <div class="lc-top"><h4>Research Interests</h4><span class="lb ongoing">Ongoing</span></div>
             <p class="lc-src">Independent</p>
@@ -642,52 +680,14 @@ sharpe = (returns.mean() * <span class="tc-num">252</span>) / (
     </div>
   </section>
 
-  <!-- ── Contact ───────────────────────────────────────────── -->
-  <section class="section alt" id="contact">
-    <div class="sc">
-      <div class="sh">
-        <span class="s-tag">09 / Contact</span>
-        <h2 class="s-title">Let's Connect</h2>
-        <p class="s-sub">Open to internships, research collaborations, and project conversations.</p>
-      </div>
-      <div class="contact-grid">
-        <div class="contact-info">
-          <div class="ci-card glass">
-            <div class="ci-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
-            <div><span class="ci-lbl">Email</span><a href="mailto:atharv.eck@gmail.com" class="ci-val">atharv.eck@gmail.com</a></div>
-          </div>
-          <div class="ci-card glass">
-            <div class="ci-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg></div>
-            <div><span class="ci-lbl">GitHub</span><a href="https://github.com/Kingbob609420" class="ci-val" target="_blank" rel="noopener">github.com/Kingbob609420</a></div>
-          </div>
-          <div class="ci-card glass">
-            <div class="ci-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/></svg></div>
-            <div><span class="ci-lbl">LinkedIn</span><a href="https://www.linkedin.com/in/atharv-sharma-150232408/" class="ci-val" target="_blank" rel="noopener">linkedin.com/in/atharv-sharma</a></div>
-          </div>
-          <div class="ci-quote glass">
-            <p>"The goal of investing is to find situations where it is safe not to diversify." — Charlie Munger</p>
-          </div>
-        </div>
-        <form class="contact-form glass" id="contact-form">
-          <div class="form-row">
-            <div class="fg"><label for="cn">Name</label><input type="text" id="cn" placeholder="Your name" required /></div>
-            <div class="fg"><label for="ce">Email</label><input type="email" id="ce" placeholder="your@email.com" required /></div>
-          </div>
-          <div class="fg"><label for="cs">Subject</label><input type="text" id="cs" placeholder="Internship / Research / Collaboration..." required /></div>
-          <div class="fg"><label for="cm">Message</label><textarea id="cm" rows="5" placeholder="Tell me about the opportunity or project..." required></textarea></div>
-          <button type="submit" class="btn btn-primary btn-full">
-            Send Message
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-          </button>
-          <p class="form-ok hidden" id="form-ok">Message sent! I'll get back to you soon.</p>
-        </form>
-      </div>
-    </div>
-  </section>
 
   <!-- Footer -->
   <footer class="footer">
-    <p>Designed &amp; built by <strong>Atharv</strong> — Aspiring Quantitative Analyst &amp; Developer</p>
+    <div class="footer-status">
+      <span class="footer-dot"></span>
+      All systems operational
+    </div>
+    <p>Built by <strong>Atharv Sharma</strong> — Quantitative Finance &amp; Python Developer</p>
     <p class="footer-sub">HTML · CSS · Vanilla JS · Chart.js &bull; <span id="yr"></span></p>
   </footer>
 
