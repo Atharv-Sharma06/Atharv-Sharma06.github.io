@@ -160,7 +160,7 @@ const heroObserver = new IntersectionObserver((entries) => {
   });
 }, { threshold: 0.5 });
 
-document.querySelectorAll('.int-card, .about-card, .proj-card, .ach-card, .learn-card, .speak-card, .speak-quote, .ci-card, .chart-card, .sh, .sk-col, .hero-content, .hero-terminal').forEach(el => {
+document.querySelectorAll('.int-card, .about-card, .proj-card, .ach-card, .learn-card, .speak-card, .speak-quote, .ci-card, .chart-card, .sh, .sk-col, .hero-content, .hero-terminal, .now-grid, .dash-grid').forEach(el => {
   el.classList.add('fade-up');
   observer.observe(el);
 });
