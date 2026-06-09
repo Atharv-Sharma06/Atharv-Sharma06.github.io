@@ -445,8 +445,8 @@ function timeAgo(date) {
 
   try {
     const [eventsRes, userRes] = await Promise.all([
-      fetch('https://api.github.com/users/Kingbob609420/events?per_page=30'),
-      fetch('https://api.github.com/users/Kingbob609420'),
+      fetch('https://api.github.com/users/Atharv-Sharma06/events?per_page=30'),
+      fetch('https://api.github.com/users/Atharv-Sharma06'),
     ]);
     const events = await eventsRes.json();
     const user   = await userRes.json();
@@ -468,15 +468,14 @@ function timeAgo(date) {
       list.innerHTML = pushes.map(e => {
         const repo   = e.repo.name.split('/')[1];
         const commit = e.payload.commits?.slice(-1)[0];
-        if (!commit) return '';
-        const msg = commit.message.split('\n')[0].slice(0, 58);
+        const msg = commit ? commit.message.split('\n')[0].slice(0, 58) : `Updated ${repo}`;
         const ago = timeAgo(new Date(e.created_at));
         return `<li class="commit-item">
           <span class="ci-repo">${repo}</span>
           <span class="ci-msg">${msg}</span>
           <span class="ci-time">${ago}</span>
         </li>`;
-      }).filter(Boolean).join('');
+      }).join('');
     }
   } catch {
     if (list) list.innerHTML = '<li class="commit-empty">Activity unavailable</li>';
