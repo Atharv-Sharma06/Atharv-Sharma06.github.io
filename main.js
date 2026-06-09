@@ -443,6 +443,24 @@ function timeAgo(date) {
   const reposEl = document.getElementById('gh-repos');
   if (!list && !reposEl) return;
 
+  const staticCommits = [
+    { repo: 'Atharv-Sharma06.github.io',    msg: 'Add DAR Youth Leadership Award to Achievements',     ago: 'today' },
+    { repo: 'Atharv-Sharma06.github.io',    msg: 'Fix GitHub activity: correct username & null commits', ago: 'today' },
+    { repo: 'ai-investment-assistant',       msg: 'Add portfolio analysis features',                     ago: '16 days ago' },
+    { repo: 'investment-research-assist',    msg: 'Initial commit',                                      ago: '17 days ago' },
+    { repo: 'stock-analyser',                msg: 'Update stock analysis logic',                         ago: '24 days ago' },
+    { repo: 'ECONOMIC-data-reader',          msg: 'Add macroeconomic data reader',                       ago: '55 days ago' },
+  ];
+
+  if (reposEl) reposEl.textContent = '17';
+  if (list) {
+    list.innerHTML = staticCommits.map(c => `<li class="commit-item">
+      <span class="ci-repo">${c.repo}</span>
+      <span class="ci-msg">${c.msg}</span>
+      <span class="ci-time">${c.ago}</span>
+    </li>`).join('');
+  }
+
   try {
     const [eventsRes, userRes] = await Promise.all([
       fetch('https://api.github.com/users/Atharv-Sharma06/events?per_page=30'),
@@ -451,7 +469,7 @@ function timeAgo(date) {
     const events = await eventsRes.json();
     const user   = await userRes.json();
 
-    if (reposEl && user.public_repos !== undefined) {
+    if (reposEl && typeof user.public_repos === 'number') {
       reposEl.textContent = user.public_repos;
     }
 
@@ -459,25 +477,19 @@ function timeAgo(date) {
       const pushes = Array.isArray(events)
         ? events.filter(e => e.type === 'PushEvent').slice(0, 7)
         : [];
-
-      if (!pushes.length) {
-        list.innerHTML = '<li class="commit-empty">No recent push activity</li>';
-        return;
+      if (pushes.length) {
+        list.innerHTML = pushes.map(e => {
+          const repo   = e.repo.name.split('/')[1];
+          const commit = e.payload.commits?.slice(-1)[0];
+          const msg = commit ? commit.message.split('\n')[0].slice(0, 58) : `Updated ${repo}`;
+          const ago = timeAgo(new Date(e.created_at));
+          return `<li class="commit-item">
+            <span class="ci-repo">${repo}</span>
+            <span class="ci-msg">${msg}</span>
+            <span class="ci-time">${ago}</span>
+          </li>`;
+        }).join('');
       }
-
-      list.innerHTML = pushes.map(e => {
-        const repo   = e.repo.name.split('/')[1];
-        const commit = e.payload.commits?.slice(-1)[0];
-        const msg = commit ? commit.message.split('\n')[0].slice(0, 58) : `Updated ${repo}`;
-        const ago = timeAgo(new Date(e.created_at));
-        return `<li class="commit-item">
-          <span class="ci-repo">${repo}</span>
-          <span class="ci-msg">${msg}</span>
-          <span class="ci-time">${ago}</span>
-        </li>`;
-      }).join('');
     }
-  } catch {
-    if (list) list.innerHTML = '<li class="commit-empty">Activity unavailable</li>';
-  }
+  } catch { /* static data already shown */ }
 })();
