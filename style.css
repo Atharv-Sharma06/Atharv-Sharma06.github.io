@@ -114,9 +114,9 @@ b, strong, h1, h2, h3, h4 { font-weight: 400; }
 .segbar i.on { background: var(--green); }
 
 /* intro choreography: lines wipe in pixel by pixel; only hidden when JS runs */
-.js .intro .intro-step { opacity: 0.35; clip-path: inset(0 100% 0 0); }
+.js .intro .intro-step { opacity: 0.35; clip-path: inset(-12px calc(100% + 12px) -12px -12px); }
 .js .intro-step { transition: clip-path 0.35s steps(8, end), opacity 0.35s steps(3, end); }
-.js .intro .intro-step.shown { opacity: 1; clip-path: inset(0); }
+.js .intro .intro-step.shown { opacity: 1; clip-path: inset(-12px); }
 .js .intro .intro-step:not(.shown) { transition: none; }
 
 /* if main.js never runs, nothing stays hidden */
@@ -219,7 +219,7 @@ html.js:not(.js-ok) .rv, html.js:not(.js-ok) .intro .intro-step { animation: rev
 .tab { display: inline-flex; align-items: center; gap: 12px; padding: 12px 16px; border: 2px solid var(--line-2); color: var(--fg-3); }
 .tab:hover { color: var(--fg); border-color: var(--fg-3); }
 .tab.active { color: var(--bg); background: var(--fg); border-color: var(--fg); }
-.log-list li { display: grid; grid-template-columns: 12em minmax(0, 1fr) auto; gap: 20px; align-items: baseline; padding: 16px 0; border-top: 2px solid var(--line); }
+.log-list li { display: grid; grid-template-columns: 13em minmax(0, 1fr) auto; gap: 20px; align-items: baseline; padding: 16px 0; border-top: 2px solid var(--line); }
 .log-list li:first-child { border-top: 0; padding-top: 0; }
 .log-y { color: var(--fg-3); }
 .log-list b { display: block; color: var(--fg); }
@@ -229,6 +229,8 @@ html.js:not(.js-ok) .rv, html.js:not(.js-ok) .intro .intro-step { animation: rev
 .badge.done { color: var(--green); border-color: var(--green); }
 .badge.wip { color: var(--coral); border-color: var(--coral); }
 .log-list li.log-quote { display: block; color: var(--green); padding-top: 20px; }
+/* with JS, only the chosen tab and no card details show (hidden before first paint, so nothing vanishes later) */
+.js .card-more, .js .log-list:not(.active) { display: none; }
 .log-quote q { quotes: "“" "”"; }
 
 /* ── Contact ───────────────────────────────────────────────── */
@@ -331,9 +333,15 @@ html.modal-open, html.modal-open body { overflow: hidden; }
   .card-title { font-size: 16px; }
   .xp li { grid-template-columns: minmax(0, 1fr) auto; }
   .xp span { grid-column: 1; grid-row: 2; }
+  .xp li { row-gap: 4px; padding: 8px 0; }
   .skill-cols { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .cl-name { font-size: 24px; }
   .segbar { gap: 4px; }
+}
+
+@media (max-width: 480px) {
+  .term-in { flex-wrap: wrap; }
+  .prompt { flex-basis: 100%; }
 }
 
 @media (max-width: 400px) {

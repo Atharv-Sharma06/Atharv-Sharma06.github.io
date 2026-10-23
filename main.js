@@ -411,14 +411,10 @@ $$('[data-close]', modal).forEach(n => n.addEventListener('click', closeProject)
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeProject(); });
 
 /* ── Quest log tabs ───────────────────────────────────────── */
-if (!fellBack) {
-  $$('.log-list:not(.active)').forEach(l => { l.hidden = true; });
-  $$('.card-more').forEach(m => { m.hidden = true; });
-}
 $$('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     $$('.tab').forEach(t => { t.classList.toggle('active', t === tab); t.setAttribute('aria-pressed', String(t === tab)); });
-    $$('.log-list').forEach(l => { l.hidden = l.dataset.panel !== tab.dataset.tab; });
+    $$('.log-list').forEach(l => l.classList.toggle('active', l.dataset.panel === tab.dataset.tab));
   });
 });
 
@@ -608,7 +604,7 @@ renderCommits();
   const NOTE_STEPS = [
     { key: 'name', q: "what's your name?", ph: 'your name', check: v => v.length >= 2 || 'i need at least a first name.' },
     { key: 'email', q: 'where can i reach you?', ph: 'you@company.com', type: 'email', check: v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) || "that email doesn't look right." },
-    { key: 'topic', q: `what's this about? ${TOPICS.map((t, i) => `${i + 1} ${t.toLowerCase()}`).join(' · ')}`, ph: 'pick a number or type your own', map: v => (/^[1-4]$/.test(v) ? TOPICS[Number(v) - 1] : v) },
+    { key: 'topic', q: `what's this about? ${TOPICS.map((t, i) => `${i + 1} ${t.toLowerCase()}`).join(' · ')}`, ph: '1-4 or your own', map: v => (/^[1-4]$/.test(v) ? TOPICS[Number(v) - 1] : v) },
     { key: 'message', q: 'your message — a sentence or two is perfect:', ph: 'type your message', check: v => v.length >= 10 || 'a little more detail helps me reply properly.' },
     { key: 'confirm', q: 'send it? (y/n)', ph: 'y or n' },
   ];
@@ -713,6 +709,7 @@ renderCommits();
   });
 
   $$('[data-cmd]').forEach(b => b.addEventListener('click', () => {
+    if (sending) return;
     if (note && b.dataset.cmd !== 'note') { print('note cancelled.', 't-dim'); endNote(); }
     if (b.dataset.cmd === 'note' && note) { input.focus({ preventScroll: true }); return; }
     run(b.dataset.cmd);
@@ -724,6 +721,8 @@ renderCommits();
   // boot screen
   print('guest~ $ about', 't-cmd'); COMMANDS.about.run();
   print('guest~ $ hello', 't-cmd'); COMMANDS.hello.run();
-  // Line heights change once the pixel font arrives; keep the newest output in view.
-  if (document.fonts) document.fonts.ready.then(() => { out.scrollTop = out.scrollHeight; });
+  // Start reading at the top; line heights change once the pixel font arrives, so re-apply then.
+  const bootTop = () => { if (!history.length && !note) out.scrollTop = 0; };
+  bootTop();
+  if (document.fonts) document.fonts.ready.then(bootTop);
 })();
