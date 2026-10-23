@@ -635,9 +635,18 @@ function describeEvent(e) {
       const branch = (p.ref || '').replace('refs/heads/', '');
       return `pushed to ${branch || 'main'}`;
     }
-    case 'CreateEvent': return p.ref_type === 'repository' ? 'created repository' : `created ${p.ref_type} ${p.ref || ''}`;
-    case 'PullRequestEvent': return `${p.action} PR: ${p.pull_request?.title || ''}`;
-    case 'IssuesEvent': return `${p.action} issue: ${p.issue?.title || ''}`;
+    // Branch/tag creation is noise in a feed; only new repositories are worth showing.
+    case 'CreateEvent': return p.ref_type === 'repository' ? 'created repository' : null;
+    // The public events API no longer always includes titles, so fall back to the number.
+    case 'PullRequestEvent': {
+      const pr = p.pull_request || {};
+      const action = p.action === 'closed' && pr.merged ? 'merged' : p.action;
+      return pr.title ? `${action} PR: ${pr.title}` : `${action} PR #${p.number ?? pr.number ?? ''}`.trim();
+    }
+    case 'IssuesEvent': {
+      const issue = p.issue || {};
+      return issue.title ? `${p.action} issue: ${issue.title}` : `${p.action} issue #${issue.number ?? ''}`.trim();
+    }
     case 'ReleaseEvent': return `released ${p.release?.tag_name || ''}`;
     case 'ForkEvent': return 'forked repository';
     case 'WatchEvent': return 'starred repository';
@@ -646,41 +655,48 @@ function describeEvent(e) {
   }
 }
 
+// Shown immediately, and kept if the GitHub API is rate-limited or unreachable.
+const STATIC_COMMITS = [
+  { repo: 'Atharv-Sharma06.github.io', msg: 'Add DAR Youth Leadership Award to Achievements', ago: 'today' },
+  { repo: 'Atharv-Sharma06.github.io', msg: 'Fix GitHub activity: correct username & null commits', ago: 'today' },
+  { repo: 'ai-investment-assistant', msg: 'Add portfolio analysis features', ago: '16 days ago' },
+  { repo: 'investment-research-assist', msg: 'Initial commit', ago: '17 days ago' },
+  { repo: 'stock-analyser', msg: 'Update stock analysis logic', ago: '24 days ago' },
+  { repo: 'ECONOMIC-data-reader', msg: 'Add macroeconomic data reader', ago: '55 days ago' },
+];
+
+function renderCommits(list, rows) {
+  list.innerHTML = rows.map((r, i) => `<li style="--i:${i}">
+      <span class="t-time">${escapeHTML(r.ago)}</span>
+      <span class="t-repo">${escapeHTML(r.repo)}</span>
+      <span class="t-msg">${escapeHTML(r.msg.slice(0, 80))}</span>
+    </li>`).join('');
+}
+
 (async function loadGitHubActivity() {
   const list = $('#commit-list');
   const reposEl = $('#gh-repos');
+  renderCommits(list, STATIC_COMMITS);
   try {
     const [eventsRes, userRes] = await Promise.all([
-      fetch('https://api.github.com/users/Kingbob609420/events/public?per_page=40'),
-      fetch('https://api.github.com/users/Kingbob609420'),
+      fetch('https://api.github.com/users/Atharv-Sharma06/events/public?per_page=40'),
+      fetch('https://api.github.com/users/Atharv-Sharma06'),
     ]);
-    if (!eventsRes.ok) throw new Error('GitHub API ' + eventsRes.status);
-    const events = await eventsRes.json();
     const user = userRes.ok ? await userRes.json() : {};
-
     if (reposEl && Number.isFinite(user.public_repos)) {
       reposEl.dataset.count = user.public_repos;
       if (reposEl.dataset.seen) countUp(reposEl, user.public_repos);
-      else reposEl.textContent = '0';
     }
 
+    if (!eventsRes.ok) return;
+    const events = await eventsRes.json();
     const rows = (Array.isArray(events) ? events : [])
       .map(e => ({ e, msg: describeEvent(e) }))
       .filter(r => r.msg)
-      .slice(0, 9);
-
-    if (!rows.length) {
-      list.innerHTML = '<li class="term-muted">No recent public activity — check back soon.</li>';
-      return;
-    }
-    list.innerHTML = rows.map(({ e, msg }, i) => `<li style="--i:${i}">
-        <span class="t-time">${timeAgo(new Date(e.created_at))}</span>
-        <span class="t-repo">${escapeHTML(e.repo.name.split('/')[1])}</span>
-        <span class="t-msg">${escapeHTML(msg.slice(0, 80))}</span>
-      </li>`).join('');
-  } catch (_) {
-    list.innerHTML = '<li class="term-muted">Activity unavailable right now — <a href="https://github.com/Kingbob609420" target="_blank" rel="noopener">see GitHub ↗</a></li>';
-  }
+      .slice(0, 9)
+      .map(({ e, msg }) => ({ repo: e.repo.name.split('/')[1], msg, ago: timeAgo(new Date(e.created_at)) }));
+    if (rows.length) renderCommits(list, rows);
+  } catch (_) { /* static data already shown */ }
 })();
 
 /* ── Copy email ───────────────────────────────────────────── */
