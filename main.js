@@ -1,14 +1,17 @@
 /* ─────────────────────────────────────────────────────────────
-   Atharv Sharma — portfolio interactions
+   Atharv Sharma — portfolio (8-bit edition)
    ───────────────────────────────────────────────────────────── */
 
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const html = document.documentElement;
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const finePointer  = matchMedia('(hover: hover) and (pointer: fine)').matches;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-const lerp  = (a, b, t) => a + (b - a) * t;
+const EMAIL = 'atharv.eck@gmail.com';
+const GH_USER = 'Atharv-Sharma06';
+
+// Tells the CSS fallbacks that JS is alive and in control of reveals.
+html.classList.add('js-ok');
 
 function seeded(seed) {
   return function () {
@@ -19,621 +22,372 @@ function seeded(seed) {
   };
 }
 
-function escapeHTML(str) {
-  return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
-/* ── Year + Eastern-time clock ────────────────────────────── */
-$$('.js-year').forEach(el => { el.textContent = new Date().getFullYear(); });
-
-const clockFmt = new Intl.DateTimeFormat('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York' });
-function tickClock() {
-  const t = clockFmt.format(new Date());
-  const c = $('#clock');
-  if (c) c.textContent = t;
-  $$('.js-clock').forEach(el => { el.textContent = t; });
-}
-tickClock();
-setInterval(tickClock, 15000);
-
-/* ── Smooth scroll (Lenis, if it loaded) ──────────────────── */
-// Loaded async so a slow CDN can never hold the page behind the preloader.
-let lenis = null;
-function initLenis() {
-  if (lenis || reduceMotion || !window.Lenis) return;
-  lenis = new window.Lenis({ lerp: 0.09, smoothWheel: true });
-  if (['is-loading', 'menu-open', 'modal-open'].some(c => html.classList.contains(c))) lenis.stop();
-  (function raf(t) { lenis.raf(t); requestAnimationFrame(raf); })(performance.now());
-}
-if (!reduceMotion) {
-  const s = document.createElement('script');
-  s.src = 'https://cdn.jsdelivr.net/npm/lenis@1.1.13/dist/lenis.min.js';
-  s.async = true;
-  s.onload = initLenis;
-  document.head.appendChild(s);
-}
-
-function scrollToTarget(target) {
-  const offset = target.id === 'top' ? 0 : -20;
-  if (lenis) lenis.scrollTo(target, { offset, duration: 1.4 });
-  else target.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth' });
-  // Keep keyboard users where they jumped to instead of back at the link.
-  if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
-  target.focus({ preventScroll: true });
-}
-
-$$('a[href^="#"]').forEach(a => {
-  a.addEventListener('click', e => {
-    const id = a.getAttribute('href');
-    const target = id === '#' ? null : $(id);
-    if (!target) return;
-    e.preventDefault();
-    closeMenu();
-    scrollToTarget(target);
+function el(tag, props = {}, children = []) {
+  const node = document.createElement(tag);
+  Object.entries(props).forEach(([k, v]) => {
+    if (k === 'class') node.className = v;
+    else if (k === 'text') node.textContent = v;
+    else node.setAttribute(k, v);
   });
-});
-$('#to-top')?.addEventListener('click', () => scrollToTarget($('#top')));
-
-/* ── Split text helpers ───────────────────────────────────── */
-// Wraps every word in `el` while keeping inline elements like <em> intact.
-function splitWords(el, makeWord) {
-  const nodes = [...el.childNodes];
-  el.textContent = '';
-  let i = 0;
-  nodes.forEach(node => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      node.textContent.split(/(\s+)/).forEach(tok => {
-        if (!tok) return;
-        if (/^\s+$/.test(tok)) { el.appendChild(document.createTextNode(' ')); return; }
-        el.appendChild(makeWord(document.createTextNode(tok), i++));
-      });
-    } else {
-      el.appendChild(makeWord(node, i++));
-    }
-  });
-  return i;
+  [].concat(children).forEach(c => node.append(c));
+  return node;
 }
 
-$$('.split').forEach(el => {
-  el.setAttribute('aria-label', el.textContent.replace(/\s+/g, ' ').trim());
-  splitWords(el, (node, i) => {
-    const w = document.createElement('span');
-    w.className = 'w';
-    w.setAttribute('aria-hidden', 'true');
-    const inner = document.createElement('span');
-    inner.style.setProperty('--i', i);
-    inner.appendChild(node);
-    w.appendChild(inner);
-    return w;
-  });
-});
-
-const scrubEls = $$('[data-scrub]').map(el => {
-  const words = [];
-  splitWords(el, node => {
-    const s = document.createElement('span');
-    s.className = 'sw';
-    s.appendChild(node);
-    words.push(s);
-    return s;
-  });
-  return { el, words };
-});
-
-/* ── Reveal on scroll ─────────────────────────────────────── */
-const io = new IntersectionObserver(entries => {
-  entries.forEach(entry => {
-    if (!entry.isIntersecting) return;
-    entry.target.classList.add('in');
-    io.unobserve(entry.target);
-  });
-}, { threshold: 0.15, rootMargin: '0px 0px -8% 0px' });
-
-function observeReveals() {
-  $$('.reveal-up, .split, .contact-h').forEach(el => {
-    if (!el.closest('.hero')) io.observe(el);
-  });
+function setInert(selectors, on) {
+  selectors.forEach(sel => { const n = $(sel); if (n) n.inert = on; });
 }
 
-/* ── Count-up stats ───────────────────────────────────────── */
-function countUp(el, to) {
-  const suffix = el.dataset.suffix || '';
-  if (reduceMotion) { el.textContent = to.toLocaleString() + suffix; return; }
-  const dur = 1600;
-  const start = performance.now();
-  (function step(now) {
-    const p = clamp((now - start) / dur, 0, 1);
-    const eased = 1 - Math.pow(1 - p, 4);
-    el.textContent = Math.round(to * eased).toLocaleString() + suffix;
-    if (p < 1) requestAnimationFrame(step);
-  })(start);
-}
-
-const statIO = new IntersectionObserver(entries => {
-  entries.forEach(entry => {
-    if (!entry.isIntersecting) return;
-    const el = entry.target;
-    el.dataset.seen = '1';
-    const to = parseInt(el.dataset.count, 10);
-    if (to > 0) countUp(el, to);
-    statIO.unobserve(el);
-  });
-}, { threshold: 0.6 });
-$$('[data-count]').forEach(el => statIO.observe(el));
-
-/* ── Hero chart line ──────────────────────────────────────── */
-const heroPath = $('#hero-path');
-const heroArea = $('#hero-area');
-const heroDot  = $('#hero-dot');
-
-function buildHeroLine() {
-  if (!heroPath) return;
-  const rand = seeded(42);
-  const W = 1400, H = 400, N = 70;
-  const pts = [];
-  let y = 330;
-  for (let i = 0; i <= N; i++) {
-    const x = (i / N) * W;
-    y += (rand() - 0.62) * 34;
-    y = clamp(y, 30, 370);
-    pts.push([x, y]);
-  }
-  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-  heroPath.setAttribute('d', d);
-  heroArea.setAttribute('d', `${d} L${W},${H} L0,${H} Z`);
-  heroPath.setAttribute('pathLength', '1');
-  heroPath.style.strokeDasharray = '1';
-  heroPath.style.strokeDashoffset = '1';
-  heroArea.style.opacity = '0';
-  heroDot.style.left = (pts[N][0] / W * 100) + '%';
-  heroDot.style.top = (pts[N][1] / H * 100) + '%';
-}
-
-function drawHeroLine() {
-  if (!heroPath) return;
-  const dur = reduceMotion ? 0 : 2600;
-  heroPath.style.transition = `stroke-dashoffset ${dur}ms cubic-bezier(.7,0,.2,1)`;
-  heroArea.style.transition = `opacity 1200ms ease ${dur * 0.6}ms`;
-  requestAnimationFrame(() => {
-    heroPath.style.strokeDashoffset = '0';
-    heroArea.style.opacity = '1';
-  });
-  setTimeout(() => heroDot.classList.add('on'), dur);
-}
-buildHeroLine();
-
-/* ── Preloader ────────────────────────────────────────────── */
-function runLoader() {
-  const loader = $('#loader');
-  const num = $('#loader-num');
-  const bar = $('#loader-bar');
-  let seen = false;
-  try { seen = sessionStorage.getItem('as-loaded') === '1'; sessionStorage.setItem('as-loaded', '1'); } catch (_) {}
-  const dur = reduceMotion ? 0 : (seen ? 700 : 1900);
-  if (lenis) lenis.stop();
-
-  const finish = () => {
-    loader.classList.add('done');
-    html.classList.remove('is-loading');
-    setTimeout(() => {
-      html.classList.add('is-ready');
-      drawHeroLine();
-      observeReveals();
-      if (lenis && !html.classList.contains('menu-open') && !html.classList.contains('modal-open')) lenis.start();
-    }, reduceMotion ? 0 : 350);
-    setTimeout(() => loader.remove(), 1400);
-  };
-
-  if (!dur) { finish(); return; }
-  const start = performance.now();
-  (function step(now) {
-    const p = clamp((now - start) / dur, 0, 1);
-    // Stepped easing makes the counter feel like data arriving in chunks.
-    const eased = p < 1 ? Math.floor((1 - Math.pow(1 - p, 3)) * 100 / 3) * 3 : 100;
-    num.textContent = Math.min(eased, 100);
-    bar.style.width = eased + '%';
-    if (p < 1) requestAnimationFrame(step);
-    else setTimeout(finish, 180);
-  })(start);
-}
-window.addEventListener('DOMContentLoaded', runLoader);
-
-/* ── Header: hide on scroll down, show on up ──────────────── */
-const header = $('#header');
-let lastY = 0;
-let scrollVel = 0;
-
-function onScroll() {
-  const y = window.scrollY;
-  const dy = y - lastY;
-  scrollVel = dy;
-  if (!html.classList.contains('menu-open')) {
-    header.classList.toggle('hide', dy > 0 && y > 200);
-  }
-  lastY = y;
-  updateScrub();
-  heroParallax(y);
-}
-window.addEventListener('scroll', onScroll, { passive: true });
-
-function updateScrub() {
-  const vh = window.innerHeight;
-  scrubEls.forEach(({ el, words }) => {
-    const r = el.getBoundingClientRect();
-    if (r.bottom < 0 || r.top > vh) return;
-    const p = clamp((vh * 0.85 - r.top) / (r.height + vh * 0.3), 0, 1);
-    const lit = Math.round(p * words.length);
-    words.forEach((w, i) => w.classList.toggle('lit', i < lit));
-  });
-}
-
-const heroTitle = $('.hero-title');
-const heroLine  = $('.hero-line-wrap');
-function heroParallax(y) {
-  if (reduceMotion || y > window.innerHeight * 1.2) return;
-  if (heroTitle) heroTitle.style.transform = `translate3d(0, ${y * 0.18}px, 0)`;
-  if (heroLine) heroLine.style.transform = `translate3d(0, ${y * 0.32}px, 0)`;
-}
+$$('.js-year').forEach(n => { n.textContent = new Date().getFullYear(); });
 
 /* ── Mobile menu ──────────────────────────────────────────── */
 const menuBtn = $('#menu-btn');
-const menu = $('#menu');
-function setInert(selectors, on) {
-  selectors.forEach(sel => { const el = $(sel); if (el) el.inert = on; });
+const nav = $('#nav');
+function setMenu(open) {
+  nav.classList.toggle('open', open);
+  menuBtn.setAttribute('aria-expanded', String(open));
+  menuBtn.textContent = open ? 'Close' : 'Menu';
 }
-function closeMenu() {
-  if (!html.classList.contains('menu-open')) return;
-  html.classList.remove('menu-open');
-  menuBtn?.setAttribute('aria-expanded', 'false');
-  menu?.setAttribute('aria-hidden', 'true');
-  setInert(['main', '.footer'], false);
-  if (lenis && !html.classList.contains('modal-open')) lenis.start();
-}
-menuBtn?.addEventListener('click', () => {
-  const open = !html.classList.contains('menu-open');
-  if (!open) { closeMenu(); return; }
-  html.classList.add('menu-open');
-  header.classList.remove('hide');
-  menuBtn.setAttribute('aria-expanded', 'true');
-  menu.setAttribute('aria-hidden', 'false');
-  setInert(['main', '.footer'], true);
-  if (lenis) lenis.stop();
+menuBtn.addEventListener('click', () => setMenu(!nav.classList.contains('open')));
+$$('a', nav).forEach(a => a.addEventListener('click', () => setMenu(false)));
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && nav.classList.contains('open')) { setMenu(false); menuBtn.focus(); }
 });
-const mobileMQ = matchMedia('(max-width: 860px)');
-const onMQ = e => { if (!e.matches) closeMenu(); };
-if (mobileMQ.addEventListener) mobileMQ.addEventListener('change', onMQ); else mobileMQ.addListener(onMQ);
+const wideMQ = matchMedia('(min-width: 721px)');
+const onWide = e => { if (e.matches) setMenu(false); };
+if (wideMQ.addEventListener) wideMQ.addEventListener('change', onWide); else wideMQ.addListener(onWide);
 
-/* ── Marquee (speeds up / reverses with scroll) ───────────── */
-(function marquee() {
-  const track = $('#marquee-track');
-  if (!track) return;
-  track.innerHTML += track.innerHTML;
+/* ── Intro: type the name, fill the loading bar ───────────── */
+const hero = $('#hero');
+const heroName = $('#hero-name');
+const typeEl = $('.type', heroName);
+const loadLabel = $('#load-label');
+const segbar = $('#segbar');
+const SEGMENTS = 20;
+for (let i = 0; i < SEGMENTS; i++) segbar.append(el('i'));
+const segs = $$('i', segbar);
+const introSteps = $$('.intro-step', hero);
+let introRaf = 0;
+
+function endIntro() {
+  cancelAnimationFrame(introRaf);
+  typeEl.textContent = typeEl.dataset.text;
+  heroName.classList.remove('typing');
+  heroName.removeAttribute('aria-label');
+  hero.classList.remove('intro', 'loading');
+  introSteps.forEach(s => s.classList.add('shown'));
+  segs.forEach(s => s.classList.remove('on'));
+}
+
+function playIntro() {
+  cancelAnimationFrame(introRaf);
+  if (reduceMotion) { endIntro(); return; }
+  const full = typeEl.dataset.text;
+  const TYPE_MS = 75;
+  const DURATION = 2300;
+  heroName.setAttribute('aria-label', full);
+  heroName.classList.add('typing');
+  hero.classList.add('intro', 'loading');
+  introSteps.forEach(s => s.classList.remove('shown'));
+  const t0 = performance.now();
+  const tick = now => {
+    const t = now - t0;
+    const n = Math.min(full.length, Math.floor(t / TYPE_MS));
+    typeEl.replaceChildren(full.slice(0, n), el('span', { class: 'caret', 'aria-hidden': 'true' }), el('span', { class: 'ghost', 'aria-hidden': 'true', text: full.slice(n) }));
+    // Progress arrives in uneven chunks, like a real loader.
+    const x = clamp(t / DURATION, 0, 1);
+    const pct = Math.min(100, Math.floor((1 - Math.pow(1 - x, 2.4)) * 100 + Math.sin(x * 9) * 2));
+    loadLabel.textContent = `Loading ${clamp(pct, 0, 100)}%`;
+    segs.forEach((s, i) => s.classList.toggle('on', ((i + 1) / SEGMENTS) * 100 <= pct));
+    introSteps.forEach((s, i) => { if (t > 1050 + i * 240) s.classList.add('shown'); });
+    if (t < DURATION + 300) introRaf = requestAnimationFrame(tick);
+    else endIntro();
+  };
+  introRaf = requestAnimationFrame(tick);
+}
+playIntro();
+
+$('#replay').addEventListener('click', () => {
+  window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
+  heroName.setAttribute('tabindex', '-1');
+  heroName.focus({ preventScroll: true });
+  playIntro();
+});
+
+/* ── Reveals + heading scramble ───────────────────────────── */
+const GLYPHS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+=?';
+function scramble(node) {
   if (reduceMotion) return;
-  let x = 0;
-  let dir = -1;
-  let last = performance.now();
-  (function loop(now) {
-    const dt = Math.min(now - last, 50);
-    last = now;
-    if (scrollVel > 1) dir = -1;
-    else if (scrollVel < -1) dir = 1;
-    const boost = clamp(Math.abs(scrollVel) * 0.4, 0, 12);
-    scrollVel *= 0.9;
-    x += dir * (0.05 * dt + boost);
-    const half = track.children[track.children.length / 2].offsetLeft - track.children[0].offsetLeft;
-    if (x <= -half) x += half;
-    if (x > 0) x -= half;
-    track.style.transform = `translate3d(${x}px,0,0)`;
-    requestAnimationFrame(loop);
-  })(last);
+  const final = node.textContent;
+  node.setAttribute('aria-label', final);
+  const DURATION = 650;
+  const t0 = performance.now();
+  const tick = now => {
+    const p = clamp((now - t0) / DURATION, 0, 1);
+    const fixed = Math.floor(p * final.length);
+    let out = final.slice(0, fixed);
+    for (let i = fixed; i < final.length; i++) {
+      out += final[i] === ' ' ? ' ' : GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
+    }
+    node.textContent = out;
+    if (p < 1) requestAnimationFrame(tick);
+    else node.textContent = final;
+  };
+  requestAnimationFrame(tick);
+}
+
+const io = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (!entry.isIntersecting) return;
+    const t = entry.target;
+    if (t.hasAttribute('data-scramble')) scramble(t);
+    else t.classList.add('in');
+    io.unobserve(t);
+  });
+}, { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
+$$('.rv, [data-scramble]').forEach(n => io.observe(n));
+
+/* ── Pixel avatar ─────────────────────────────────────────── */
+// Palette lives here so the character is easy to re-skin.
+const SPRITE_PALETTE = {
+  H: '#20241f', h: '#30362f', S: '#b97a52', s: '#94603f', E: '#e9e7df', P: '#0a0c0a',
+  M: '#e9e7df', G: '#3f8a4a', g: '#2f6b37', w: '#e9e7df', L: '#8ff09a', D: '#1a1d1a',
+};
+const SPRITE_ROWS = [
+  '......HHHHHH......',
+  '....HHHHHHHHHH....',
+  '...HHHHHHHHHHHH...',
+  '..HHHhHHHHHHhHHH..',
+  '..HHHHHHHHHHHHHH..',
+  '..HHHSSSHHSSSHHH..',
+  '..HHSSSSSSSSSSHH..',
+  '..HSSSSSSSSSSSSH..',
+  '.sSSSEESSSSEESSSs.',
+  '.sSSSPESSSSPESSSs.',
+  '..SSSSSSSSSSSSSS..',
+  '..SSSSSSSssSSSSS..',
+  '..SSSSSSSSSSSSSS..',
+  '..sSSSSMMMMSSSSs..',
+  '...sSSSSSSSSSSs...',
+  '.....ssSSSSss.....',
+  '...GGGGGggGGGGG...',
+  '..GGGGGGGGGGGGGG..',
+  '.GGGwGGGGGGGGwGGG.',
+  '.GGGwGGGGGGGLwGGG.',
+  '.GGGGGGGGGLLGGGGG.',
+  '.SSGGGGGGLGGGGGSS.',
+  '.SSGGGGGGGGGGGGSS.',
+  '...DDDDD..DDDDD...',
+];
+
+(function drawSprite() {
+  const svg = $('#sprite');
+  if (!svg) return;
+  const NS = 'http://www.w3.org/2000/svg';
+  const base = document.createElementNS(NS, 'g');
+  const eyes = document.createElementNS(NS, 'g');
+  eyes.setAttribute('class', 'eyes');
+  SPRITE_ROWS.forEach((row, y) => {
+    // Merge horizontal runs of one colour into a single rect.
+    let x = 0;
+    while (x < row.length) {
+      const ch = row[x];
+      let w = 1;
+      while (row[x + w] === ch) w++;
+      if (ch !== '.') {
+        const isEye = ch === 'E' || ch === 'P';
+        const r = document.createElementNS(NS, 'rect');
+        r.setAttribute('x', x); r.setAttribute('y', y);
+        r.setAttribute('width', w); r.setAttribute('height', 1);
+        r.setAttribute('fill', SPRITE_PALETTE[isEye ? 'S' : ch]);
+        base.append(r);
+        if (isEye) {
+          const e = r.cloneNode();
+          e.setAttribute('fill', SPRITE_PALETTE[ch]);
+          eyes.append(e);
+        }
+      }
+      x += w;
+    }
+  });
+  svg.append(base, eyes);
 })();
 
-/* ── Cursor + magnetic elements ───────────────────────────── */
-const cursor = $('#cursor');
-const cursorLabel = $('#cursor-label');
-const mouse = { x: innerWidth / 2, y: innerHeight / 2 };
-
-if (finePointer && !reduceMotion) {
-  const pos = { x: mouse.x, y: mouse.y };
-  document.addEventListener('mousemove', e => {
-    mouse.x = e.clientX;
-    mouse.y = e.clientY;
-    cursor.classList.add('on');
-  });
-  document.addEventListener('mouseleave', () => cursor.classList.remove('on'));
-  (function loop() {
-    pos.x = lerp(pos.x, mouse.x, 0.22);
-    pos.y = lerp(pos.y, mouse.y, 0.22);
-    cursor.style.transform = `translate3d(${pos.x}px, ${pos.y}px, 0)`;
-    requestAnimationFrame(loop);
-  })();
-
-  document.addEventListener('mouseover', e => {
-    const row = e.target.closest('.proj-row');
-    const interactive = e.target.closest('a, button, input, textarea, .chip');
-    cursor.classList.toggle('label', !!row);
-    cursor.classList.toggle('hover', !row && !!interactive);
-    if (row) cursorLabel.textContent = row.parentElement.classList.contains('open') ? 'Close' : 'Open';
-  });
-
-  $$('[data-magnetic]').forEach(el => {
-    el.addEventListener('mousemove', e => {
-      const r = el.getBoundingClientRect();
-      const dx = e.clientX - (r.left + r.width / 2);
-      const dy = e.clientY - (r.top + r.height / 2);
-      el.style.transform = `translate(${dx * 0.25}px, ${dy * 0.35}px)`;
-    });
-    el.addEventListener('mouseleave', () => {
-      el.style.transition = 'transform .6s cubic-bezier(.16,1,.3,1)';
-      el.style.transform = '';
-      setTimeout(() => { el.style.transition = ''; }, 600);
-    });
-  });
-}
-
-/* ── Project visuals (generated SVG charts) ───────────────── */
-const VW = 400, VH = 250, PAD = { l: 22, r: 22, t: 44, b: 26 };
-const sx = (i, n) => PAD.l + (i / (n - 1)) * (VW - PAD.l - PAD.r);
-const sy = (v, min, max) => PAD.t + (1 - (v - min) / (max - min)) * (VH - PAD.t - PAD.b);
-const toPath = pts => pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join('');
-
-function frame(title, value, hue, body) {
-  let grid = '';
-  for (let i = 0; i < 5; i++) {
-    const y = PAD.t + i * (VH - PAD.t - PAD.b) / 4;
-    grid += `<line x1="${PAD.l}" x2="${VW - PAD.r}" y1="${y}" y2="${y}" stroke="rgba(236,232,225,.07)" />`;
-  }
-  return `<svg class="viz" viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Illustrative ${title} chart">
-    <rect width="${VW}" height="${VH}" fill="#121214" />
-    <rect width="${VW}" height="${VH}" fill="${hue}" opacity=".035" />
-    ${grid}
-    <text x="${PAD.l}" y="26" class="viz-t">${title}</text>
-    <text x="${VW - PAD.r}" y="26" class="viz-v" fill="${hue}" text-anchor="end">${value}</text>
+/* ── Project previews (generated, illustrative) ───────────── */
+const VW = 320, VH = 180;
+const pts = arr => arr.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+function windowFrame(bg, bar, title, body) {
+  return `<svg viewBox="0 0 ${VW} ${VH}" shape-rendering="crispEdges" role="img" aria-label="Illustrative preview of ${title}">
+    <rect width="${VW}" height="${VH}" fill="${bg}"/>
+    <rect width="${VW}" height="14" fill="${bar}"/>
+    <rect x="6" y="5" width="4" height="4" fill="#e8673f"/><rect x="13" y="5" width="4" height="4" fill="#ffffff" opacity=".25"/><rect x="20" y="5" width="4" height="4" fill="#ffffff" opacity=".25"/>
+    <text x="${VW / 2}" y="10" fill="#ffffff" opacity=".55" font-family="Silkscreen, monospace" font-size="6" text-anchor="middle">${title}</text>
     ${body}
   </svg>`;
 }
+const txt = (x, y, s, fill = '#ffffff', size = 6, op = 0.6, anchor = 'start') =>
+  `<text x="${x}" y="${y}" fill="${fill}" opacity="${op}" font-family="Silkscreen, monospace" font-size="${size}" text-anchor="${anchor}">${s}</text>`;
 
-const VIZ = {
-  macro(hue) {
+const SHOTS = {
+  macro() {
     const rand = seeded(7);
-    const n = 44;
-    const cpi = [], un = [];
+    let b = `<rect x="0" y="14" width="66" height="166" fill="#132748"/>${txt(8, 28, 'FILTERS')}`;
+    ['US', 'UK', 'EU', 'JP'].forEach((c, i) => {
+      b += `<rect x="8" y="${36 + i * 14}" width="50" height="9" fill="${i === 0 ? '#7cc4ff' : '#1d3866'}"/>${txt(12, 43 + i * 14, c, i === 0 ? '#0f1d36' : '#ffffff', 6, 0.8)}`;
+    });
+    ['CPI', 'UNRATE', 'GDP'].forEach((k, i) => {
+      const x = 76 + i * 80;
+      b += `<rect x="${x}" y="22" width="72" height="34" fill="#16294a"/>${txt(x + 6, 32, k)}`;
+      const sp = Array.from({ length: 12 }, (_, j) => [x + 6 + j * 5.4, 48 - rand() * 10 - (k === 'CPI' ? j * 0.5 : 0)]);
+      b += `<polyline points="${pts(sp)}" fill="none" stroke="${i === 1 ? '#ffd166' : '#7cc4ff'}" stroke-width="1.5"/>`;
+    });
+    b += `<rect x="76" y="64" width="232" height="106" fill="#16294a"/>`;
+    for (let g = 0; g < 4; g++) b += `<rect x="84" y="${78 + g * 22}" width="216" height="1" fill="#ffffff" opacity=".08"/>`;
+    const n = 40, a = [], u = [];
     for (let i = 0; i < n; i++) {
       const t = i / (n - 1);
-      cpi.push(1.6 + 6.6 * Math.exp(-Math.pow((t - 0.75) / 0.1, 2)) + t * 1.6 + (rand() - 0.5) * 0.5);
-      un.push(6.2 - t * 2.4 + 9 * Math.exp(-Math.pow((t - 0.58) / 0.035, 2)) + (rand() - 0.5) * 0.3);
+      a.push([84 + t * 216, 150 - (16 + 60 * Math.exp(-Math.pow((t - 0.75) / 0.1, 2)) + t * 14 + rand() * 4)]);
+      u.push([84 + t * 216, 150 - (52 - t * 20 + 70 * Math.exp(-Math.pow((t - 0.58) / 0.035, 2)) + rand() * 3)]);
     }
-    const a = toPath(cpi.map((v, i) => [sx(i, n), sy(v, 0, 15)]));
-    const b = toPath(un.map((v, i) => [sx(i, n), sy(v, 0, 15)]));
-    return frame('CPI vs unemployment', 'illustrative', hue, `
-      <path d="${b}" fill="none" stroke="#ece8e1" stroke-opacity=".45" stroke-width="1.5" pathLength="1" class="draw" />
-      <path d="${a}" fill="none" stroke="${hue}" stroke-width="2" pathLength="1" class="draw" />
-      <g class="viz-legend"><circle cx="${PAD.l + 4}" cy="${VH - 10}" r="3" fill="${hue}" /><text x="${PAD.l + 12}" y="${VH - 7}">CPI</text>
-      <circle cx="${PAD.l + 48}" cy="${VH - 10}" r="3" fill="#ece8e1" opacity=".5" /><text x="${PAD.l + 56}" y="${VH - 7}">Unemployment</text></g>`);
+    b += `<polyline points="${pts(u)}" fill="none" stroke="#ffd166" stroke-width="1.5" opacity=".8"/><polyline points="${pts(a)}" fill="none" stroke="#7cc4ff" stroke-width="2"/>`;
+    return windowFrame('#0f1d36', '#0a1528', 'economic_dashboard', b);
   },
 
-  candles(hue) {
+  candles() {
     const rand = seeded(11);
-    const n = 34;
-    let c = 100;
-    const data = [];
-    for (let i = 0; i < n; i++) {
-      const o = c;
-      c = o + (rand() - 0.42) * 6;
-      data.push({ o, c, h: Math.max(o, c) + rand() * 3, l: Math.min(o, c) - rand() * 3 });
-    }
-    const min = Math.min(...data.map(d => d.l)) - 2;
-    const max = Math.max(...data.map(d => d.h)) + 2;
-    const w = (VW - PAD.l - PAD.r) / n * 0.56;
-    let body = '';
+    let b = `${txt(10, 28, 'TICKER · 1D')}`;
+    ['1M', '6M', '1Y'].forEach((l, i) => { b += `<rect x="${236 + i * 26}" y="20" width="22" height="10" fill="${i === 2 ? '#5fd068' : '#1c2328'}"/>${txt(247 + i * 26, 28, l, i === 2 ? '#0f1417' : '#ffffff', 6, 0.8, 'middle')}`; });
+    const n = 30; let c = 100; const data = [];
+    for (let i = 0; i < n; i++) { const o = c; c = o + (rand() - 0.42) * 6; data.push({ o, c, h: Math.max(o, c) + rand() * 3, l: Math.min(o, c) - rand() * 3 }); }
+    const lo = Math.min(...data.map(d => d.l)), hi = Math.max(...data.map(d => d.h));
+    const Y = v => 118 - (v - lo) / (hi - lo) * 80;
     data.forEach((d, i) => {
-      const x = sx(i, n);
-      const col = d.c >= d.o ? hue : '#ff6b5b';
-      const y1 = sy(Math.max(d.o, d.c), min, max);
-      const y2 = sy(Math.min(d.o, d.c), min, max);
-      body += `<g class="pop" style="--i:${i}"><line x1="${x}" x2="${x}" y1="${sy(d.h, min, max)}" y2="${sy(d.l, min, max)}" stroke="${col}" stroke-width="1" />
-        <rect x="${x - w / 2}" y="${y1}" width="${w}" height="${Math.max(y2 - y1, 1)}" fill="${col}" rx="1" /></g>`;
+      const x = 14 + i * 9.8, col = d.c >= d.o ? '#5fd068' : '#e8673f';
+      b += `<rect x="${x + 2.5}" y="${Y(d.h)}" width="1" height="${Y(d.l) - Y(d.h)}" fill="${col}"/><rect x="${x}" y="${Y(Math.max(d.o, d.c))}" width="6" height="${Math.max(2, Y(Math.min(d.o, d.c)) - Y(Math.max(d.o, d.c)))}" fill="${col}"/>`;
     });
-    const sma = data.map((_, i) => {
-      const s = data.slice(Math.max(0, i - 6), i + 1);
-      return [sx(i, n), sy(s.reduce((a, d) => a + d.c, 0) / s.length, min, max)];
-    });
-    return frame('Sample ticker · SMA(7)', 'illustrative', hue, `${body}
-      <path d="${toPath(sma)}" fill="none" stroke="#ece8e1" stroke-width="1.4" stroke-dasharray="3 3" opacity=".7" />`);
+    const sma = data.map((_, i) => { const s = data.slice(Math.max(0, i - 6), i + 1); return [17 + i * 9.8, Y(s.reduce((a, d) => a + d.c, 0) / s.length)]; });
+    b += `<polyline points="${pts(sma)}" fill="none" stroke="#ffffff" stroke-width="1" stroke-dasharray="3 2" opacity=".7"/>`;
+    b += `<rect x="10" y="128" width="300" height="44" fill="#151b1f"/>${txt(16, 138, 'RSI')}<rect x="16" y="146" width="288" height="1" fill="#e8673f" opacity=".4"/><rect x="16" y="162" width="288" height="1" fill="#5fd068" opacity=".4"/>`;
+    const rsi = Array.from({ length: 48 }, (_, i) => [16 + i * 6.1, 154 + Math.sin(i / 3) * 9 + (rand() - 0.5) * 6]);
+    b += `<polyline points="${pts(rsi)}" fill="none" stroke="#c9a6ff" stroke-width="1.2"/>`;
+    return windowFrame('#0f1417', '#0a0e10', 'stock_analysis', b);
   },
 
-  forecast(hue) {
+  forecast() {
     const rand = seeded(23);
-    const hist = 30, fut = 14, n = hist + fut;
-    const ys = [];
-    let v = 50;
-    for (let i = 0; i < hist; i++) { v += (rand() - 0.45) * 4; ys.push(v); }
+    const hist = 28, fut = 14;
+    let v = 100; const ys = [];
+    for (let i = 0; i < hist; i++) { v += (rand() - 0.45) * 5; ys.push(v); }
     const fc = [ys[hist - 1]];
-    for (let i = 1; i < fut; i++) fc.push(fc[i - 1] + 0.55 + (rand() - 0.5) * 0.8);
-    const all = ys.concat(fc);
-    const min = Math.min(...all) - 14, max = Math.max(...all) + 14;
-    const H = toPath(ys.map((y, i) => [sx(i, n), sy(y, min, max)]));
-    const F = toPath(fc.map((y, i) => [sx(hist - 1 + i, n), sy(y, min, max)]));
-    const up = fc.map((y, i) => [sx(hist - 1 + i, n), sy(y + Math.sqrt(i) * 3.2, min, max)]);
-    const lo = fc.map((y, i) => [sx(hist - 1 + i, n), sy(y - Math.sqrt(i) * 3.2, min, max)]).reverse();
-    const xT = sx(hist - 1, n);
-    return frame('LSTM forecast · CI band', 'illustrative', hue, `
-      <path d="${toPath(up.concat(lo))}Z" fill="${hue}" opacity=".16" class="fade" />
-      <line x1="${xT}" x2="${xT}" y1="${PAD.t - 6}" y2="${VH - PAD.b}" stroke="#ece8e1" stroke-opacity=".25" stroke-dasharray="2 4" />
-      <text x="${xT + 6}" y="${PAD.t + 4}" class="viz-t">today</text>
-      <path d="${H}" fill="none" stroke="#ece8e1" stroke-width="1.6" pathLength="1" class="draw" />
-      <path d="${F}" fill="none" stroke="${hue}" stroke-width="2" stroke-dasharray="4 4" class="fade" />`);
+    for (let i = 1; i < fut; i++) fc.push(fc[i - 1] + 0.6 + (rand() - 0.5));
+    const all = ys.concat(fc), lo = Math.min(...all) - 14, hi = Math.max(...all) + 14;
+    const X = i => 14 + i * (292 / (hist + fut - 1)), Y = y => 128 - (y - lo) / (hi - lo) * 98;
+    const up = fc.map((y, i) => [X(hist - 1 + i), Y(y + Math.sqrt(i) * 3.4)]);
+    const dn = fc.map((y, i) => [X(hist - 1 + i), Y(y - Math.sqrt(i) * 3.4)]).reverse();
+    let b = `${txt(10, 28, 'LSTM · FORECAST')}${txt(310, 28, 'CI BAND', '#c9a6ff', 6, 0.8, 'end')}`;
+    b += `<polygon points="${pts(up.concat(dn))}" fill="#c9a6ff" opacity=".2"/>`;
+    b += `<rect x="${X(hist - 1)}" y="30" width="1" height="100" fill="#ffffff" opacity=".25"/>`;
+    b += `<polyline points="${pts(ys.map((y, i) => [X(i), Y(y)]))}" fill="none" stroke="#ffffff" stroke-width="1.6"/>`;
+    b += `<polyline points="${pts(fc.map((y, i) => [X(hist - 1 + i), Y(y)]))}" fill="none" stroke="#c9a6ff" stroke-width="2" stroke-dasharray="4 3"/>`;
+    b += `<rect x="10" y="142" width="300" height="30" fill="#211740"/>${txt(16, 154, 'TRAINING')}`;
+    for (let i = 0; i < 20; i++) b += `<rect x="${16 + i * 14.4}" y="160" width="11" height="5" fill="${i < 13 ? '#c9a6ff' : '#3a2d61'}"/>`;
+    return windowFrame('#170f2b', '#100a1f', 'market_predictor', b);
   },
 
-  sentiment(hue) {
+  sentiment() {
     const rand = seeded(31);
-    const n = 28;
-    const mid = PAD.t + (VH - PAD.t - PAD.b) / 2;
-    const bw = (VW - PAD.l - PAD.r) / n * 0.62;
-    let body = `<line x1="${PAD.l}" x2="${VW - PAD.r}" y1="${mid}" y2="${mid}" stroke="#ece8e1" stroke-opacity=".2" />`;
-    const price = [];
-    let p = 0;
-    for (let i = 0; i < n; i++) {
-      const s = Math.sin(i / 4) * 0.55 + (rand() - 0.5) * 0.9;
-      const h = Math.abs(s) * 70;
-      const x = sx(i, n);
-      body += `<rect class="pop" style="--i:${i}" x="${x - bw / 2}" y="${s > 0 ? mid - h : mid}" width="${bw}" height="${h}" rx="1.5" fill="${s > 0 ? hue : '#ff6b5b'}" opacity=".85" />`;
-      p += s * 0.8 + 0.15;
-      price.push([x, p]);
+    let b = `${txt(10, 28, 'HEADLINES')}`;
+    for (let i = 0; i < 6; i++) {
+      const y = 36 + i * 22, s = Math.sin(i * 1.7) * 0.7 + (rand() - 0.5) * 0.5;
+      b += `<rect x="10" y="${y}" width="186" height="16" fill="#26170f"/>`;
+      b += `<rect x="16" y="${y + 4}" width="${60 + rand() * 70}" height="3" fill="#ffffff" opacity=".35"/><rect x="16" y="${y + 9}" width="${40 + rand() * 50}" height="3" fill="#ffffff" opacity=".18"/>`;
+      b += `<rect x="${s > 0 ? 164 : 164 - Math.abs(s) * 24}" y="${y + 5}" width="${Math.abs(s) * 24}" height="6" fill="${s > 0 ? '#5fd068' : '#e8673f'}"/>`;
     }
-    const pm = Math.min(...price.map(q => q[1])) - 1, px = Math.max(...price.map(q => q[1])) + 1;
-    body += `<path d="${toPath(price.map(q => [q[0], sy(q[1], pm, px)]))}" fill="none" stroke="#ece8e1" stroke-width="1.6" pathLength="1" class="draw" />`;
-    return frame('VADER compound vs price', 'illustrative', hue, body);
+    b += `<rect x="206" y="22" width="104" height="150" fill="#26170f"/>${txt(258, 36, 'MOOD', '#ffffff', 6, 0.6, 'middle')}`;
+    const cols = ['#e8673f', '#e8673f', '#f08a4b', '#f0a84b', '#e8c547', '#c9d44f', '#9bd45a', '#5fd068', '#5fd068'];
+    cols.forEach((c, i) => {
+      const a = Math.PI * (1 - i / (cols.length - 1));
+      b += `<rect x="${258 + Math.cos(a) * 36 - 4}" y="${96 - Math.sin(a) * 36 - 4}" width="8" height="8" fill="${c}"/>`;
+    });
+    b += `<line x1="258" y1="96" x2="${258 + Math.cos(0.7) * 26}" y2="${96 - Math.sin(0.7) * 26}" stroke="#ffffff" stroke-width="2" shape-rendering="auto"/><rect x="255" y="93" width="6" height="6" fill="#ffffff"/>`;
+    b += `${txt(222, 116, 'FEAR', '#e8673f', 6, 0.9)}${txt(296, 116, 'GREED', '#5fd068', 6, 0.9, 'end')}`;
+    const price = Array.from({ length: 16 }, (_, i) => [214 + i * 5.8, 156 - Math.sin(i / 3) * 8 - i * 0.6]);
+    b += `<polyline points="${pts(price)}" fill="none" stroke="#ffffff" stroke-width="1.2" opacity=".7"/>`;
+    return windowFrame('#1d120c', '#140c07', 'sentiment_analyzer', b);
   },
 
-  frontier(hue) {
+  frontier() {
     const rand = seeded(5);
-    const xMin = 0.08, xMax = 0.34, yMin = 0.02, yMax = 0.26;
-    const X = x => PAD.l + (x - xMin) / (xMax - xMin) * (VW - PAD.l - PAD.r);
-    const Y = y => sy(y, yMin, yMax);
+    const X = x => 20 + (x - 0.08) / 0.26 * 280, Y = y => 128 - (y - 0.02) / 0.24 * 100;
     const front = x => 0.03 + 0.42 * Math.sqrt(Math.max(x - 0.09, 0)) - 0.15 * (x - 0.09);
-    let dots = '';
-    for (let i = 0; i < 240; i++) {
-      const x = 0.1 + rand() * 0.23;
-      const y = front(x) - Math.pow(rand(), 0.6) * 0.12;
-      const sharpe = (y - 0.02) / x;
-      dots += `<circle class="pop" style="--i:${i % 40}" cx="${X(x).toFixed(1)}" cy="${Y(y).toFixed(1)}" r="1.8" fill="${hue}" opacity="${clamp(sharpe / 1.4, 0.12, 0.9).toFixed(2)}" />`;
+    let b = `${txt(10, 28, 'EFFICIENT FRONTIER')}${txt(310, 28, 'MONTE CARLO', '#5bffc8', 6, 0.8, 'end')}`;
+    for (let i = 0; i < 220; i++) {
+      const x = 0.1 + rand() * 0.23, y = front(x) - Math.pow(rand(), 0.6) * 0.12;
+      b += `<rect x="${X(x).toFixed(0)}" y="${Y(y).toFixed(0)}" width="2" height="2" fill="#5bffc8" opacity="${clamp((y - 0.02) / x / 1.4, 0.15, 0.95).toFixed(2)}"/>`;
     }
     const curve = [];
-    for (let x = 0.095; x <= 0.33; x += 0.005) curve.push([X(x), Y(front(x))]);
-    // Max-Sharpe tangency point (rf = 2%)
-    let best = { s: 0, x: 0, y: 0 };
-    for (let x = 0.1; x <= 0.33; x += 0.002) { const s = (front(x) - 0.02) / x; if (s > best.s) best = { s, x, y: front(x) }; }
-    const cmlEnd = 0.33;
-    return frame('Efficient frontier · Monte Carlo', 'illustrative', hue, `${dots}
-      <line x1="${X(xMin)}" y1="${Y(0.02 + best.s * xMin)}" x2="${X(cmlEnd)}" y2="${Y(0.02 + best.s * cmlEnd)}" stroke="#ece8e1" stroke-opacity=".35" stroke-dasharray="3 4" />
-      <path d="${toPath(curve)}" fill="none" stroke="#ece8e1" stroke-width="1.8" pathLength="1" class="draw" />
-      <g class="fade"><circle cx="${X(best.x)}" cy="${Y(best.y)}" r="9" fill="${hue}" opacity=".25" /><circle cx="${X(best.x)}" cy="${Y(best.y)}" r="4" fill="${hue}" /></g>`);
+    for (let x = 0.095; x <= 0.33; x += 0.006) curve.push([X(x), Y(front(x))]);
+    b += `<polyline points="${pts(curve)}" fill="none" stroke="#ffffff" stroke-width="1.6"/>`;
+    let best = { s: 0, x: 0 };
+    for (let x = 0.1; x <= 0.33; x += 0.002) { const s = (front(x) - 0.02) / x; if (s > best.s) best = { s, x }; }
+    b += `<rect x="${X(best.x) - 4}" y="${Y(front(best.x)) - 4}" width="8" height="8" fill="#e8c547"/>`;
+    b += `<rect x="10" y="142" width="300" height="30" fill="#0f2e2b"/>${txt(16, 154, 'ALLOCATION')}`;
+    const w = [0.3, 0.22, 0.18, 0.17, 0.13], cs = ['#5bffc8', '#7cc4ff', '#c9a6ff', '#e8c547', '#e8673f'];
+    let x0 = 16;
+    w.forEach((f, i) => { b += `<rect x="${x0}" y="160" width="${f * 288 - 2}" height="6" fill="${cs[i]}"/>`; x0 += f * 288; });
+    return windowFrame('#0b211f', '#071715', 'portfolio_optimizer', b);
   },
 };
 
-function renderViz(container, type, hue) {
-  if (VIZ[type]) container.innerHTML = VIZ[type](hue);
+function renderShot(container, type) {
+  if (!SHOTS[type]) return;
+  const tag = $('.shot-tag', container);
+  container.innerHTML = SHOTS[type]();
+  if (tag) container.append(tag);
 }
+$$('.shot[data-shot]').forEach(s => renderShot(s, s.dataset.shot));
 
-/* ── Work list: accordion, hover preview, filters ─────────── */
-const projects = $$('.proj');
-const workList = $('#work-list');
+/* ── Project window ───────────────────────────────────────── */
+const modal = $('#modal');
+let modalReturn = null;
+const cards = $$('.card');
 
-projects.forEach(p => {
-  const row = $('.proj-row', p);
-  const visual = $('.proj-visual', p);
-  row.addEventListener('click', () => {
-    const open = !p.classList.contains('open');
-    projects.forEach(o => {
-      if (o !== p && o.classList.contains('open')) {
-        o.classList.remove('open');
-        $('.proj-row', o).setAttribute('aria-expanded', 'false');
-      }
-    });
-    p.classList.toggle('open', open);
-    row.setAttribute('aria-expanded', String(open));
-    if (open) renderViz(visual, p.dataset.preview, p.dataset.hue);
-    cursorLabel.textContent = open ? 'Close' : 'Open';
-    preview.classList.toggle('on', !open && hovering === p);
-    setTimeout(() => lenis?.resize(), 850);
-  });
-});
-
-const preview = $('#preview');
-const previewInner = $('#preview-inner');
-let hovering = null;
-
-if (finePointer && !reduceMotion) {
-  const pp = { x: mouse.x, y: mouse.y, r: 0 };
-  (function loop() {
-    const nx = lerp(pp.x, mouse.x, 0.12);
-    pp.r = lerp(pp.r, clamp((mouse.x - pp.x) * 0.06, -10, 10), 0.15);
-    pp.x = nx;
-    pp.y = lerp(pp.y, mouse.y, 0.12);
-    preview.style.translate = `${pp.x}px ${pp.y}px`;
-    preview.style.rotate = `${pp.r}deg`;
-    requestAnimationFrame(loop);
-  })();
-
-  projects.forEach(p => {
-    $('.proj-row', p).addEventListener('mouseenter', () => {
-      hovering = p;
-      p.classList.add('hovered');
-      workList.classList.add('list-hovering');
-      if (p.classList.contains('open')) { preview.classList.remove('on'); return; }
-      renderViz(previewInner, p.dataset.preview, p.dataset.hue);
-      preview.classList.add('on');
-    });
-    $('.proj-row', p).addEventListener('mouseleave', () => {
-      hovering = null;
-      p.classList.remove('hovered');
-      workList.classList.remove('list-hovering');
-      preview.classList.remove('on');
-    });
-  });
+function openProject(card) {
+  const link = $('.card-link', card).href;
+  const slug = link.split('/').filter(Boolean).pop();
+  $('#modal-file').textContent = `${slug}.py`;
+  $('#modal-title').textContent = $('.card-title', card).textContent;
+  $('#modal-tag').textContent = $('.card-tag', card).textContent;
+  $('#modal-desc').textContent = $('.card-desc', card).textContent;
+  $('#modal-stack').textContent = $('.more-stack', card).textContent;
+  const list = $('#modal-features');
+  list.replaceChildren(...$$('.card-more li', card).map(li => el('li', { text: li.textContent })));
+  $('#modal-link').href = link;
+  const shot = $('#modal-shot');
+  renderShot(shot, card.dataset.project);
+  shot.append(el('span', { class: 'shot-tag', text: 'Preview · illustrative' }));
+  modalReturn = document.activeElement;
+  modal.hidden = false;
+  html.classList.add('modal-open');
+  setInert(['.header', 'main', '.footer'], true);
+  $('.term-x', modal).focus();
 }
+function closeProject() {
+  if (modal.hidden) return;
+  modal.hidden = true;
+  html.classList.remove('modal-open');
+  setInert(['.header', 'main', '.footer'], false);
+  if (modalReturn) modalReturn.focus();
+}
+cards.forEach(card => $('.explore', card).addEventListener('click', () => openProject(card)));
+$$('[data-close]', modal).forEach(n => n.addEventListener('click', closeProject));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeProject(); });
 
-$$('.wf').forEach(btn => {
-  btn.addEventListener('click', () => {
-    $$('.wf').forEach(b => { b.classList.toggle('active', b === btn); b.setAttribute('aria-pressed', String(b === btn)); });
-    const f = btn.dataset.f;
-    projects.forEach((p, i) => {
-      const show = f === 'all' || p.dataset.cat.split(' ').includes(f);
-      p.classList.toggle('filtered-out', !show);
-      if (show && !reduceMotion) {
-        p.animate([{ opacity: 0, transform: 'translateY(24px)' }, { opacity: 1, transform: 'none' }],
-          { duration: 700, delay: i * 50, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'backwards' });
-      }
-    });
-    setTimeout(() => lenis?.resize(), 100);
-  });
-});
-
-/* ── Watchlist sparklines ─────────────────────────────────── */
-$$('[data-spark]').forEach(svg => {
-  const rand = seeded(+svg.dataset.spark * 97);
-  let v = 12;
-  const pts = [];
-  for (let i = 0; i < 24; i++) { v = clamp(v + (rand() - 0.5) * 5, 2, 22); pts.push([i * (80 / 23), v]); }
-  svg.innerHTML = `<path d="${toPath(pts)}" stroke="var(--fg-3)" />`;
-});
-
-/* ── Record tabs ──────────────────────────────────────────── */
-function indexRecords(list) { $$('li', list).forEach((li, i) => li.style.setProperty('--i', i)); }
-$$('.rec-list').forEach(indexRecords);
+/* ── Quest log tabs ───────────────────────────────────────── */
 $$('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     $$('.tab').forEach(t => { t.classList.toggle('active', t === tab); t.setAttribute('aria-pressed', String(t === tab)); });
-    $$('.rec-list').forEach(l => l.classList.toggle('active', l.dataset.panel === tab.dataset.tab));
-    setTimeout(() => lenis?.resize(), 50);
+    $$('.log-list').forEach(l => { l.hidden = l.dataset.panel !== tab.dataset.tab; });
   });
-});
-
-/* ── Résumé modal ─────────────────────────────────────────── */
-const modal = $('#resume-modal');
-function openModal() {
-  const frameEl = $('iframe', modal);
-  if (!frameEl.src) frameEl.src = frameEl.dataset.src;
-  modal.hidden = false;
-  html.classList.add('modal-open');
-  setInert(['#header', '#menu', 'main', '.footer'], true);
-  lenis?.stop();
-  $('[data-close]:not(.modal-backdrop)', modal).focus();
-}
-function closeModal() {
-  modal.hidden = true;
-  html.classList.remove('modal-open');
-  setInert(['#header', '#menu', 'main', '.footer'], false);
-  if (!html.classList.contains('menu-open')) lenis?.start();
-  $('#resume-open').focus();
-}
-$('#resume-open')?.addEventListener('click', openModal);
-$$('[data-close]', modal).forEach(el => el.addEventListener('click', closeModal));
-document.addEventListener('keydown', e => {
-  if (e.key !== 'Escape') return;
-  if (!modal.hidden) closeModal();
-  if (html.classList.contains('menu-open')) closeMenu();
 });
 
 /* ── GitHub activity ──────────────────────────────────────── */
@@ -654,8 +408,7 @@ function describeEvent(e) {
     case 'PushEvent': {
       const commit = p.commits?.slice(-1)[0];
       if (commit) return commit.message.split('\n')[0];
-      const branch = (p.ref || '').replace('refs/heads/', '');
-      return `pushed to ${branch || 'main'}`;
+      return `pushed to ${(p.ref || '').replace('refs/heads/', '') || 'main'}`;
     }
     // Branch/tag creation is noise in a feed; only new repositories are worth showing.
     case 'CreateEvent': return p.ref_type === 'repository' ? 'created repository' : null;
@@ -675,8 +428,8 @@ function describeEvent(e) {
   }
 }
 
-// Shown immediately, and kept if the GitHub API is rate-limited or unreachable.
-const STATIC_COMMITS = [
+// Shown immediately, and kept if the GitHub API is rate-limited or unreachable (snapshot of 2026-06-09).
+let commits = [
   { repo: 'Atharv-Sharma06.github.io', msg: 'Add DAR Youth Leadership Award to Achievements', date: '2026-06-09' },
   { repo: 'Atharv-Sharma06.github.io', msg: 'Fix GitHub activity: correct username & null commits', date: '2026-06-09' },
   { repo: 'ai-investment-assistant', msg: 'Add portfolio analysis features', date: '2026-05-24' },
@@ -685,29 +438,23 @@ const STATIC_COMMITS = [
   { repo: 'ECONOMIC-data-reader', msg: 'Add macroeconomic data reader', date: '2026-04-15' },
 ].map(c => ({ ...c, ago: timeAgo(new Date(`${c.date}T12:00:00`)) }));
 
-function renderCommits(list, rows) {
-  list.innerHTML = rows.map((r, i) => `<li style="--i:${i}">
-      <span class="t-time">${escapeHTML(r.ago)}</span>
-      <span class="t-repo">${escapeHTML(r.repo)}</span>
-      <span class="t-msg">${escapeHTML(r.msg.slice(0, 80))}</span>
-    </li>`).join('');
+function renderCommits() {
+  $('#commit-list').replaceChildren(...commits.slice(0, 7).map(c => el('li', {}, [
+    el('span', { class: 'c-time', text: c.ago }),
+    el('span', { class: 'c-repo', text: c.repo }),
+    el('span', { class: 'c-msg', text: c.msg.slice(0, 80) }),
+  ])));
 }
+renderCommits();
 
 (async function loadGitHubActivity() {
-  const list = $('#commit-list');
-  const reposEl = $('#gh-repos');
-  renderCommits(list, STATIC_COMMITS);
   try {
     const [eventsRes, userRes] = await Promise.all([
-      fetch('https://api.github.com/users/Atharv-Sharma06/events/public?per_page=40'),
-      fetch('https://api.github.com/users/Atharv-Sharma06'),
+      fetch(`https://api.github.com/users/${GH_USER}/events/public?per_page=40`),
+      fetch(`https://api.github.com/users/${GH_USER}`),
     ]);
     const user = userRes.ok ? await userRes.json() : {};
-    if (reposEl && Number.isFinite(user.public_repos)) {
-      reposEl.dataset.count = user.public_repos;
-      if (reposEl.dataset.seen) countUp(reposEl, user.public_repos);
-    }
-
+    if (Number.isFinite(user.public_repos)) $('#gh-repos').textContent = user.public_repos;
     if (!eventsRes.ok) return;
     const events = await eventsRes.json();
     const rows = (Array.isArray(events) ? events : [])
@@ -715,150 +462,228 @@ function renderCommits(list, rows) {
       .filter(r => r.msg)
       .slice(0, 9)
       .map(({ e, msg }) => ({
-        repo: e.repo.name.startsWith('Atharv-Sharma06/') ? e.repo.name.split('/')[1] : e.repo.name,
+        repo: e.repo.name.startsWith(`${GH_USER}/`) ? e.repo.name.split('/')[1] : e.repo.name,
         msg,
         ago: timeAgo(new Date(e.created_at)),
       }));
-    if (rows.length) renderCommits(list, rows);
+    if (rows.length) { commits = rows; renderCommits(); }
   } catch (_) { /* static data already shown */ }
 })();
 
-/* ── Copy email ───────────────────────────────────────────── */
-const EMAIL = 'atharv.eck@gmail.com';
-const copyBtn = $('#copy-email');
-copyBtn?.addEventListener('click', async () => {
-  const hint = $('#copy-hint');
-  try {
-    await navigator.clipboard.writeText(EMAIL);
-    copyBtn.classList.add('copied');
-    hint.textContent = 'Copied to clipboard ✓';
-  } catch (_) {
-    window.location.href = `mailto:${EMAIL}`;
-    return;
-  }
-  setTimeout(() => { copyBtn.classList.remove('copied'); hint.textContent = 'Click to copy'; }, 2200);
-});
-
-/* ── Conversational contact flow ──────────────────────────── */
-(function contactFlow() {
-  const form = $('#flow');
-  if (!form) return;
-  const steps = $$('.step', form);
-  const total = 4;
-  const nextBtn = $('#flow-next');
-  const backBtn = $('#flow-back');
-  const bar = $('#flow-bar');
-  const count = $('#flow-step');
-  const topicInput = $('#topic-input');
-  let current = 1;
+/* ── Terminal ─────────────────────────────────────────────── */
+(function terminal() {
+  const out = $('#term-out');
+  const form = $('#term-form');
+  const input = $('#term-input');
+  const prompt = $('#term-prompt');
+  const PROMPT_HTML = prompt.innerHTML;
+  const history = [];
+  let hIndex = 0;
+  let note = null;     // active "write a note" flow, or null
   let sending = false;
 
-  const value = name => (form.elements[name]?.value || '').trim();
-
-  function setStep(n) {
-    const prev = steps[current - 1];
-    const next = steps[n - 1];
-    prev.classList.remove('active');
-    prev.classList.toggle('leave-up', n > current);
-    next.classList.remove('leave-up');
-    next.classList.add('active');
-    current = n;
-
-    const shown = Math.min(n, total);
-    count.textContent = String(shown).padStart(2, '0');
-    bar.style.width = (n > total ? 100 : (shown / total) * 100) + '%';
-    backBtn.disabled = sending || n === 1 || n > total;
-    nextBtn.disabled = sending || n > total;
-    $('span', nextBtn).textContent = n === total ? 'Send message' : 'Next';
-    form.classList.toggle('complete', n > total);
-
-    const name = value('name') || 'friend';
-    $$('.js-name', form).forEach(el => { el.textContent = name.split(' ')[0]; });
-
-    const field = n > total ? $('#flow-reset') : $('.step-input, .chip', next);
-    if (field) setTimeout(() => field.focus({ preventScroll: true }), 350);
-  }
-
-  function fail(msg) {
-    const step = steps[current - 1];
-    $('.step-err', step).textContent = msg;
-    step.classList.remove('shake');
-    void step.offsetWidth;
-    step.classList.add('shake');
-  }
-
-  function validate() {
-    $('.step-err', steps[current - 1]).textContent = '';
-    if (current === 1 && value('name').length < 2) return fail('I’ll need at least a first name.');
-    if (current === 2 && !topicInput.value) return fail('Pick whichever fits best.');
-    if (current === 3 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value('email'))) return fail('That email doesn’t look quite right.');
-    if (current === 4 && value('message').length < 10) return fail('A sentence or two helps me reply properly.');
-    return true;
-  }
-
-  $$('.chip', form).forEach(chip => {
-    chip.addEventListener('click', () => {
-      $$('.chip', form).forEach(c => c.classList.toggle('sel', c === chip));
-      topicInput.value = chip.dataset.v;
-      $('.step-err', steps[1]).textContent = '';
-      setTimeout(() => { if (current === 2) setStep(3); }, 380);
+  function print(parts, cls = '') {
+    const p = el('p', { class: cls });
+    [].concat(parts).forEach(part => {
+      if (typeof part === 'string') p.append(part);
+      else if (part.href) p.append(el('a', { href: part.href, ...(part.ext ? { target: '_blank', rel: 'noopener' } : {}) }, [part.text]));
+      else if (part.cls) p.append(el('span', { class: part.cls, text: part.text }));
     });
-  });
+    out.append(p);
+    out.scrollTop = out.scrollHeight;
+    return p;
+  }
+  const echo = cmd => print(`${note ? 'note' : 'guest~'} $ ${cmd}`, 't-cmd');
 
-  $('#f-msg').addEventListener('keydown', e => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); if (!e.repeat) form.requestSubmit(); }
-  });
+  const PROJECTS = cards.map(c => ({ card: c, name: $('.card-title', c).textContent, link: $('.card-link', c).href }));
 
-  backBtn.addEventListener('click', () => { if (!sending && current > 1) setStep(current - 1); });
+  const COMMANDS = {
+    help: { desc: 'list commands', run() {
+      Object.entries(COMMANDS).filter(([, c]) => c.desc).forEach(([k, c]) => print(`${k.padEnd(9, ' ')} --> ${c.desc}`));
+      print('tip: tab completes, up/down browses history.', 't-dim');
+    } },
+    about: { desc: 'a little about me', run() {
+      print('Atharv Sharma. Quant developer. Fort Mill, SC.');
+      print('I build Python tools that turn market data into decisions — backtests, optimizers, forecasts. Open to internships & research.');
+    } },
+    hello: { desc: 'say hello', run() {
+      print('Hey, player 2. Welcome to my corner of the internet. Try "projects", or "note" to send me a message.');
+    } },
+    projects: { desc: 'see what i have built', run() {
+      PROJECTS.forEach((p, i) => print([`${i + 1}. ${p.name}  `, { href: p.link, text: 'code', ext: true }]));
+      print('type "open 1" (or any number) to explore one.', 't-dim');
+    } },
+    open: { run(arg) {
+      const p = PROJECTS[parseInt(arg, 10) - 1];
+      if (!p) { print('usage: open <1-' + PROJECTS.length + '>', 't-err'); return; }
+      print(`opening ${p.name}…`, 't-ok');
+      openProject(p.card);
+    } },
+    skills: { desc: 'my skill tree', run() {
+      print('technical: python, pandas, numpy, sql, scikit-learn, tensorflow, streamlit, plotly, javascript, git');
+      print('quant: backtesting, portfolio theory, monte carlo, volatility, sharpe ratio, options basics, fred api, yfinance');
+    } },
+    awards: { desc: 'achievements unlocked', run() {
+      $$('.log-list[data-panel="achievements"] b').forEach(b => print(`★ ${b.textContent}`));
+    } },
+    log: { desc: 'recent github activity', run() {
+      commits.slice(0, 6).forEach(c => print([{ cls: 't-dim', text: `${c.ago.padEnd(8, ' ')} ` }, { cls: 't-ok', text: c.repo }, ` ${c.msg}`]));
+    } },
+    note: { desc: 'write me a note', run() { startNote(); } },
+    copy: { desc: 'copy my email', async run() {
+      try { await navigator.clipboard.writeText(EMAIL); print(`copied ${EMAIL} to your clipboard.`, 't-ok'); }
+      catch (_) { print(['clipboard blocked — here it is: ', { href: `mailto:${EMAIL}`, text: EMAIL }]); }
+    } },
+    follow: { desc: 'find me elsewhere', run() {
+      print(['github   ', { href: `https://github.com/${GH_USER}`, text: `github.com/${GH_USER}`, ext: true }]);
+      print(['email    ', { href: `mailto:${EMAIL}`, text: EMAIL }]);
+      print(['resume   ', { href: 'resume.pdf', text: 'resume.pdf', ext: true }]);
+    } },
+    resume: { desc: 'open my resume', run() {
+      print(['opening ', { href: 'resume.pdf', text: 'resume.pdf', ext: true }, '…'], 't-ok');
+      window.open('resume.pdf', '_blank', 'noopener');
+    } },
+    clear: { desc: 'a fresh terminal', run() { out.replaceChildren(); } },
+    replay: { desc: 'play the intro again', run() { $('#replay').click(); } },
+    whoami: { run() { print('guest. (recruiters, you are very welcome — try "note".)'); } },
+    date: { run() { print(new Date().toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'full', timeStyle: 'short' }) + ' ET'); } },
+    sudo: { run(arg) {
+      if (/hire/i.test(arg)) { print('access granted. opening a note…', 't-ok'); startNote('Internship / hiring'); }
+      else print('permission denied. nice try though.', 't-err');
+    } },
+    exit: { run() { print('there is no escape. (kidding — just scroll up.)'); } },
+  };
+  const ALIASES = { hi: 'hello', ls: 'projects', email: 'note', contact: 'note', github: 'follow', socials: 'follow', cv: 'resume', cls: 'clear', achievements: 'awards', activity: 'log', 'git': 'log' };
 
-  form.addEventListener('submit', async e => {
-    e.preventDefault();
-    if (sending || current > total) return;
-    if (!validate()) return;
-    if (current < total) { setStep(current + 1); return; }
+  function run(raw) {
+    const line = raw.trim();
+    if (!line) return;
+    if (note) { noteAnswer(line); return; }
+    echo(line);
+    history.push(line); hIndex = history.length;
+    const [word, ...rest] = line.split(/\s+/);
+    const key = ALIASES[word.toLowerCase()] || word.toLowerCase();
+    const cmd = COMMANDS[key];
+    if (cmd) cmd.run(rest.join(' '));
+    else print(`command not found: ${word}. type "help".`, 't-err');
+  }
 
+  /* write-a-note flow */
+  const TOPICS = ['Internship', 'Research role', 'Project collaboration', 'Just saying hi'];
+  const NOTE_STEPS = [
+    { key: 'name', q: "what's your name?", ph: 'your name', check: v => v.length >= 2 || 'i need at least a first name.' },
+    { key: 'email', q: 'where can i reach you?', ph: 'you@company.com', type: 'email', check: v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) || "that email doesn't look right." },
+    { key: 'topic', q: `what's this about? ${TOPICS.map((t, i) => `${i + 1} ${t.toLowerCase()}`).join(' · ')}`, ph: 'pick a number or type your own', map: v => TOPICS[parseInt(v, 10) - 1] || v },
+    { key: 'message', q: 'your message — a sentence or two is perfect:', ph: 'type your message', check: v => v.length >= 10 || 'a little more detail helps me reply properly.' },
+    { key: 'confirm', q: 'send it? (y/n)', ph: 'y or n' },
+  ];
+
+  function setPrompt(label) {
+    if (label) prompt.replaceChildren(el('span', { class: 'green', text: label }));
+    else prompt.innerHTML = PROMPT_HTML;
+  }
+  function askNote() {
+    const step = NOTE_STEPS[note.i];
+    print(step.q, 't-ok');
+    setPrompt(`note ${note.i + 1}/${NOTE_STEPS.length} >`);
+    input.placeholder = step.ph;
+    input.type = step.type || 'text';
+    input.focus({ preventScroll: true });
+  }
+  function startNote(topic) {
+    note = { i: 0, data: {} };
+    if (topic) note.preset = topic;
+    print('writing a note. type "cancel" any time to stop.', 't-dim');
+    askNote();
+  }
+  function endNote() {
+    note = null;
+    setPrompt();
+    input.placeholder = 'Type a command';
+    input.type = 'text';
+  }
+  function noteAnswer(v) {
+    print(`note $ ${v}`, 't-cmd');
+    if (/^cancel$/i.test(v)) { print('note cancelled.', 't-dim'); endNote(); return; }
+    const step = NOTE_STEPS[note.i];
+    if (step.key === 'confirm') {
+      if (/^y(es)?$/i.test(v)) { sendNote(); return; }
+      if (/^n(o)?$/i.test(v)) { print('not sent. type "note" to start over.', 't-dim'); endNote(); return; }
+      print('type y or n.', 't-err'); return;
+    }
+    const ok = step.check ? step.check(v) : true;
+    if (ok !== true) { print(ok, 't-err'); return; }
+    note.data[step.key] = step.map ? step.map(v) : v;
+    note.i++;
+    if (note.i === 2 && note.preset) { note.data.topic = note.preset; note.i++; }
+    if (NOTE_STEPS[note.i].key === 'confirm') {
+      const d = note.data;
+      print(`to: ${EMAIL}`, 't-dim');
+      print(`from: ${d.name} <${d.email}>`, 't-dim');
+      print(`re: ${d.topic}`, 't-dim');
+      print(`"${d.message}"`, 't-dim');
+    }
+    askNote();
+  }
+
+  async function sendNote() {
+    if (sending) return;
     sending = true;
-    nextBtn.disabled = true;
-    backBtn.disabled = true;
-    $('span', nextBtn).textContent = 'Sending…';
-    const data = new FormData(form);
-    const subject = `[Portfolio] ${topicInput.value} — ${value('name')}`;
-    const mailto = `mailto:${EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(`${value('message')}\n\n— ${value('name')} (${value('email')})`)}`;
-
+    const d = note.data;
+    print('sending…', 't-dim');
+    const body = new URLSearchParams({ 'form-name': 'contact', ...d }).toString();
     let delivered = false;
     try {
-      // Works when the site is served by Netlify (form is registered via data-netlify).
-      const res = await fetch('/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams(data).toString(),
-      });
+      // Works when the site is served by Netlify (the hidden form registers the fields).
+      const res = await fetch('/', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
       delivered = res.ok;
     } catch (_) { delivered = false; }
-
-    $$('.js-email', form).forEach(el => { el.textContent = value('email'); });
-    const sub = $('#done-sub');
-    const q = $('.step-done .step-q', form);
     if (delivered) {
-      q.innerHTML = `Thanks, <span class="js-name">${escapeHTML(value('name').split(' ')[0])}</span> — message received.`;
-      sub.innerHTML = `I'll reply to <strong>${escapeHTML(value('email'))}</strong> soon.`;
+      print(`sent. thanks ${d.name.split(' ')[0]} — i'll reply to ${d.email} soon.`, 't-ok');
     } else {
       // Static hosting (GitHub Pages): hand off to the visitor's mail app, pre-filled.
-      q.innerHTML = `Almost there, <span class="js-name">${escapeHTML(value('name').split(' ')[0])}</span>.`;
-      sub.innerHTML = `Your email app should open with everything filled in — just hit send. If it didn't, <a href="${mailto}">open it here</a> or write to ${EMAIL}.`;
+      const mailto = `mailto:${EMAIL}?subject=${encodeURIComponent(`[Portfolio] ${d.topic} — ${d.name}`)}&body=${encodeURIComponent(`${d.message}\n\n— ${d.name} (${d.email})`)}`;
+      print('opening your mail app with everything filled in — just hit send.', 't-ok');
+      print(['nothing opened? ', { href: mailto, text: 'click here' }, ` or write to ${EMAIL}.`]);
       window.location.href = mailto;
     }
     sending = false;
-    setStep(total + 1);
+    endNote();
+  }
+
+  /* input handling */
+  form.addEventListener('submit', e => {
+    e.preventDefault();
+    if (sending) return;
+    const v = input.value;
+    input.value = '';
+    run(v);
   });
 
-  $('#flow-reset').addEventListener('click', () => {
-    form.reset();
-    topicInput.value = '';
-    $$('.chip', form).forEach(c => c.classList.remove('sel'));
-    steps.forEach(s => s.classList.remove('active', 'leave-up'));
-    steps[0].classList.add('active');
-    current = 1;
-    setStep(1);
+  input.addEventListener('keydown', e => {
+    if (note) return;
+    if (e.key === 'ArrowUp' && history.length) {
+      e.preventDefault(); hIndex = Math.max(0, hIndex - 1); input.value = history[hIndex];
+    } else if (e.key === 'ArrowDown' && history.length) {
+      e.preventDefault(); hIndex = Math.min(history.length, hIndex + 1); input.value = history[hIndex] || '';
+    } else if (e.key === 'Tab' && input.value.trim()) {
+      const pre = input.value.trim().toLowerCase();
+      const names = Object.keys(COMMANDS).filter(k => k.startsWith(pre));
+      if (names.length === 1) { e.preventDefault(); input.value = names[0] + ' '; }
+      else if (names.length > 1) { e.preventDefault(); print(names.join('   '), 't-dim'); }
+    }
   });
+
+  $$('[data-cmd]').forEach(b => b.addEventListener('click', () => {
+    if (note && b.dataset.cmd !== 'note') endNote();
+    if (b.dataset.cmd === 'note' && note) { input.focus({ preventScroll: true }); return; }
+    run(b.dataset.cmd);
+    input.focus({ preventScroll: true });
+  }));
+  $('#term-clear').addEventListener('click', () => { out.replaceChildren(); input.focus({ preventScroll: true }); });
+  out.addEventListener('click', e => { if (!e.target.closest('a') && !window.getSelection().toString()) input.focus({ preventScroll: true }); });
+
+  // boot screen
+  print('guest~ $ about', 't-cmd'); COMMANDS.about.run();
+  print('guest~ $ hello', 't-cmd'); COMMANDS.hello.run();
 })();
