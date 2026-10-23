@@ -219,7 +219,7 @@ function runLoader() {
       html.classList.add('is-ready');
       drawHeroLine();
       observeReveals();
-      if (lenis) lenis.start();
+      if (lenis && !html.classList.contains('menu-open') && !html.classList.contains('modal-open')) lenis.start();
     }, reduceMotion ? 0 : 350);
     setTimeout(() => loader.remove(), 1400);
   };
@@ -299,7 +299,9 @@ menuBtn?.addEventListener('click', () => {
   setInert(['main', '.footer'], true);
   if (lenis) lenis.stop();
 });
-matchMedia('(max-width: 860px)').addEventListener('change', e => { if (!e.matches) closeMenu(); });
+const mobileMQ = matchMedia('(max-width: 860px)');
+const onMQ = e => { if (!e.matches) closeMenu(); };
+if (mobileMQ.addEventListener) mobileMQ.addEventListener('change', onMQ); else mobileMQ.addListener(onMQ);
 
 /* ── Marquee (speeds up / reverses with scroll) ───────────── */
 (function marquee() {
@@ -765,8 +767,8 @@ copyBtn?.addEventListener('click', async () => {
     const shown = Math.min(n, total);
     count.textContent = String(shown).padStart(2, '0');
     bar.style.width = (n > total ? 100 : (shown / total) * 100) + '%';
-    backBtn.disabled = n === 1 || n > total;
-    nextBtn.disabled = n > total;
+    backBtn.disabled = sending || n === 1 || n > total;
+    nextBtn.disabled = sending || n > total;
     $('span', nextBtn).textContent = n === total ? 'Send message' : 'Next';
     form.classList.toggle('complete', n > total);
 
@@ -807,7 +809,7 @@ copyBtn?.addEventListener('click', async () => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); if (!e.repeat) form.requestSubmit(); }
   });
 
-  backBtn.addEventListener('click', () => { if (current > 1) setStep(current - 1); });
+  backBtn.addEventListener('click', () => { if (!sending && current > 1) setStep(current - 1); });
 
   form.addEventListener('submit', async e => {
     e.preventDefault();
@@ -817,6 +819,7 @@ copyBtn?.addEventListener('click', async () => {
 
     sending = true;
     nextBtn.disabled = true;
+    backBtn.disabled = true;
     $('span', nextBtn).textContent = 'Sending…';
     const data = new FormData(form);
     const subject = `[Portfolio] ${topicInput.value} — ${value('name')}`;
