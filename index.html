@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
-  <script src="https://cdn.jsdelivr.net/npm/lenis@1.1.13/dist/lenis.min.js" defer></script>
+  <noscript><style>.loader { display: none; } html.is-loading, html.is-loading body { overflow: visible; } .reveal-up, .line-inner { opacity: 1; transform: none; }</style></noscript>
 </head>
 <body>
 
@@ -44,6 +44,7 @@
       <a href="#activity" class="nav-a"><span data-text="Now">Now</span></a>
       <a href="#record" class="nav-a"><span data-text="Record">Record</span></a>
       <a href="#contact" class="nav-a"><span data-text="Contact">Contact</span></a>
+      <a href="resume.pdf" class="nav-a" target="_blank" rel="noopener"><span data-text="Résumé ↗">Résumé ↗</span></a>
     </nav>
     <div class="header-right">
       <span class="clock"><span class="pulse"></span><span id="clock">--:--</span> ET</span>
@@ -65,6 +66,7 @@
     <div class="menu-foot">
       <a href="mailto:atharv.eck@gmail.com">atharv.eck@gmail.com</a>
       <a href="https://github.com/Kingbob609420" target="_blank" rel="noopener">GitHub ↗</a>
+      <a href="resume.pdf" target="_blank" rel="noopener">Résumé ↗</a>
     </div>
   </div>
 
@@ -88,7 +90,7 @@
 
       <div class="hero-meta wrap">
         <p class="reveal-up"><span class="pulse"></span> Open to internships &amp; research</p>
-        <p class="reveal-up">Fort Mill, SC — 34.99° N, 80.94° W</p>
+        <p class="reveal-up">Fort Mill, SC</p>
       </div>
 
       <h1 class="hero-title wrap" aria-label="Atharv Sharma">
@@ -158,7 +160,7 @@
           <div class="stat reveal-up"><span class="stat-n" data-count="5">0</span><span class="stat-l">Featured projects</span></div>
           <div class="stat reveal-up"><span class="stat-n" data-count="20" data-suffix="+">0</span><span class="stat-l">Technical indicators engineered</span></div>
           <div class="stat reveal-up"><span class="stat-n" data-count="10000" data-suffix="+">0</span><span class="stat-l">Monte Carlo paths simulated</span></div>
-          <div class="stat reveal-up"><span class="stat-n" id="gh-repos" data-count="17">0</span><span class="stat-l">Public repos on GitHub</span></div>
+          <div class="stat reveal-up"><span class="stat-n" id="gh-repos" data-count="17">0</span><span class="stat-l">Public repos · @Atharv-Sharma06</span></div>
         </div>
       </div>
     </section>
@@ -172,11 +174,11 @@
         </div>
         <h2 class="big-h split">Tools for reading <em>markets</em></h2>
 
-        <div class="work-filters reveal-up" role="tablist" aria-label="Filter projects">
-          <button class="wf active" data-f="all" role="tab" aria-selected="true">All <sup>5</sup></button>
-          <button class="wf" data-f="finance" role="tab" aria-selected="false">Finance <sup>3</sup></button>
-          <button class="wf" data-f="aiml" role="tab" aria-selected="false">AI / ML <sup>2</sup></button>
-          <button class="wf" data-f="tools" role="tab" aria-selected="false">Tools <sup>1</sup></button>
+        <div class="work-filters reveal-up" role="group" aria-label="Filter projects">
+          <button class="wf active" data-f="all" aria-pressed="true">All <sup>5</sup></button>
+          <button class="wf" data-f="finance" aria-pressed="false">Finance <sup>3</sup></button>
+          <button class="wf" data-f="aiml" aria-pressed="false">AI / ML <sup>2</sup></button>
+          <button class="wf" data-f="tools" aria-pressed="false">Tools <sup>1</sup></button>
         </div>
 
         <div class="work-head" aria-hidden="true">
@@ -331,7 +333,7 @@
           <div class="term reveal-up">
             <div class="term-bar">
               <i></i><i></i><i></i>
-              <span>~/github — recent pushes</span>
+              <span>~/github — recent activity</span>
               <a href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener">@Atharv-Sharma06 ↗</a>
             </div>
             <ul class="term-log" id="commit-list">
@@ -376,10 +378,10 @@
         </div>
         <h2 class="big-h split">Honors, <em>speaking</em> &amp; study</h2>
 
-        <div class="tabs reveal-up" role="tablist" aria-label="Record">
-          <button class="tab active" data-tab="honors" role="tab" aria-selected="true">Honors &amp; leadership</button>
-          <button class="tab" data-tab="speaking" role="tab" aria-selected="false">Speaking</button>
-          <button class="tab" data-tab="learning" role="tab" aria-selected="false">Learning</button>
+        <div class="tabs reveal-up" role="group" aria-label="Record">
+          <button class="tab active" data-tab="honors" aria-pressed="true">Honors &amp; leadership</button>
+          <button class="tab" data-tab="speaking" aria-pressed="false">Speaking</button>
+          <button class="tab" data-tab="learning" aria-pressed="false">Learning</button>
         </div>
 
         <div class="tab-panels">
@@ -440,7 +442,7 @@
 
         <div class="contact-grid">
           <aside class="contact-side reveal-up">
-            <p class="contact-lede">Internship, research role, a project you want a second pair of hands on — or just a question about a model. Answer four quick prompts and I'll get back within a day or two.</p>
+            <p class="contact-lede">Internship, research role, a project you want a second pair of hands on — or just a question about a model. Answer four quick prompts and I'll get back to you.</p>
             <div class="contact-direct">
               <span class="mini-h">Or reach me directly</span>
               <button class="copy" id="copy-email" data-magnetic>
@@ -454,7 +456,7 @@
 
           <form class="flow reveal-up" id="flow" name="contact" method="POST" data-netlify="true" netlify-honeypot="bot-field" novalidate>
             <input type="hidden" name="form-name" value="contact" />
-            <p class="hp"><label>Don't fill this out: <input name="bot-field" /></label></p>
+            <p class="hp" aria-hidden="true"><label>Don't fill this out: <input name="bot-field" tabindex="-1" autocomplete="off" /></label></p>
             <input type="hidden" name="topic" id="topic-input" />
 
             <div class="flow-top">
@@ -489,7 +491,7 @@
 
               <fieldset class="step" data-step="4">
                 <legend class="step-q">Tell me a bit more.</legend>
-                <textarea class="step-input step-area" name="message" id="f-msg" rows="4" placeholder="A few lines is perfect…" required></textarea>
+                <textarea class="step-input step-area" name="message" id="f-msg" rows="4" data-lenis-prevent placeholder="A few lines is perfect…" required></textarea>
                 <p class="step-err" aria-live="polite"></p>
               </fieldset>
 

@@ -37,18 +37,29 @@ tickClock();
 setInterval(tickClock, 15000);
 
 /* ── Smooth scroll (Lenis, if it loaded) ──────────────────── */
+// Loaded async so a slow CDN can never hold the page behind the preloader.
 let lenis = null;
 function initLenis() {
-  if (reduceMotion || !window.Lenis) return;
+  if (lenis || reduceMotion || !window.Lenis) return;
   lenis = new window.Lenis({ lerp: 0.09, smoothWheel: true });
+  if (['is-loading', 'menu-open', 'modal-open'].some(c => html.classList.contains(c))) lenis.stop();
   (function raf(t) { lenis.raf(t); requestAnimationFrame(raf); })(performance.now());
 }
-initLenis();
+if (!reduceMotion) {
+  const s = document.createElement('script');
+  s.src = 'https://cdn.jsdelivr.net/npm/lenis@1.1.13/dist/lenis.min.js';
+  s.async = true;
+  s.onload = initLenis;
+  document.head.appendChild(s);
+}
 
 function scrollToTarget(target) {
   const offset = target.id === 'top' ? 0 : -20;
   if (lenis) lenis.scrollTo(target, { offset, duration: 1.4 });
   else target.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth' });
+  // Keep keyboard users where they jumped to instead of back at the link.
+  if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+  target.focus({ preventScroll: true });
 }
 
 $$('a[href^="#"]').forEach(a => {
@@ -267,11 +278,16 @@ function heroParallax(y) {
 /* ── Mobile menu ──────────────────────────────────────────── */
 const menuBtn = $('#menu-btn');
 const menu = $('#menu');
+function setInert(selectors, on) {
+  selectors.forEach(sel => { const el = $(sel); if (el) el.inert = on; });
+}
 function closeMenu() {
+  if (!html.classList.contains('menu-open')) return;
   html.classList.remove('menu-open');
   menuBtn?.setAttribute('aria-expanded', 'false');
   menu?.setAttribute('aria-hidden', 'true');
-  if (lenis && !$('#resume-modal:not([hidden])')) lenis.start();
+  setInert(['main', '.footer'], false);
+  if (lenis && !html.classList.contains('modal-open')) lenis.start();
 }
 menuBtn?.addEventListener('click', () => {
   const open = !html.classList.contains('menu-open');
@@ -280,8 +296,10 @@ menuBtn?.addEventListener('click', () => {
   header.classList.remove('hide');
   menuBtn.setAttribute('aria-expanded', 'true');
   menu.setAttribute('aria-hidden', 'false');
+  setInert(['main', '.footer'], true);
   if (lenis) lenis.stop();
 });
+matchMedia('(max-width: 860px)').addEventListener('change', e => { if (!e.matches) closeMenu(); });
 
 /* ── Marquee (speeds up / reverses with scroll) ───────────── */
 (function marquee() {
@@ -300,7 +318,7 @@ menuBtn?.addEventListener('click', () => {
     const boost = clamp(Math.abs(scrollVel) * 0.4, 0, 12);
     scrollVel *= 0.9;
     x += dir * (0.05 * dt + boost);
-    const half = track.scrollWidth / 2;
+    const half = track.children[track.children.length / 2].offsetLeft - track.children[0].offsetLeft;
     if (x <= -half) x += half;
     if (x > 0) x -= half;
     track.style.transform = `translate3d(${x}px,0,0)`;
@@ -363,7 +381,7 @@ function frame(title, value, hue, body) {
     const y = PAD.t + i * (VH - PAD.t - PAD.b) / 4;
     grid += `<line x1="${PAD.l}" x2="${VW - PAD.r}" y1="${y}" y2="${y}" stroke="rgba(236,232,225,.07)" />`;
   }
-  return `<svg class="viz" viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="xMidYMid slice" role="img" aria-label="${title} chart">
+  return `<svg class="viz" viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Illustrative ${title} chart">
     <rect width="${VW}" height="${VH}" fill="#121214" />
     <rect width="${VW}" height="${VH}" fill="${hue}" opacity=".035" />
     ${grid}
@@ -385,7 +403,7 @@ const VIZ = {
     }
     const a = toPath(cpi.map((v, i) => [sx(i, n), sy(v, 0, 15)]));
     const b = toPath(un.map((v, i) => [sx(i, n), sy(v, 0, 15)]));
-    return frame('CPI YoY vs UNRATE · 2014–24', '9.1% peak', hue, `
+    return frame('CPI vs unemployment', 'illustrative', hue, `
       <path d="${b}" fill="none" stroke="#ece8e1" stroke-opacity=".45" stroke-width="1.5" pathLength="1" class="draw" />
       <path d="${a}" fill="none" stroke="${hue}" stroke-width="2" pathLength="1" class="draw" />
       <g class="viz-legend"><circle cx="${PAD.l + 4}" cy="${VH - 10}" r="3" fill="${hue}" /><text x="${PAD.l + 12}" y="${VH - 7}">CPI</text>
@@ -418,8 +436,7 @@ const VIZ = {
       const s = data.slice(Math.max(0, i - 6), i + 1);
       return [sx(i, n), sy(s.reduce((a, d) => a + d.c, 0) / s.length, min, max)];
     });
-    const chg = ((data[n - 1].c / data[0].o - 1) * 100).toFixed(1);
-    return frame('NVDA · 1D · SMA(7)', `${chg > 0 ? '+' : ''}${chg}%`, hue, `${body}
+    return frame('Sample ticker · SMA(7)', 'illustrative', hue, `${body}
       <path d="${toPath(sma)}" fill="none" stroke="#ece8e1" stroke-width="1.4" stroke-dasharray="3 3" opacity=".7" />`);
   },
 
@@ -438,7 +455,7 @@ const VIZ = {
     const up = fc.map((y, i) => [sx(hist - 1 + i, n), sy(y + Math.sqrt(i) * 3.2, min, max)]);
     const lo = fc.map((y, i) => [sx(hist - 1 + i, n), sy(y - Math.sqrt(i) * 3.2, min, max)]).reverse();
     const xT = sx(hist - 1, n);
-    return frame('LSTM forecast · 95% CI', '↑ 0.62 conf.', hue, `
+    return frame('LSTM forecast · CI band', 'illustrative', hue, `
       <path d="${toPath(up.concat(lo))}Z" fill="${hue}" opacity=".16" class="fade" />
       <line x1="${xT}" x2="${xT}" y1="${PAD.t - 6}" y2="${VH - PAD.b}" stroke="#ece8e1" stroke-opacity=".25" stroke-dasharray="2 4" />
       <text x="${xT + 6}" y="${PAD.t + 4}" class="viz-t">today</text>
@@ -464,7 +481,7 @@ const VIZ = {
     }
     const pm = Math.min(...price.map(q => q[1])) - 1, px = Math.max(...price.map(q => q[1])) + 1;
     body += `<path d="${toPath(price.map(q => [q[0], sy(q[1], pm, px)]))}" fill="none" stroke="#ece8e1" stroke-width="1.6" pathLength="1" class="draw" />`;
-    return frame('VADER compound vs price', 'Greed · 64', hue, body);
+    return frame('VADER compound vs price', 'illustrative', hue, body);
   },
 
   frontier(hue) {
@@ -486,7 +503,7 @@ const VIZ = {
     let best = { s: 0, x: 0, y: 0 };
     for (let x = 0.1; x <= 0.33; x += 0.002) { const s = (front(x) - 0.02) / x; if (s > best.s) best = { s, x, y: front(x) }; }
     const cmlEnd = 0.33;
-    return frame('Efficient frontier · 10k sims', `Sharpe ${best.s.toFixed(2)}`, hue, `${dots}
+    return frame('Efficient frontier · Monte Carlo', 'illustrative', hue, `${dots}
       <line x1="${X(xMin)}" y1="${Y(0.02 + best.s * xMin)}" x2="${X(cmlEnd)}" y2="${Y(0.02 + best.s * cmlEnd)}" stroke="#ece8e1" stroke-opacity=".35" stroke-dasharray="3 4" />
       <path d="${toPath(curve)}" fill="none" stroke="#ece8e1" stroke-width="1.8" pathLength="1" class="draw" />
       <g class="fade"><circle cx="${X(best.x)}" cy="${Y(best.y)}" r="9" fill="${hue}" opacity=".25" /><circle cx="${X(best.x)}" cy="${Y(best.y)}" r="4" fill="${hue}" /></g>`);
@@ -557,7 +574,7 @@ if (finePointer && !reduceMotion) {
 
 $$('.wf').forEach(btn => {
   btn.addEventListener('click', () => {
-    $$('.wf').forEach(b => { b.classList.toggle('active', b === btn); b.setAttribute('aria-selected', String(b === btn)); });
+    $$('.wf').forEach(b => { b.classList.toggle('active', b === btn); b.setAttribute('aria-pressed', String(b === btn)); });
     const f = btn.dataset.f;
     projects.forEach((p, i) => {
       const show = f === 'all' || p.dataset.cat.split(' ').includes(f);
@@ -577,8 +594,7 @@ $$('[data-spark]').forEach(svg => {
   let v = 12;
   const pts = [];
   for (let i = 0; i < 24; i++) { v = clamp(v + (rand() - 0.5) * 5, 2, 22); pts.push([i * (80 / 23), v]); }
-  const up = pts[23][1] < pts[0][1];
-  svg.innerHTML = `<path d="${toPath(pts)}" stroke="${up ? 'var(--accent)' : 'var(--red)'}" />`;
+  svg.innerHTML = `<path d="${toPath(pts)}" stroke="var(--fg-3)" />`;
 });
 
 /* ── Record tabs ──────────────────────────────────────────── */
@@ -586,7 +602,7 @@ function indexRecords(list) { $$('li', list).forEach((li, i) => li.style.setProp
 $$('.rec-list').forEach(indexRecords);
 $$('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
-    $$('.tab').forEach(t => { t.classList.toggle('active', t === tab); t.setAttribute('aria-selected', String(t === tab)); });
+    $$('.tab').forEach(t => { t.classList.toggle('active', t === tab); t.setAttribute('aria-pressed', String(t === tab)); });
     $$('.rec-list').forEach(l => l.classList.toggle('active', l.dataset.panel === tab.dataset.tab));
     setTimeout(() => lenis?.resize(), 50);
   });
@@ -598,12 +614,16 @@ function openModal() {
   const frameEl = $('iframe', modal);
   if (!frameEl.src) frameEl.src = frameEl.dataset.src;
   modal.hidden = false;
+  html.classList.add('modal-open');
+  setInert(['#header', '#menu', 'main', '.footer'], true);
   lenis?.stop();
   $('[data-close]:not(.modal-backdrop)', modal).focus();
 }
 function closeModal() {
   modal.hidden = true;
-  lenis?.start();
+  html.classList.remove('modal-open');
+  setInert(['#header', '#menu', 'main', '.footer'], false);
+  if (!html.classList.contains('menu-open')) lenis?.start();
   $('#resume-open').focus();
 }
 $('#resume-open')?.addEventListener('click', openModal);
@@ -648,8 +668,6 @@ function describeEvent(e) {
       return issue.title ? `${p.action} issue: ${issue.title}` : `${p.action} issue #${issue.number ?? ''}`.trim();
     }
     case 'ReleaseEvent': return `released ${p.release?.tag_name || ''}`;
-    case 'ForkEvent': return 'forked repository';
-    case 'WatchEvent': return 'starred repository';
     case 'PublicEvent': return 'made repository public';
     default: return null;
   }
@@ -657,13 +675,13 @@ function describeEvent(e) {
 
 // Shown immediately, and kept if the GitHub API is rate-limited or unreachable.
 const STATIC_COMMITS = [
-  { repo: 'Atharv-Sharma06.github.io', msg: 'Add DAR Youth Leadership Award to Achievements', ago: 'today' },
-  { repo: 'Atharv-Sharma06.github.io', msg: 'Fix GitHub activity: correct username & null commits', ago: 'today' },
-  { repo: 'ai-investment-assistant', msg: 'Add portfolio analysis features', ago: '16 days ago' },
-  { repo: 'investment-research-assist', msg: 'Initial commit', ago: '17 days ago' },
-  { repo: 'stock-analyser', msg: 'Update stock analysis logic', ago: '24 days ago' },
-  { repo: 'ECONOMIC-data-reader', msg: 'Add macroeconomic data reader', ago: '55 days ago' },
-];
+  { repo: 'Atharv-Sharma06.github.io', msg: 'Add DAR Youth Leadership Award to Achievements', date: '2026-06-09' },
+  { repo: 'Atharv-Sharma06.github.io', msg: 'Fix GitHub activity: correct username & null commits', date: '2026-06-09' },
+  { repo: 'ai-investment-assistant', msg: 'Add portfolio analysis features', date: '2026-05-24' },
+  { repo: 'investment-research-assist', msg: 'Initial commit', date: '2026-05-23' },
+  { repo: 'stock-analyser', msg: 'Update stock analysis logic', date: '2026-05-16' },
+  { repo: 'ECONOMIC-data-reader', msg: 'Add macroeconomic data reader', date: '2026-04-15' },
+].map(c => ({ ...c, ago: timeAgo(new Date(`${c.date}T12:00:00`)) }));
 
 function renderCommits(list, rows) {
   list.innerHTML = rows.map((r, i) => `<li style="--i:${i}">
@@ -694,7 +712,11 @@ function renderCommits(list, rows) {
       .map(e => ({ e, msg: describeEvent(e) }))
       .filter(r => r.msg)
       .slice(0, 9)
-      .map(({ e, msg }) => ({ repo: e.repo.name.split('/')[1], msg, ago: timeAgo(new Date(e.created_at)) }));
+      .map(({ e, msg }) => ({
+        repo: e.repo.name.startsWith('Atharv-Sharma06/') ? e.repo.name.split('/')[1] : e.repo.name,
+        msg,
+        ago: timeAgo(new Date(e.created_at)),
+      }));
     if (rows.length) renderCommits(list, rows);
   } catch (_) { /* static data already shown */ }
 })();
@@ -727,6 +749,7 @@ copyBtn?.addEventListener('click', async () => {
   const count = $('#flow-step');
   const topicInput = $('#topic-input');
   let current = 1;
+  let sending = false;
 
   const value = name => (form.elements[name]?.value || '').trim();
 
@@ -742,15 +765,16 @@ copyBtn?.addEventListener('click', async () => {
     const shown = Math.min(n, total);
     count.textContent = String(shown).padStart(2, '0');
     bar.style.width = (n > total ? 100 : (shown / total) * 100) + '%';
-    backBtn.disabled = n === 1;
+    backBtn.disabled = n === 1 || n > total;
+    nextBtn.disabled = n > total;
     $('span', nextBtn).textContent = n === total ? 'Send message' : 'Next';
     form.classList.toggle('complete', n > total);
 
     const name = value('name') || 'friend';
     $$('.js-name', form).forEach(el => { el.textContent = name.split(' ')[0]; });
 
-    const field = $('.step-input, .chip', next);
-    if (field && n <= total) setTimeout(() => field.focus({ preventScroll: true }), 350);
+    const field = n > total ? $('#flow-reset') : $('.step-input, .chip', next);
+    if (field) setTimeout(() => field.focus({ preventScroll: true }), 350);
   }
 
   function fail(msg) {
@@ -780,16 +804,18 @@ copyBtn?.addEventListener('click', async () => {
   });
 
   $('#f-msg').addEventListener('keydown', e => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); form.requestSubmit(); }
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); if (!e.repeat) form.requestSubmit(); }
   });
 
   backBtn.addEventListener('click', () => { if (current > 1) setStep(current - 1); });
 
   form.addEventListener('submit', async e => {
     e.preventDefault();
+    if (sending || current > total) return;
     if (!validate()) return;
     if (current < total) { setStep(current + 1); return; }
 
+    sending = true;
     nextBtn.disabled = true;
     $('span', nextBtn).textContent = 'Sending…';
     const data = new FormData(form);
@@ -819,7 +845,7 @@ copyBtn?.addEventListener('click', async () => {
       sub.innerHTML = `Your email app should open with everything filled in — just hit send. If it didn't, <a href="${mailto}">open it here</a> or write to ${EMAIL}.`;
       window.location.href = mailto;
     }
-    nextBtn.disabled = false;
+    sending = false;
     setStep(total + 1);
   });
 
