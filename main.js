@@ -411,8 +411,10 @@ $$('[data-close]', modal).forEach(n => n.addEventListener('click', closeProject)
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeProject(); });
 
 /* ── Quest log tabs ───────────────────────────────────────── */
-$$('.log-list:not(.active)').forEach(l => { l.hidden = true; });
-$$('.card-more').forEach(m => { m.hidden = true; });
+if (!fellBack) {
+  $$('.log-list:not(.active)').forEach(l => { l.hidden = true; });
+  $$('.card-more').forEach(m => { m.hidden = true; });
+}
 $$('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     $$('.tab').forEach(t => { t.classList.toggle('active', t === tab); t.setAttribute('aria-pressed', String(t === tab)); });
@@ -528,8 +530,11 @@ renderCommits();
 
   const COMMANDS = {
     help: { desc: 'list commands', run() {
+      const top = out.lastElementChild;
       Object.entries(COMMANDS).filter(([, c]) => c.desc).forEach(([k, c]) => print(`${k} --> ${c.desc}`));
       print('tip: tab completes, up/down browses history.', 't-dim');
+      // The list is taller than the window: start reading from the top of it, not the bottom.
+      if (top) out.scrollTop += top.getBoundingClientRect().top - out.getBoundingClientRect().top - 16;
     } },
     about: { desc: 'a little about me', run() {
       print('Atharv Sharma. Software engineer at Moonshot. 9th grade at Cuthbertson High School. Fort Mill, SC.');
