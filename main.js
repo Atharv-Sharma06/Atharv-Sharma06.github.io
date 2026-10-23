@@ -503,8 +503,8 @@ renderCommits();
       print('tip: tab completes, up/down browses history.', 't-dim');
     } },
     about: { desc: 'a little about me', run() {
-      print('Atharv Sharma. Quant developer. Fort Mill, SC.');
-      print('I build Python tools that turn market data into decisions — backtests, optimizers, forecasts. Open to internships & research.');
+      print('Atharv Sharma. Software engineer at Moonshot. 9th grade at Cuthbertson High School. Fort Mill, SC.');
+      print('I build software end to end — APIs, data pipelines, dashboards and ML models — mostly pointed at markets and AI safety.');
     } },
     hello: { desc: 'say hello', run() {
       print('Hey, player 2. Welcome to my corner of the internet. Try "projects", or "note" to send me a message.');
@@ -520,7 +520,8 @@ renderCommits();
       openProject(p.card);
     } },
     skills: { desc: 'my skill tree', run() {
-      print('technical: python, pandas, numpy, sql, scikit-learn, tensorflow, streamlit, plotly, javascript, git');
+      print('engineering: python, javascript, sql, git/github, apis, web scraping, streamlit');
+      print('ml / data: pandas, numpy, scikit-learn, tensorflow, matplotlib, plotly');
       print('quant: backtesting, portfolio theory, monte carlo, volatility, sharpe ratio, options basics, fred api, yfinance');
     } },
     awards: { desc: 'achievements unlocked', run() {
@@ -545,7 +546,7 @@ renderCommits();
     } },
     clear: { desc: 'a fresh terminal', run() { out.replaceChildren(); } },
     replay: { desc: 'play the intro again', run() { $('#replay').click(); } },
-    whoami: { run() { print('guest. (recruiters, you are very welcome — try "note".)'); } },
+    whoami: { run() { print('guest. (the site belongs to atharv — swe at moonshot. try "about" or "note".)'); } },
     date: { run() { print(new Date().toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'full', timeStyle: 'short' }) + ' ET'); } },
     sudo: { run(arg) {
       if (/hire/i.test(arg)) { print('access granted. opening a note…', 't-ok'); startNote('Internship / hiring'); }

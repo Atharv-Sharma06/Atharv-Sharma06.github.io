@@ -180,6 +180,10 @@ html.js:not(.js-ok) .rv, html.js:not(.js-ok) .intro .intro-step { animation: rev
 .inventory { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 40px; font-size: 11px; }
 .inventory div { display: flex; justify-content: space-between; gap: 12px; }
 .inventory dd { color: var(--green); text-align: right; }
+.xp li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 16px; align-items: baseline; padding: 4px 0; font-size: 12px; }
+.xp b { font-weight: 400; }
+.xp span { color: var(--green); }
+.xp em { font-style: normal; font-size: 10px; color: var(--bg); background: var(--green); padding: 2px 6px; line-height: 1.4; }
 .watch { display: flex; flex-wrap: wrap; gap: 8px 28px; font-size: 11px; color: var(--fg-3); }
 .watch b { color: var(--fg); font-weight: 400; margin-right: 6px; }
 
@@ -199,7 +203,7 @@ html.js:not(.js-ok) .rv, html.js:not(.js-ok) .intro .intro-step { animation: rev
 .commits .c-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repos { font-size: 11px; margin-top: 12px; }
 
-.skill-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; }
+.skill-cols { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px; }
 .skill-cols h4 { font-size: 12px; font-weight: 700; margin-bottom: 12px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chips li { font-size: 10px; line-height: 1; padding: 7px 9px; border: 2px solid var(--line-2); color: var(--fg-2); transition: color 0.15s, border-color 0.15s; }
@@ -318,6 +322,8 @@ html.modal-open, html.modal-open body { overflow: hidden; }
   .card-wide .card-body { padding: 20px 6px 4px; }
   .card-title { font-size: 17px; }
   .inventory { grid-template-columns: 1fr; }
+  .xp li { grid-template-columns: minmax(0, 1fr) auto; }
+  .xp span { grid-column: 1; grid-row: 2; }
   .skill-cols { grid-template-columns: 1fr; gap: 24px; }
   .log-list li { grid-template-columns: 1fr auto; gap: 4px 12px; }
   .log-y { grid-column: 1 / -1; }
