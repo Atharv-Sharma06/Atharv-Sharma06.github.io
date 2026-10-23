@@ -9,7 +9,7 @@
   <script>document.documentElement.classList.add('js');</script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Silkscreen&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -39,9 +39,7 @@
     <nav class="nav" id="nav" aria-label="Primary">
       <a href="#projects">Projects</a>
       <a href="#about">About</a>
-      <a href="#quests">Quest log</a>
       <a href="#contact">Contact</a>
-      <a href="resume.pdf" target="_blank" rel="noopener" class="nav-hi">Résumé <span aria-hidden="true">↗</span></a>
       <a href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener" class="nav-hi">GitHub <span aria-hidden="true">↗</span></a>
     </nav>
   </header>
@@ -61,7 +59,6 @@
         <li><a href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener">GitHub</a></li>
         <li><a href="mailto:atharv.eck@gmail.com">Email</a></li>
         <li><a href="resume.pdf" target="_blank" rel="noopener">Résumé</a></li>
-        <li><span class="muted">Fort Mill, SC</span></li>
       </ul>
       <div class="loadbar" aria-hidden="true">
         <span class="loadbar-label" id="load-label">Loading 0%</span>
@@ -75,18 +72,18 @@
 
       <div class="cards">
 
-        <article class="card rv" data-project="macro">
+        <article class="card rv" data-project="macro" data-repo="ECONOMIC-data-reader">
           <div class="shot" data-shot="macro"><span class="shot-tag">Preview · illustrative</span></div>
           <div class="card-body">
             <h3 class="card-title">Economic Data Dashboard</h3>
             <p class="card-desc">Interactive dashboard tracking CPI inflation, unemployment, GDP growth and interest rates — with multi-country comparison and 20-year trends.</p>
             <p class="card-tag">Macro, visualized · <span class="state live">Live</span></p>
             <div class="card-foot">
-              <a class="card-link" href="https://github.com/Atharv-Sharma06/economic-data-dashboard" target="_blank" rel="noopener">Source on GitHub <span aria-hidden="true">↗</span></a>
+              <a class="card-link" href="https://github.com/Atharv-Sharma06/ECONOMIC-data-reader" target="_blank" rel="noopener">Source on GitHub <span aria-hidden="true">↗</span></a>
               <button class="btn btn-line explore" type="button">Explore <svg class="ico" aria-hidden="true"><use href="#i-explore" /></svg></button>
             </div>
           </div>
-          <div class="card-more" hidden>
+          <div class="card-more">
             <p class="more-stack">Python · Streamlit · FRED API · Plotly</p>
             <ul>
               <li>Real-time inflation &amp; unemployment tracking</li>
@@ -97,18 +94,18 @@
           </div>
         </article>
 
-        <article class="card rv" data-project="candles">
+        <article class="card rv" data-project="candles" data-repo="stock-analyser">
           <div class="shot" data-shot="candles"><span class="shot-tag">Preview · illustrative</span></div>
           <div class="card-body">
             <h3 class="card-title">Stock Analysis Tool</h3>
             <p class="card-desc">Built on yfinance — trend detection, volatility metrics, SMA/EMA crossovers and annotated chart output for any ticker.</p>
             <p class="card-tag">Signals from price · <span class="state live">Live</span></p>
             <div class="card-foot">
-              <a class="card-link" href="https://github.com/Atharv-Sharma06/stock-analysis-tool" target="_blank" rel="noopener">Source on GitHub <span aria-hidden="true">↗</span></a>
+              <a class="card-link" href="https://github.com/Atharv-Sharma06/stock-analyser" target="_blank" rel="noopener">Source on GitHub <span aria-hidden="true">↗</span></a>
               <button class="btn btn-line explore" type="button">Explore <svg class="ico" aria-hidden="true"><use href="#i-explore" /></svg></button>
             </div>
           </div>
-          <div class="card-more" hidden>
+          <div class="card-more">
             <p class="more-stack">Python · yfinance · Pandas · Matplotlib</p>
             <ul>
               <li>RSI/MACD trend &amp; momentum analysis</li>
@@ -126,11 +123,11 @@
             <p class="card-desc">Modern Portfolio Theory in practice — Markowitz optimization to find the efficient frontier, maximize the Sharpe ratio, and visualize risk/return trade-offs for any basket of stocks.</p>
             <p class="card-tag">Risk, balanced · <span class="state live">Live</span></p>
             <div class="card-foot">
-              <a class="card-link" href="https://github.com/Atharv-Sharma06/portfolio-optimizer" target="_blank" rel="noopener">Source on GitHub <span aria-hidden="true">↗</span></a>
+              <a class="card-link" href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener">More on GitHub <span aria-hidden="true">↗</span></a>
               <button class="btn btn-line explore" type="button">Explore <svg class="ico" aria-hidden="true"><use href="#i-explore" /></svg></button>
             </div>
           </div>
-          <div class="card-more" hidden>
+          <div class="card-more">
             <p class="more-stack">Python · SciPy · NumPy · Streamlit</p>
             <ul>
               <li>Efficient frontier visualization</li>
@@ -148,11 +145,11 @@
             <p class="card-desc">ML models trained on historical prices, technical indicators and sentiment signals to forecast short-term direction, with backtested performance metrics.</p>
             <p class="card-tag">ML on markets · <span class="state wip">In progress</span></p>
             <div class="card-foot">
-              <a class="card-link" href="https://github.com/Atharv-Sharma06/ai-market-predictor" target="_blank" rel="noopener">Source on GitHub <span aria-hidden="true">↗</span></a>
+              <a class="card-link" href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener">More on GitHub <span aria-hidden="true">↗</span></a>
               <button class="btn btn-line explore" type="button">Explore <svg class="ico" aria-hidden="true"><use href="#i-explore" /></svg></button>
             </div>
           </div>
-          <div class="card-more" hidden>
+          <div class="card-more">
             <p class="more-stack">Python · LSTM · TensorFlow · scikit-learn</p>
             <ul>
               <li>LSTM neural network for price forecasting</li>
@@ -170,11 +167,11 @@
             <p class="card-desc">Scores financial news and Reddit with VADER to gauge market mood, correlate it with price movement, and flag contrarian signals.</p>
             <p class="card-tag">Reading the room · <span class="state live">Live</span></p>
             <div class="card-foot">
-              <a class="card-link" href="https://github.com/Atharv-Sharma06/market-sentiment-analyzer" target="_blank" rel="noopener">Source on GitHub <span aria-hidden="true">↗</span></a>
+              <a class="card-link" href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener">More on GitHub <span aria-hidden="true">↗</span></a>
               <button class="btn btn-line explore" type="button">Explore <svg class="ico" aria-hidden="true"><use href="#i-explore" /></svg></button>
             </div>
           </div>
-          <div class="card-more" hidden>
+          <div class="card-more">
             <p class="more-stack">Python · NLP · VADER · News API</p>
             <ul>
               <li>News API &amp; Reddit sentiment scoring via VADER</li>
@@ -246,9 +243,9 @@
         <div class="panel rv">
           <h3 class="label">Commit log <a href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener" class="label-link">@Atharv-Sharma06 <span aria-hidden="true">↗</span></a></h3>
           <ul class="commits" id="commit-list">
-            <li class="muted">Fetching activity…</li>
+            <li class="muted">Recent activity on <a href="https://github.com/Atharv-Sharma06">GitHub ↗</a></li>
           </ul>
-          <p class="repos muted"><span id="gh-repos">17</span> public repos</p>
+          <p class="repos muted" hidden><span id="gh-repos"></span> public repos</p>
         </div>
       </div>
 
@@ -304,8 +301,8 @@
           <li><span class="log-y">2024</span><div><b>Research excellence</b><span>Independent economic research on inflation trends and their correlation with consumer spending.</span></div><span class="badge">Unlocked</span></li>
           <li><span class="log-y">2023–26</span><div><b>Team leader</b><span>Led multi-person data science and finance projects from concept through final presentation.</span></div><span class="badge">Unlocked</span></li>
         </ul>
-        <ul class="log-list" data-panel="training" hidden>
-          <li><span class="log-y">Udemy</span><div><b>Python for Finance</b><span>pandas, NumPy, financial APIs and quantitative analysis workflows.</span></div><span class="badge done">Complete</span></li>
+        <ul class="log-list" data-panel="training">
+          <li><span class="log-y">Udemy / self-study</span><div><b>Python for Finance</b><span>pandas, NumPy, financial APIs and quantitative analysis workflows.</span></div><span class="badge done">Complete</span></li>
           <li><span class="log-y">Coursera</span><div><b>Machine Learning Fundamentals — Andrew Ng</b><span>Regression, classification, neural networks and model evaluation on real datasets.</span></div><span class="badge done">Complete</span></li>
           <li><span class="log-y">CFA Inst.</span><div><b>CFA Investment Foundations</b><span>Equity, fixed income, derivatives and portfolio management.</span></div><span class="badge wip">In progress</span></li>
           <li><span class="log-y">DL.AI</span><div><b>Deep Learning Specialization</b><span>CNNs, RNNs and LSTMs — applying deep learning to financial time series.</span></div><span class="badge wip">In progress</span></li>
@@ -313,7 +310,7 @@
           <li><span class="log-y">Research</span><div><b>Research interests</b><span>Algorithmic trading · behavioral finance · NLP for market signals · macroeconomics</span></div><span class="badge">Ongoing</span></li>
           <li><span class="log-y">Learning</span><div><b>Currently levelling up</b><span>ML concepts · AI safety · LLM systems · AI-based analysis · advanced tutorials</span></div><span class="badge">Ongoing</span></li>
         </ul>
-        <ul class="log-list" data-panel="speaking" hidden>
+        <ul class="log-list" data-panel="speaking">
           <li><span class="log-y">Research</span><div><b>Research presentations</b><span>Independent economic research on inflation and consumer spending, presented to panels of educators and community stakeholders as clear, visual narratives.</span></div><span class="badge">Speech</span></li>
           <li><span class="log-y">Pitch</span><div><b>Hackathon pitches</b><span>Financial data tools and AI solutions pitched to technical judges — product value, architecture and real-world impact in under five minutes.</span></div><span class="badge">Speech</span></li>
           <li><span class="log-y">Demo</span><div><b>Project walkthroughs</b><span>Explaining portfolio optimizers and ML models to audiences without technical backgrounds through story-driven demos.</span></div><span class="badge">Speech</span></li>
@@ -339,7 +336,7 @@
           </div>
           <form class="term-in" id="term-form" autocomplete="off" novalidate>
             <label for="term-input" class="prompt" id="term-prompt"><span class="coral">Guest</span> ~ <span class="green">$</span></label>
-            <input id="term-input" type="text" spellcheck="false" autocapitalize="off" placeholder="Type a command" aria-describedby="term-hint" />
+            <input id="term-input" type="text" spellcheck="false" autocapitalize="off" placeholder="Type a command" aria-label="Terminal command" aria-describedby="term-hint" />
             <button type="submit" class="term-go" aria-label="Run command">→</button>
           </form>
           <p class="sr-only" id="term-hint">Type help for a list of commands. Up and down arrows browse history, Tab completes.</p>
