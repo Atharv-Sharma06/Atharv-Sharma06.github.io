@@ -202,72 +202,6 @@ const io = new IntersectionObserver(entries => {
 if (fellBack) $$('.rv').forEach(n => n.classList.add('in'));
 $$('.rv, [data-scramble]').forEach(n => io.observe(n));
 
-/* ── Pixel avatar ─────────────────────────────────────────── */
-// Palette lives here so the character is easy to re-skin.
-const SPRITE_PALETTE = {
-  H: '#1a1b33', h: '#34375e', S: '#dba680', s: '#bb8763', E: '#f5f6ff', P: '#090c26',
-  M: '#f5f6ff', G: '#eef0f8', g: '#c5cadf', L: '#2b3da4', D: '#1f2a5c',
-};
-const SPRITE_ROWS = [
-  '......HHHHHH......',
-  '....HHHHHHHHHH....',
-  '...HHHHHHHHHHHH...',
-  '..HHHhHHHHHHhHHH..',
-  '..HHHHHHHHHHHHHH..',
-  '..HHHSSSHHSSSHHH..',
-  '..HHSSSSSSSSSSHH..',
-  '..HSSSSSSSSSSSSH..',
-  '.sSSSEESSSSEESSSs.',
-  '.sSSSPESSSSPESSSs.',
-  '..SSSSSSSSSSSSSS..',
-  '..SSSSSSSssSSSSS..',
-  '..SSSSSSSSSSSSSS..',
-  '..sSSSSMMMMSSSSs..',
-  '...sSSSSSSSSSSs...',
-  '.....ssSSSSss.....',
-  '...GGGGsSSsGGGG...',
-  '..GGGGGGggGGGGGG..',
-  '.GGGGGGGGGGGGGGGG.',
-  '.gGGGGGGGGGGLGGGg.',
-  '.SSGGGGGGGLLGGGSS.',
-  '.SSGGGGGGLGGGGGSS.',
-  '.ssGGGGGGGGGGGGss.',
-  '...DDDDD..DDDDD...',
-];
-
-(function drawSprite() {
-  const svg = $('#sprite');
-  if (!svg) return;
-  const NS = 'http://www.w3.org/2000/svg';
-  const base = document.createElementNS(NS, 'g');
-  const eyes = document.createElementNS(NS, 'g');
-  eyes.setAttribute('class', 'eyes');
-  SPRITE_ROWS.forEach((row, y) => {
-    // Merge horizontal runs of one colour into a single rect.
-    let x = 0;
-    while (x < row.length) {
-      const ch = row[x];
-      let w = 1;
-      while (row[x + w] === ch) w++;
-      if (ch !== '.') {
-        const isEye = ch === 'E' || ch === 'P';
-        const r = document.createElementNS(NS, 'rect');
-        r.setAttribute('x', x); r.setAttribute('y', y);
-        r.setAttribute('width', w); r.setAttribute('height', 1);
-        r.setAttribute('fill', SPRITE_PALETTE[isEye ? 'S' : ch]);
-        base.append(r);
-        if (isEye) {
-          const e = r.cloneNode();
-          e.setAttribute('fill', SPRITE_PALETTE[ch]);
-          eyes.append(e);
-        }
-      }
-      x += w;
-    }
-  });
-  svg.append(base, eyes);
-})();
-
 /* ── Project previews (generated, illustrative) ───────────── */
 const VW = 320, VH = 180;
 const pts = arr => arr.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
@@ -405,9 +339,30 @@ $$('.shot[data-shot]').forEach(s => renderShot(s, s.dataset.shot));
 /* ── Project window ───────────────────────────────────────── */
 const modal = $('#modal');
 let modalReturn = null;
+let shown = null; // the project row on show in the window
 const cards = $$('.entry.project');
+// The window's commands are a small menu: the ▶ cursor marks the selected one. The key legend means what it says,
+// pressed or tapped: Esc closes, Tab moves the cursor to the next command, Enter selects it.
+const keyFor = name => $(`.key[data-key="${name}"]`, modal);
+const commands = $$('.modal-actions .btn', modal);
+const modalWin = $('.modal-win', modal);
+let cmd = 0;
+function markCommand(i) {
+  cmd = (i + commands.length) % commands.length;
+  commands.forEach((c, k) => {
+    c.classList.toggle('sel', k === cmd);
+    if (k === cmd) c.setAttribute('aria-current', 'true'); else c.removeAttribute('aria-current');
+  });
+  // the on-screen Enter says what it will select
+  keyFor('Enter').setAttribute('aria-label', `Select: ${commands[cmd].textContent.trim()} (Enter)`);
+}
+function selectCommand(i) {
+  markCommand(i);
+  commands[cmd].focus({ preventScroll: true });
+}
 
-function openProject(card) {
+function fillProject(card) {
+  shown = card;
   const link = $('.e-link', card).href;
   const title = $('.e-title', card).textContent;
   $('#modal-file').textContent = title.toLowerCase().replace(/\W+/g, '_') + '.py';
@@ -422,11 +377,19 @@ function openProject(card) {
   const shot = $('#modal-shot');
   renderShot(shot, card.dataset.project);
   if (!$('.shot-tag', shot)) shot.append(el('span', { class: 'shot-tag', text: 'Preview · illustrative' }));
-  modalReturn = document.activeElement;
-  modal.hidden = false;
-  html.classList.add('modal-open');
-  setInert(['.skip', '.header', 'main', '.footer'], true);
-  $('.term-x', modal).focus();
+}
+function openProject(card) {
+  fillProject(card);
+  if (modal.hidden) {
+    modalReturn = document.activeElement;
+    modal.hidden = false;
+    html.classList.add('modal-open');
+    setInert(['.skip', '.header', 'main', '.footer'], true);
+  }
+  // start at the top of the window, on its title, with the cursor on the first command
+  modalWin.scrollTop = 0;
+  markCommand(0);
+  $('#modal-title').focus({ preventScroll: true });
 }
 function closeProject() {
   if (modal.hidden) return;
@@ -437,23 +400,69 @@ function closeProject() {
 }
 cards.forEach(card => $('.explore', card).addEventListener('click', () => openProject(card)));
 $$('[data-close]', modal).forEach(n => n.addEventListener('click', closeProject));
+$('#modal-next').addEventListener('click', () => {
+  const i = (cards.indexOf(shown) + 1) % cards.length;
+  fillProject(cards[i]);
+  modalWin.scrollTop = 0;
+  $('#modal-status').textContent = `${$('#modal-title').textContent}, project ${i + 1} of ${cards.length}`;
+});
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeProject(); });
 
-/* ── Sections: one open at a time ─────────────────────────── */
-// The profile's toggles (and the header links) open one numbered section below them; the open one closes the others.
+// The on-screen keys press down when the real key is pressed, and do the same thing when tapped.
+function pressKey(name) {
+  const k = keyFor(name);
+  if (!k) return;
+  k.classList.add('down');
+  setTimeout(() => k.classList.remove('down'), 140);
+}
+function runKey(name) {
+  if (name === 'Escape') closeProject();
+  else if (name === 'Tab') selectCommand(cmd + 1);
+  else if (name === 'Enter') commands[cmd].click();
+}
+modal.addEventListener('focusin', e => { const k = commands.indexOf(e.target); if (k >= 0) markCommand(k); });
+// on the document, so the keys keep working wherever focus sits while the window is open
+document.addEventListener('keydown', e => {
+  if (modal.hidden) return;
+  if (e.key === 'Tab') {
+    // Tab cycles the cursor through the commands and never leaves the window
+    e.preventDefault();
+    pressKey('Tab');
+    selectCommand(cmd + (e.shiftKey ? -1 : 1));
+  } else if (e.key === 'Enter') {
+    pressKey('Enter');
+    // a focused command handles Enter itself; anywhere else in the window, Enter selects the command under the cursor
+    if (!e.target.closest('a, button')) { e.preventDefault(); commands[cmd].click(); }
+  }
+});
+$$('.key', modal).forEach(k => {
+  k.addEventListener('mousedown', e => e.preventDefault()); // keep focus (and the cursor) on the selected command
+  k.addEventListener('click', () => { pressKey(k.dataset.key); runKey(k.dataset.key); });
+});
+
+/* ── Sections: dropdowns under the profile ───────────────── */
+// Like the reference, every section starts folded. A toggle drops its section open below the menu and folds whichever
+// was open; pressing it again rolls it back up. Header links, the skip link, #hashes and the terminal open them too.
 const secs = $$('.sec');
 const togglesEl = $('#toggles');
 const tgs = $$('.tg');
 const navLinks = $$('.nav a[href^="#"]');
-const isSection = id => !!id && secs.some(s => s.id === id);
+const OLD_IDS = { about: 'experience', quests: 'awards', term: 'contact' }; // anchors from the previous layout
+const sectionId = id => (secs.some(s => s.id === id) ? id : OLD_IDS[id] || null);
 const narrowMQ = matchMedia('(max-width: 720px)');
-let openSec = $('.sec.open');
-let pageTurn = 0;
-html.classList.add('one-sec');
+const FOLD_MS = 200;
+let openSec = null;
+let turn = 0;
 
+// Counts follow the rows ("6 entries", "4 ways"), so they can't drift when rows are added.
 $$('.sec-count').forEach(c => {
   const list = $('.entries', c.closest('.sec'));
-  if (list && /entr(y|ies)$/.test(c.textContent)) c.textContent = `${list.children.length} ${list.children.length === 1 ? 'entry' : 'entries'}`;
+  const m = c.textContent.trim().match(/^\d+\s+(\w+)$/);
+  if (!list || !m) return;
+  const one = m[1].replace(/ies$/, 'y').replace(/s$/, '');
+  const many = /[^aeiou]y$/.test(one) ? one.replace(/y$/, 'ies') : `${one}s`;
+  const n = list.children.length;
+  c.textContent = `${n} ${n === 1 ? one : many}`;
 });
 
 function syncSections() {
@@ -462,33 +471,34 @@ function syncSections() {
   navLinks.forEach(a => { if (a.hash === `#${id}`) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current'); });
 }
 
-// Land with the toggles just under the pinned header (on phones, the section itself), clear of its fade.
+// Land with the toggles just under the pinned header, clear of its fade. On phones the section itself goes there,
+// unless the toggles hold keyboard focus, which must stay in view.
 function bringIntoView(sec) {
-  const clear = headerEl.getBoundingClientRect().bottom + 40;
+  const clear = headerEl.getBoundingClientRect().bottom + 36;
   const top = sec.getBoundingClientRect().top;
   if (top >= clear - 8 && top < window.innerHeight * 0.55) return;
-  const anchor = narrowMQ.matches ? sec : togglesEl;
+  const anchor = narrowMQ.matches && !togglesEl.querySelector(':focus-visible') ? sec : togglesEl;
   const y = anchor.getBoundingClientRect().top + window.scrollY - clear;
   window.scrollTo({ top: Math.max(0, y), behavior: reduceMotion ? 'auto' : 'smooth' });
 }
 
 function openSection(id, { toggle = false, focus = false, scroll = true, animate = !reduceMotion } = {}) {
-  const next = isSection(id) ? document.getElementById(id) : null;
+  const sid = sectionId(id);
+  const next = sid ? document.getElementById(sid) : null;
   const prev = openSec;
-  clearTimeout(pageTurn);
+  clearTimeout(turn);
   // pressing the open section's toggle folds it away again
-  const closing = toggle && next && next === prev;
-  openSec = closing ? null : next;
+  openSec = toggle && next === prev ? null : next;
   syncSections();
   history.replaceState(null, '', openSec ? `#${openSec.id}` : location.pathname + location.search);
-  const show = () => {
-    secs.forEach(s => { s.classList.remove('leaving', 'entering'); if (s !== openSec) s.classList.remove('open'); });
+  const drop = () => {
+    secs.forEach(s => { s.classList.remove('folding', 'dropping'); if (s !== openSec) s.classList.remove('open'); });
     if (!openSec) return;
     openSec.classList.add('open');
     if (animate && openSec !== prev) {
       $$('.entries > li, .term, .sec-sub', openSec).forEach((n, i) => n.style.setProperty('--i', Math.min(i, 10)));
       void openSec.offsetWidth;
-      openSec.classList.add('entering');
+      openSec.classList.add('dropping');
     }
     if (scroll) bringIntoView(openSec);
     if (focus) {
@@ -497,8 +507,9 @@ function openSection(id, { toggle = false, focus = false, scroll = true, animate
       h.focus({ preventScroll: true });
     }
   };
-  if (animate && prev && prev !== openSec) { prev.classList.add('leaving'); pageTurn = setTimeout(show, 140); }
-  else show();
+  // the open section rolls up first, then the new one drops down
+  if (animate && prev && prev !== openSec) { prev.classList.remove('dropping'); prev.classList.add('folding'); turn = setTimeout(drop, FOLD_MS); }
+  else drop();
 }
 
 const plainClick = e => e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
@@ -510,27 +521,45 @@ tgs.forEach(t => t.addEventListener('click', e => {
 // Any other link to a section (header, skip link) opens it and moves focus there.
 document.addEventListener('click', e => {
   const a = e.target.closest('a[href^="#"]');
-  if (!a || a.classList.contains('tg') || !plainClick(e) || !isSection(a.hash.slice(1))) return;
+  if (!a || a.classList.contains('tg') || !plainClick(e) || !sectionId(a.hash.slice(1))) return;
   e.preventDefault();
   openSection(a.hash.slice(1), { focus: true });
 });
 window.addEventListener('hashchange', () => {
-  const id = location.hash.slice(1);
-  if (isSection(id) && document.getElementById(id) !== openSec) openSection(id, { focus: true });
+  const id = sectionId(location.hash.slice(1));
+  if (id && document.getElementById(id) !== openSec) openSection(id, { focus: true });
 });
 
-// A link straight to a section (…/#awards) opens it; the browser's own jump ran while it was still hidden.
-const firstHash = location.hash.slice(1);
-if (isSection(firstHash) && document.getElementById(firstHash) !== openSec) {
-  openSection(firstHash, { scroll: false, animate: false });
-  requestAnimationFrame(() => openSec.scrollIntoView());
-} else {
-  syncSections();
-}
+(function firstOpen() {
+  const id = sectionId(location.hash.slice(1));
+  if (!html.classList.contains('one-sec')) {
+    // main.js arrived so late that every section was unfolded for reading. Keep open the section under the reading
+    // line (a third of the way down, below the header), fold the rest, and hold what's being read where it is.
+    // The URL is left alone, so the browser doesn't jump to a #hash at load.
+    const top = headerEl.getBoundingClientRect().bottom;
+    const line = top + (window.innerHeight - top) / 3;
+    const keep = secs.find(s => { const r = s.getBoundingClientRect(); return r.top <= line && r.bottom > line; });
+    const hold = keep && (document.elementFromPoint(window.innerWidth / 2, line)?.closest('.entry, .sec-head, .sec-sub, .term') || keep);
+    const before = hold ? hold.getBoundingClientRect().top : 0;
+    if (keep) { openSec = keep; keep.classList.add('open'); }
+    html.style.overflowAnchor = 'none';
+    html.classList.add('one-sec');
+    if (hold) window.scrollBy({ top: hold.getBoundingClientRect().top - before, behavior: 'instant' });
+    html.style.overflowAnchor = '';
+    syncSections();
+    return;
+  }
+  if (!id) { syncSections(); return; }
+  openSection(id, { scroll: false, animate: false });
+  // A link straight to a section (…/#awards) was followed while the section was still folded, so jump to it now;
+  // on reload or Back, leave the browser's restored scroll position alone.
+  const nav = performance.getEntriesByType ? performance.getEntriesByType('navigation')[0] : null;
+  if (!nav || nav.type === 'navigate') requestAnimationFrame(() => openSec.scrollIntoView());
+})();
 
 /* ── GitHub activity ──────────────────────────────────────── */
 function timeAgo(date) {
-  const s = Math.floor((Date.now() - date) / 1000);
+  const s = Math.max(0, Math.floor((Date.now() - date) / 1000));
   if (s < 60) return `${s}s ago`;
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m ago`;
@@ -573,7 +602,7 @@ let commits = [
   { repo: 'investment-research-assist', msg: 'Initial commit', date: '2026-05-23' },
   { repo: 'stock-analyser', msg: 'Update stock analysis logic', date: '2026-05-16' },
   { repo: 'ECONOMIC-data-reader', msg: 'Add macroeconomic data reader', date: '2026-04-15' },
-].map(c => ({ ...c, ago: timeAgo(new Date(`${c.date}T12:00:00`)) }));
+].map(c => ({ ...c, ago: new Date(`${c.date}T12:00:00`).toLocaleString('en-US', { month: 'short', year: 'numeric' }) }));
 
 function renderCommits() {
   $('#commit-list').replaceChildren(...commits.slice(0, 7).map(c => el('li', { class: 'entry' }, [
@@ -632,7 +661,9 @@ renderCommits();
   }
   const echo = cmd => print(`${note ? 'note' : 'guest~'} $ ${cmd}`, 't-cmd');
 
-  const PROJECTS = cards.map(c => ({ card: c, name: $('.e-title', c).textContent, link: $('.e-link', c).href }));
+  const PROJECTS = $$('#projects > .entries:not(.commits) > .entry').map(row => ({
+    row, name: $('.e-title', row).textContent, link: $('.e-link', row)?.href, windowed: row.classList.contains('project'),
+  }));
 
   const COMMANDS = {
     help: { desc: 'list commands', run() {
@@ -643,38 +674,51 @@ renderCommits();
       if (top) out.scrollTop += top.getBoundingClientRect().top - out.getBoundingClientRect().top - 16;
     } },
     about: { desc: 'a little about me', run() {
-      print('Atharv Sharma. Software engineer at Moonshot. 9th grade at Cuthbertson High School. Fort Mill, SC.');
+      print('Atharv Sharma. Software engineer at Moonshot (YC). 9th grade at Cuthbertson High School. Charlotte, NC.');
       print('I build software end to end — APIs, data pipelines, dashboards and ML models — mostly pointed at markets and AI safety.');
     } },
     hello: { desc: 'say hello', run() {
       print('Hey, player 2. Welcome to my corner of the internet. Try "projects", or "note" to send me a message.');
     } },
     projects: { desc: 'see what i have built', run() {
-      PROJECTS.forEach((p, i) => print([`${i + 1}. ${p.name} `, { href: p.link, text: p.card.dataset.repo ? 'code' : 'github', ext: true }]));
+      PROJECTS.forEach((p, i) => print([`${i + 1}. ${p.name} `, ...(p.link ? [{ href: p.link, text: p.row.dataset.repo ? 'code' : 'github', ext: true }] : [])]));
       print('type "open 1" (or any number) to explore one.', 't-dim');
     } },
     open: { run(arg) {
       const p = PROJECTS[parseInt(arg, 10) - 1];
       if (!p) { print('usage: open <1-' + PROJECTS.length + '>', 't-err'); return; }
       print(`opening ${p.name}…`, 't-ok');
-      openProject(p.card);
+      if (p.windowed) { openProject(p.row); return; }
+      // no project window for this one: show its row in the projects section, with focus on it
+      openSection('projects');
+      setTimeout(() => {
+        const t = $('.e-title', p.row);
+        t.setAttribute('tabindex', '-1');
+        t.focus({ preventScroll: true });
+        p.row.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
+      }, reduceMotion ? 0 : FOLD_MS + 80);
     } },
     skills: { desc: 'my skill tree', run() {
-      print('engineering: python, javascript, sql, git/github, apis, web scraping, streamlit');
-      print('ml / data: pandas, numpy, scikit-learn, tensorflow, matplotlib, plotly');
-      print('quant: backtesting, portfolio theory, monte carlo, volatility, sharpe ratio, options basics, fred api, yfinance');
+      print('engineering: python, javascript / typescript, react / next.js, sql, git/github, apis, web scraping, streamlit');
+      print('ml / data: llm fine-tuning (qlora), pandas, numpy, scikit-learn, tensorflow, matplotlib, plotly, tableau / power bi');
+      print('quant: backtesting, factor models, tf-idf on sec filings, portfolio theory, monte carlo, volatility, sharpe ratio, options basics, fred api, yfinance');
     } },
-    awards: { desc: 'achievements unlocked', run() {
-      $$('#awards .e-title').forEach(b => print(`★ ${b.textContent}`));
+    awards: { desc: 'awards & courses', run() {
+      $$('#awards .entry:not(.course)').forEach(r => {
+        const place = $('.e-when .state', r);
+        print(`★ ${place ? `${place.textContent}, ` : ''}${$('.e-title', r).textContent}`);
+      });
+      $$('#awards .entry.course').forEach(c => print(`· ${$('.e-title', c).textContent} (${$('.e-when', c).textContent.trim().toLowerCase()})`, 't-dim'));
     } },
     log: { desc: 'recent github activity', run() {
       commits.slice(0, 6).forEach(c => print([{ cls: 't-dim', text: `${c.ago} ` }, { cls: 't-ok', text: c.repo }, ` ${c.msg}`]));
     } },
     cd: { desc: 'open a section — cd research', run(arg) {
-      const id = arg.trim().toLowerCase().replace(/^[#/.]+|\/$/g, '');
-      if (!isSection(id)) { print(`usage: cd <${secs.map(s => s.id).join(' | ')}>`, 't-err'); return; }
+      const id = sectionId(arg.trim().toLowerCase().replace(/^[#/.]+|\/$/g, ''));
+      if (!id) { print(`usage: cd <${secs.map(s => s.id).join(' | ')}>`, 't-err'); return; }
       print(`opening ${id}…`, 't-ok');
-      openSection(id, { focus: true });
+      // the terminal lives in contact: only move focus when it is about to fold away
+      openSection(id, { focus: document.getElementById(id) !== openSec });
     } },
     note: { desc: 'write me a note', run() { startNote(); } },
     copy: { desc: 'copy my email', async run() {
@@ -683,6 +727,7 @@ renderCommits();
     } },
     follow: { desc: 'find me elsewhere', run() {
       print(['github   ', { href: `https://github.com/${GH_USER}`, text: `github.com/${GH_USER}`, ext: true }]);
+      print(['linkedin ', { href: 'https://www.linkedin.com/in/atharv-sharma-150232408', text: 'linkedin.com/in/atharv-sharma-150232408', ext: true }]);
       print(['email    ', { href: `mailto:${EMAIL}`, text: EMAIL }]);
       print(['resume   ', { href: 'resume.pdf', text: 'resume.pdf', ext: true }]);
     } },
@@ -816,6 +861,13 @@ renderCommits();
       e.preventDefault(); hIndex = Math.max(0, hIndex - 1); input.value = history[hIndex];
     } else if (e.key === 'ArrowDown' && history.length) {
       e.preventDefault(); hIndex = Math.min(history.length, hIndex + 1); input.value = history[hIndex] || '';
+    } else if (e.key === 'Tab' && !e.shiftKey && /^\s*cd\s+\S*$/i.test(input.value)) {
+      // cd completes section names
+      const pre = (input.value.match(/^\s*cd\s+(\S*)/i) || [, ''])[1].toLowerCase();
+      const names = secs.map(s => s.id).filter(k => k.startsWith(pre));
+      // only hold on to Tab when it completes something; otherwise it moves focus on as usual
+      if (names.length === 1 && names[0] !== pre) { e.preventDefault(); input.value = `cd ${names[0]}`; }
+      else if (names.length > 1) { e.preventDefault(); print(names.join('   '), 't-dim'); }
     } else if (e.key === 'Tab' && !e.shiftKey && input.value.trim()) {
       const pre = input.value.trim().toLowerCase();
       const names = Object.keys(COMMANDS).filter(k => k.startsWith(pre));

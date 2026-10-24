@@ -160,6 +160,11 @@ hr { border: 0; height: 2px; background: var(--dash); margin: 22px 0; }
 .nav a { padding: 4px 0; }
 .nav a:hover, .nav a:focus-visible { color: var(--gold); }
 .nav a[aria-current="true"] { color: var(--gold); }
+/* the open section's link keeps the ▶ cursor too, so it isn't marked by colour alone */
+@media (min-width: 961px) { .header .brand { margin-right: 28px; } }
+.nav a[aria-current="true"]::before { visibility: visible; animation: none; }
+.nav:has(a:hover) a[aria-current="true"]:not(:hover)::before,
+.nav:has(a:focus-visible) a[aria-current="true"]:not(:focus-visible)::before { visibility: hidden; }
 .menu-btn {
   border: 4px solid transparent;
   border-image: var(--edge-light) 4 / 4px stretch;
@@ -168,7 +173,7 @@ hr { border: 0; height: 2px; background: var(--dash); margin: 22px 0; }
 }
 
 /* ── Profile: title card ──────────────────────────────────── */
-.hero { position: relative; padding-top: 88px; padding-bottom: 40px; }
+.hero { position: relative; padding-top: 56px; padding-bottom: 40px; }
 .hero-name {
   font-family: var(--px-d);
   font-size: 64px;
@@ -221,7 +226,7 @@ hr { border: 0; height: 2px; background: var(--dash); margin: 22px 0; }
   content: "";
   position: absolute;
   top: 0;
-  left: calc(100% + 56px);
+  right: calc(100% + 48px);
   width: 110px;
   height: 110px;
   background: var(--moon) center / 110px 110px no-repeat;
@@ -274,6 +279,7 @@ hr { border: 0; height: 2px; background: var(--dash); margin: 22px 0; }
 .e-tags.big li:hover { color: var(--gold); border-color: var(--gold); }
 .e-act {
   position: relative;
+  min-height: 24px;
   font-family: var(--px-d); font-size: 8px; line-height: 16px; text-transform: uppercase; letter-spacing: 0.08em;
   color: var(--fg);
   padding-bottom: 2px;
@@ -358,7 +364,15 @@ hr { border: 0; height: 2px; background: var(--dash); margin: 22px 0; }
 .modal-help { padding: 16px 20px; }
 .modal-help .label { margin-top: 0; }
 .keys { margin-top: 14px; color: var(--fg-3); }
-.keys kbd { font-family: var(--px-d); font-size: 8px; color: var(--ink); background: var(--gold); padding: 3px 5px; margin-right: 4px; clip-path: var(--notch); }
+.keys kbd { display: inline-block; font-family: var(--px-d); font-size: 8px; color: var(--ink); background: var(--gold); padding: 3px 5px; clip-path: var(--notch); }
+/* the legend's keys are buttons: a tap does what the key does, and a real key press pushes the on-screen one */
+.key { padding: 6px 2px; margin: -6px 2px -6px 0; line-height: 1; vertical-align: baseline; }
+.key:hover kbd, .key:focus-visible kbd { background: #fff0b0; }
+.key:active kbd, .key.down kbd { background: var(--gold-2); transform: translateY(2px); }
+.modal-actions { gap: 12px 36px; padding: 16px 26px 18px 56px; background: var(--dash) left top / 100% 2px no-repeat, var(--win-bot); }
+/* in the window the ▶ only ever marks the selected command, the one Enter (or the Enter key) will run */
+.modal-actions .btn.sel::before { visibility: visible; animation: cursor-blink 0.9s steps(1, end) infinite; }
+.modal-actions .btn:not(.sel)::before { visibility: hidden; }
 @keyframes win-open { from { transform: scaleY(0.08); } 50% { transform: scaleY(0.55); } }
 
 /* ── Pinned header: stays at the top, content fades out as it slides under ── */
@@ -375,9 +389,12 @@ hr { border: 0; height: 2px; background: var(--dash); margin: 22px 0; }
 .header.stuck::after, .header.stuck::before { opacity: 1; }
 
 /* ── Responsive ───────────────────────────────────────────── */
-@media (max-width: 1000px) {
+@media (max-width: 1040px) {
   /* six toggles no longer fit on one line: two rows of three, like a command grid */
   .toggles { display: grid; grid-template-columns: repeat(3, auto); justify-items: start; }
+}
+@media (max-width: 1100px) {
+  .avatar::before { display: none; }
 }
 @media (max-width: 960px) {
   .hero-name { font-size: 56px; }
@@ -397,7 +414,7 @@ hr { border: 0; height: 2px; background: var(--dash); margin: 22px 0; }
   }
   .nav a { border-top: 0; background: var(--dash) left top / 100% 2px no-repeat; padding: 12px 0; }
   .nav a:first-child { background: none; }
-  .avatar::before { left: calc(100% + 32px); width: 88px; height: 88px; background-size: 88px 88px; }
+  .avatar::before { display: none; }
 }
 @media (max-width: 720px) {
   .header { width: calc(100% - 32px); padding: 8px 16px; }
@@ -414,19 +431,59 @@ hr { border: 0; height: 2px; background: var(--dash); margin: 22px 0; }
   .toggles { padding: 6px 16px 6px 34px; gap: 0 28px; }
   .tg::before { left: -22px; }
   .sec { padding: 20px 18px 10px; }
-  .sec-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "n title title" "rule rule count"; gap: 10px 12px; }
-  .sec-n { grid-area: n; }
-  .sec-head h2 { grid-area: title; font-size: 8px; }
-  .sec-head::after { grid-area: rule; min-width: 0; }
-  .sec-count { grid-area: count; }
   .e-title::before { left: -16px; }
   .e-title { font-size: 18px; }
   .term-out { padding-inline: 16px; }
   .term-in { margin-inline: 16px; }
   .term-actions { padding: 16px 16px 16px 34px; gap: 12px 30px; }
+  /* a compact command list at the foot of the window */
+  .modal-actions { padding: 12px 16px 12px 44px; gap: 8px 30px; }
+  .modal-actions .btn { padding: 8px 14px; }
+  .modal-actions .btn-solid { padding-bottom: 6px; }
+  .modal-actions .btn::before { left: -28px; }
 }
 @media (max-width: 480px) {
   .toggles { grid-template-columns: repeat(2, auto); }
+}
+/* short laptop screens: a smaller portrait keeps the toggles on the first screen */
+@media (min-width: 721px) and (max-height: 820px) {
+  .hero { padding-top: 32px; }
+  .hero-name { margin-bottom: 20px; }
+  .hero-links { margin-top: 18px; }
+  .profile { margin-top: 20px; }
+  .avatar { padding: 20px 28px 16px; }
+  .sprite { width: 108px; height: 144px; }
+  .avatar-shadow { width: 100px; }
+  .avatar::after { width: 120px; margin-top: 14px; }
+}
+@media (max-width: 548px) {
+  .sec-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "n title title" "rule rule count"; gap: 10px 12px; }
+  .sec-n { grid-area: n; }
+  .sec-head h2 { grid-area: title; font-size: 8px; }
+  .sec-head::after { grid-area: rule; min-width: 0; }
+  .sec-count { grid-area: count; }
+}
+/* phones: a small portrait beside the bio, like a profile card */
+@media (max-width: 520px) {
+  .hero { padding-top: 24px; }
+  .hero-links { gap: 6px 28px; padding: 8px 14px 8px 24px; font-size: 14px; }
+  .profile { gap: 14px; margin-top: 20px; }
+  .avatar { padding: 14px 14px 12px; }
+  .sprite { width: 72px; height: 96px; }
+  .avatar-shadow { width: 64px; height: 6px; background-size: calc(100% - 32px) 2px, 100% 2px, calc(100% - 32px) 2px; background-position: 16px 0, 0 2px, 16px 4px; }
+  .avatar::after { width: 76px; margin-top: 10px; }
+  .hero-bio, .status { font-size: 14px; line-height: 22px; }
+  .status { gap: 8px; margin-top: 10px; }
+}
+@media (max-width: 360px) {
+  .toggles { padding: 6px 10px 6px 28px; gap: 0 24px; }
+  .tg { font-size: 14px; }
+  .tg::before { left: -20px; }
+}
+@media (max-width: 359px) {
+  .header { padding-inline: 12px; }
+  .brand { font-size: 10px; }
+  .menu-btn { padding-inline: 8px; }
 }
 @media (max-width: 400px) {
   .hero-name { font-size: 32px; }
@@ -438,7 +495,6 @@ hr { border: 0; height: 2px; background: var(--dash); margin: 22px 0; }
 @media (hover: none) {
   .hero-links { padding-left: 28px; }
   .term-actions { padding-left: 22px; gap: 12px; }
-  .modal-actions { gap: 12px; }
 }
 @media (hover: none) and (max-width: 720px) {
   .hero-links { padding-left: 20px; }
@@ -450,7 +506,12 @@ hr { border: 0; height: 2px; background: var(--dash); margin: 22px 0; }
 }
 
 @media print {
+  :root { --fg: #000; --fg-2: #222; --fg-3: #555; --green: #1e6b2a; --gold: #7a5d00; --coral: #a33a17; }
   body { background: #fff; }
+  .entry { break-inside: avoid; }
+  .sec-head, .sec-sub { break-after: avoid; }
+  .state.gold { background: none; color: var(--gold); border-color: currentColor; }
+  .modal-actions { position: static; }
   .sec, .term, .toggles, .avatar, .header, .hero-links, .modal-win, .modal-help {
     border: 2px solid #000; border-image: none; background: #fff;
   }

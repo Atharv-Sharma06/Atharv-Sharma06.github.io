@@ -89,23 +89,26 @@ b, strong, h1, h2, h3, h4 { font-weight: 400; }
 .menu-btn { display: none; border: 2px solid var(--line-2); padding: 8px 12px; }
 
 /* ── Profile (centered, like a title card) ─────────────────── */
-.hero { display: flex; flex-direction: column; align-items: center; text-align: center; padding-top: 88px; padding-bottom: 40px; }
+.hero { display: flex; flex-direction: column; align-items: center; text-align: center; padding-top: 56px; padding-bottom: 40px; }
 /* the heading hugs the name, so the roulette copy can sit exactly on top of it */
 .hero-name { position: relative; width: fit-content; max-width: 100%; font-size: 64px; line-height: 1.1; margin-bottom: 24px; min-height: 1.1em; }
 /* font roulette: the real name keeps its space while a scaled copy flips faces on top of it */
-.name-roll { display: none; position: absolute; left: 50%; top: 0; white-space: pre; transform-origin: 50% 0; pointer-events: none; }
+.name-roll { display: none; position: absolute; left: 50%; top: 0; white-space: pre; transform: translateX(-50%); transform-origin: 50% 0; pointer-events: none; }
 .rolling .name-roll { display: block; }
 .rolling .type { visibility: hidden; }
-.hero-line { font-size: 20px; line-height: 32px; max-width: 46em; }
+.hero-line { font-size: 20px; line-height: 32px; max-width: 46em; text-wrap: balance; }
 .hero-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 32px; margin-top: 24px; color: var(--fg-3); }
 .hero-links a:hover { color: var(--green); }
-.hero-bio { max-width: 60ch; margin-top: 28px; }
-.status { display: inline-flex; align-items: center; gap: 12px; margin-top: 16px; color: var(--green); }
+/* portrait beside the bio, so the toggles reach the first screen */
+.profile { display: flex; align-items: center; justify-content: center; gap: 36px; margin-top: 28px; text-align: left; }
+.profile-text { max-width: 34em; }
+.hero-bio { max-width: 60ch; }
+.status { display: inline-flex; align-items: center; gap: 12px; margin-top: 14px; color: var(--green); }
 .blink-dot { width: 8px; height: 8px; background: var(--green); animation: caret 1s steps(1) 4; }
 @keyframes caret { 50% { opacity: 0; } }
 
 /* avatar: materialises row by row once the name lands */
-.avatar { position: relative; display: grid; place-items: center; margin-top: 32px; padding: 24px 32px; }
+.avatar { position: relative; flex-shrink: 0; display: grid; place-items: center; padding: 24px 32px; }
 .sprite { width: 144px; height: 192px; }
 .js .avatar .sprite { clip-path: inset(0 0 100% 0); }
 .js .avatar.in .sprite { clip-path: inset(0); transition: clip-path 0.72s steps(12, end) 0.1s; }
@@ -120,7 +123,8 @@ b, strong, h1, h2, h3, h4 { font-weight: 400; }
 .avatar-shadow { width: 120px; height: 12px; background: #121512; margin-top: -6px; }
 
 /* section toggles: lowercase words with an arrow that turns when a section is open */
-.toggles { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 36px; margin-top: 32px; }
+/* the gap above is at least the header's clearance, so a landed menu never shows the portrait's edge under the header */
+.toggles { display: flex; flex-wrap: wrap; justify-content: safe center; gap: 4px 36px; margin-top: 36px; }
 .tg { position: relative; display: inline-flex; align-items: center; gap: 10px; padding: 8px 2px; font-size: 20px; line-height: 1.2; color: var(--fg-3); white-space: nowrap; transition: color 0.15s; }
 .tg:hover { color: var(--fg); }
 .tg[aria-expanded="true"] { color: var(--fg); }
@@ -143,7 +147,8 @@ html.js:not(.js-ok) .rv, html.js:not(.js-ok) .intro .intro-step, html.js:not(.js
 
 /* ── The book: numbered sections, one open at a time ───────── */
 .book { max-width: calc(var(--book) + 48px); padding-bottom: 48px; }
-.sec { scroll-margin-top: 112px; }
+/* a #link to a section lands where a toggle tap does: the menu just under the header, the section below it */
+.sec { scroll-margin-top: 108px; }
 .sec + .sec { margin-top: 32px; }
 /* once main.js has taken over the toggles, only the open section shows; if it never runs, every section stays readable */
 .one-sec .sec:not(.open) { display: none; }
@@ -182,7 +187,7 @@ html.js:not(.js-ok) .rv, html.js:not(.js-ok) .intro .intro-step, html.js:not(.js
 .sec-sub { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin-top: 28px; padding-top: 20px; border-top: 2px solid var(--line-2); }
 .commits .entry { padding: 12px 0; grid-template-columns: 8.5em minmax(0, 1fr) minmax(0, 14em); }
 .commits .entry:first-child { padding-top: 8px; }
-.commits .e-desc { margin-top: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commits .e-desc { margin-top: 0; overflow-wrap: anywhere; }
 .commits .e-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
 .repos { margin-top: 12px; }
 
@@ -217,7 +222,12 @@ html.js:not(.js-ok) .rv, html.js:not(.js-ok) .intro .intro-step, html.js:not(.js
 .term-go { color: var(--fg-2); }
 .term-go:hover { color: var(--green); }
 .term-actions { display: flex; flex-wrap: wrap; gap: 12px; padding: 20px; margin-top: 12px; border-top: 2px solid var(--line); }
-.e-row-link { overflow-wrap: anywhere; }
+.e-title.e-row-link { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
+.e-row-link .ico { display: inline-block; width: 12px; height: 12px; margin-left: 4px; vertical-align: 0; }
+/* a citation under a paper, like the reference's */
+.e-cite { margin-top: 12px; padding-left: 12px; border-left: 2px solid var(--line-2); font-size: 14px; color: var(--fg-3); }
+.e-cite a { color: var(--fg-2); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.e-cite a:hover, .e-cite a:focus-visible { color: var(--green); }
 .e-row-link:hover, .e-row-link:focus-visible { color: var(--green); }
 
 /* ── Footer ────────────────────────────────────────────────── */
@@ -242,7 +252,7 @@ html.modal-open body { overflow: clip; } /* a body scroll container would unpin 
 .features li { display: flex; gap: 12px; padding: 8px 0; border-top: 2px solid var(--line); }
 .features li::before { content: ">"; color: var(--green); }
 .more-stack { color: var(--fg-2); }
-.modal-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+.modal-actions { position: sticky; bottom: 0; z-index: 1; display: flex; flex-wrap: wrap; gap: 12px; padding: 16px 24px 18px; background: var(--panel); }
 @keyframes fade { from { opacity: 0; } }
 @keyframes pop { from { opacity: 0; transform: translateY(16px) scale(0.98); } }
 
@@ -252,9 +262,13 @@ html.modal-open body { overflow: clip; } /* a body scroll container would unpin 
 .shot-tag { position: absolute; z-index: 1; right: 8px; bottom: 8px; background: rgba(10, 12, 10, 0.82); color: var(--fg-2); font-size: 8px; line-height: 1; padding: 5px 7px; }
 
 /* section page turn: the old section fades out, the new rows step in one after another */
-.sec.leaving { opacity: 0; transition: opacity 0.14s steps(2, end); }
-.sec.entering .sec-head { animation: row-in 0.24s steps(3, end) both; }
-.sec.entering .entries > li, .sec.entering .term, .sec.entering .sec-sub { animation: row-in 0.32s steps(4, end) both; animation-delay: calc(60ms + var(--i, 0) * 45ms); }
+/* dropdown: the open section rolls up, then the new one unrolls from under the toggles and its rows step in */
+.sec.folding { animation: fold 0.2s steps(4, end) forwards; }
+.sec.dropping { animation: drop 0.32s steps(6, end); }
+.sec.dropping .sec-head { animation: row-in 0.24s steps(3, end) 0.06s both; }
+.sec.dropping .entries > li, .sec.dropping .term, .sec.dropping .sec-sub { animation: row-in 0.32s steps(4, end) both; animation-delay: calc(120ms + var(--i, 0) * 45ms); }
+@keyframes drop { from { clip-path: inset(0 0 100% 0); } }
+@keyframes fold { to { clip-path: inset(0 0 100% 0); opacity: 0.4; } }
 @keyframes row-in { from { opacity: 0; transform: translateX(-12px); } }
 
 /* ── Responsive ────────────────────────────────────────────── */
@@ -278,25 +292,41 @@ html.modal-open body { overflow: clip; } /* a body scroll container would unpin 
   .nav a:first-child { border-top: 0; }
 }
 
+@media (max-width: 900px) {
+  /* rows fold: date and meta share the top line, the entry runs full width under them */
+  .entry, .commits .entry { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "when meta" "body body"; gap: 6px 16px; }
+  .e-when { grid-area: when; }
+  .e-body { grid-area: body; }
+  .e-meta { grid-area: meta; flex-direction: row; flex-wrap: wrap; justify-content: safe flex-end; gap: 6px 14px; }
+  .e-meta > * { min-width: 0; overflow-wrap: anywhere; }
+  .commits .e-meta { justify-self: end; max-width: 100%; }
+}
+
 @media (max-width: 720px) {
   .hero { padding-top: 48px; }
   .hero-name { font-size: 40px; }
   .hero-line { font-size: 16px; line-height: 28px; }
   .tg { font-size: 16px; }
+  .sec { scroll-margin-top: 0; }
   .toggles { gap: 2px 28px; }
-  /* rows fold: date and meta share the top line, the entry runs full width under them */
-  .entry, .commits .entry { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "when meta" "body body"; gap: 6px 16px; }
-  .e-when { grid-area: when; }
-  .e-body { grid-area: body; }
-  .e-meta { grid-area: meta; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px; }
-  .commits .e-meta { max-width: 12em; }
   .e-title { font-size: 18px; }
   .card-title { font-size: 16px; }
+  .e-row-link:focus-visible { outline-offset: 1px; }
+}
+
+@media (max-width: 540px) {
+  /* the tagline takes its own line, so the actions always share the next one */
+  .e-meta .e-tagline { flex-basis: 100%; }
 }
 
 @media (max-width: 480px) {
   .term-in { flex-wrap: wrap; }
   .prompt { flex-basis: 100%; }
+}
+
+@media (max-width: 359px) {
+  .entry:has(.e-meta .e-act) { grid-template-areas: "when when" "meta meta" "body body"; }
+  .entry:has(.e-meta .e-act) .e-meta { justify-content: flex-start; }
 }
 
 @media (max-width: 400px) {
