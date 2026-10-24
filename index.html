@@ -121,36 +121,88 @@
         <div class="sec-head">
           <span class="sec-n" aria-hidden="true">01</span>
           <h2 id="projects-h" data-scramble>Projects</h2>
-          <span class="sec-count">9 entries</span>
+          <span class="sec-count">12 entries</span>
         </div>
         <ol class="entries">
-          <li class="entry">
+          <li class="entry" data-repo="llama-qlora-chatbot">
             <p class="e-when"><span class="state live">Built</span></p>
             <div class="e-body">
               <h3 class="e-title">Llama QLoRA Chatbot &amp; Prompt-Injection Defense Harness</h3>
               <p class="e-desc">Fine-tuned Llama 3.1 8B Instruct with QLoRA (a rank-16 adapter) on OASST1 and Dolly-15k, sized to train end to end on a single 32GB consumer GPU. An evaluation harness tests the model against documented injection attacks, scored by an LLM judge, and an instruction-hierarchy and input-classifier defense layer cut the attack success rate from 40% to 0% on the five-attack battery.</p>
               <ul class="e-tags" aria-label="Stack"><li>Llama 3.1 8B</li><li>QLoRA</li><li>Prompt injection</li><li>LLM judge</li></ul>
             </div>
-            <div class="e-meta"><p>Attack success</p><p class="gold">40% to 0%</p></div>
+            <div class="e-meta">
+              <p>Attack success</p>
+              <p class="gold">40% to 0%</p>
+              <a class="e-act e-link" href="https://github.com/Atharv-Sharma06/llama-qlora-chatbot" target="_blank" rel="noopener">Source <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a>
+            </div>
           </li>
 
-          <li class="entry">
+          <li class="entry" data-repo="ai-investment-assistant">
             <p class="e-when"><span class="state gold">1st place</span></p>
             <div class="e-body">
               <h3 class="e-title">QuantifyAI</h3>
-              <p class="e-desc">Built solo, and won 1st Place in the Education category at a Minorities in STEM hackathon.</p>
+              <p class="e-desc">Helps students who want to start investing. A rule-based engine pulls live market data and scores a stock from 0 to 100 on volatility, 52-week position, momentum and trend, then GPT-4o mini turns the numbers into a plain-English breakdown and a direct “Should I invest?” answer. Built solo, and won 1st Place in the Education category at a Minorities in STEM hackathon.</p>
+              <ul class="e-tags" aria-label="Stack"><li>Next.js</li><li>Yahoo Finance</li><li>GPT-4o mini</li><li>Recharts</li></ul>
             </div>
-            <div class="e-meta"><p>Minorities in STEM</p><p>Hackathon</p></div>
+            <div class="e-meta">
+              <p>Minorities in STEM</p>
+              <p>Hackathon</p>
+              <a class="e-act e-link" href="https://github.com/Atharv-Sharma06/ai-investment-assistant" target="_blank" rel="noopener">Source <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a>
+              <a class="e-act" href="https://quantifyai-by-as.netlify.app" target="_blank" rel="noopener">Live demo <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a>
+            </div>
           </li>
 
-          <li class="entry">
+          <li class="entry" data-repo="mathscan-ai--mobile-math-recog">
             <p class="e-when"><span class="state gold">2nd place</span></p>
             <div class="e-body">
               <h3 class="e-title">Math Scan AI</h3>
               <p class="e-desc">AI-powered app that evaluates students' math work using OCR and gives detailed feedback.</p>
-              <ul class="e-tags" aria-label="Stack"><li>OCR</li><li>AI feedback</li></ul>
+              <ul class="e-tags" aria-label="Stack"><li>OCR</li><li>AI feedback</li><li>React Native</li><li>Expo</li></ul>
             </div>
-            <div class="e-meta"><p>Science fair</p></div>
+            <div class="e-meta">
+              <p>Science fair</p>
+              <a class="e-act e-link" href="https://github.com/Atharv-Sharma06/mathscan-ai--mobile-math-recog" target="_blank" rel="noopener">Source <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a>
+            </div>
+          </li>
+
+          <li class="entry" data-repo="smg">
+            <p class="e-when"><span class="state live">Built</span></p>
+            <div class="e-body">
+              <h3 class="e-title">SMG Automated Trader</h3>
+              <p class="e-desc">A trading bot for The Stock Market Game. It scrapes holdings, cash and the NC rankings with Selenium, blends momentum, fundamental and technical signals, and checks each order against the game's rules before placing it. It also backtests strategies, tracks P&amp;L and drawdown, and sends Slack and email alerts. It runs as a dry run unless live trading is switched on.</p>
+              <ul class="e-tags" aria-label="Stack"><li>Python</li><li>Selenium</li><li>yfinance</li><li>Backtesting</li></ul>
+            </div>
+            <div class="e-meta">
+              <p>Stock Market Game</p>
+              <a class="e-act e-link" href="https://github.com/Atharv-Sharma06/smg" target="_blank" rel="noopener">Source <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a>
+            </div>
+          </li>
+
+          <li class="entry" data-repo="congress">
+            <p class="e-when"><span class="state live">Built</span></p>
+            <div class="e-body">
+              <h3 class="e-title">CivicAI</h3>
+              <p class="e-desc">An iOS app that explains your county with public data. It pulls 13 measures live from the Census, BLS and BEA, charts about 11 years of history for each, and answers plain-English questions from those numbers alone, with every statistic traced back to its source dataset.</p>
+              <ul class="e-tags" aria-label="Stack"><li>SwiftUI</li><li>Swift Charts</li><li>Node.js</li><li>Census &amp; FRED APIs</li><li>OpenAI</li></ul>
+            </div>
+            <div class="e-meta">
+              <p>iOS app</p>
+              <a class="e-act e-link" href="https://github.com/Atharv-Sharma06/congress" target="_blank" rel="noopener">Source <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a>
+            </div>
+          </li>
+
+          <li class="entry" data-repo="Kaggle">
+            <p class="e-when"><span class="state live">Built</span></p>
+            <div class="e-body">
+              <h3 class="e-title">OrbitAI</h3>
+              <p class="e-desc">A live satellite tracker with an AI tutor. It propagates thousands of satellites with SGP4 orbital mechanics on a 3D Earth at 60 fps. Click one and the tutor explains what it does at one of four levels, from kid to advanced. There's also a voice chat tutor, a side-by-side comparison tool, a quiz and a sky finder that predicts ISS passes.</p>
+              <ul class="e-tags" aria-label="Stack"><li>Next.js</li><li>Three.js</li><li>SGP4</li><li>Claude API</li></ul>
+            </div>
+            <div class="e-meta">
+              <p>Web app</p>
+              <a class="e-act e-link" href="https://github.com/Atharv-Sharma06/Kaggle" target="_blank" rel="noopener">Source <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a>
+            </div>
           </li>
 
           <li class="entry project" data-project="macro" data-repo="ECONOMIC-data-reader">
@@ -305,6 +357,7 @@
             <div class="e-meta">
               <p>Lead author</p>
               <p><span class="state wip">In progress</span></p>
+              <a class="e-act" href="https://github.com/Atharv-Sharma06/v5" target="_blank" rel="noopener">Experiment code <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a>
             </div>
           </li>
           <li class="entry">
