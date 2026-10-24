@@ -10,6 +10,8 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const EMAIL = 'atharv.eck@gmail.com';
 const GH_USER = 'Atharv-Sharma06';
 
+// If main.js arrives late, the CSS fallback may already have revealed the page; don't hide it again.
+const fellBack = !reduceMotion && getComputedStyle($('.intro-step')).opacity === '1';
 // Tells the CSS fallbacks that JS is alive and in control of reveals.
 html.classList.add('js-ok');
 
@@ -50,9 +52,12 @@ function setMenu(open) {
 menuBtn.addEventListener('click', () => setMenu(!nav.classList.contains('open')));
 $$('a', nav).forEach(a => a.addEventListener('click', () => setMenu(false)));
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && nav.classList.contains('open')) { setMenu(false); menuBtn.focus(); }
+  if (e.key !== 'Escape' || !nav.classList.contains('open') || !$('#modal').hidden) return;
+  const inHeader = nav.contains(document.activeElement) || document.activeElement === menuBtn;
+  setMenu(false);
+  if (inHeader) menuBtn.focus();
 });
-const wideMQ = matchMedia('(min-width: 721px)');
+const wideMQ = matchMedia('(min-width: 841px)');
 const onWide = e => { if (e.matches) setMenu(false); };
 if (wideMQ.addEventListener) wideMQ.addEventListener('change', onWide); else wideMQ.addListener(onWide);
 
@@ -82,8 +87,8 @@ function playIntro() {
   cancelAnimationFrame(introRaf);
   if (reduceMotion) { endIntro(); return; }
   const full = typeEl.dataset.text;
-  const TYPE_MS = 75;
-  const DURATION = 2300;
+  const TYPE_MS = 28;
+  const DURATION = 2100;
   heroName.setAttribute('aria-label', full);
   heroName.classList.add('typing');
   hero.classList.add('intro', 'loading');
@@ -92,19 +97,40 @@ function playIntro() {
   const tick = now => {
     const t = now - t0;
     const n = Math.min(full.length, Math.floor(t / TYPE_MS));
-    typeEl.replaceChildren(full.slice(0, n), el('span', { class: 'caret', 'aria-hidden': 'true' }), el('span', { class: 'ghost', 'aria-hidden': 'true', text: full.slice(n) }));
+    // Keep the word being typed in one unbreakable run, so it never starts on the wrong line.
+    const done = full.slice(0, n), rest = full.slice(n);
+    const cut = done.lastIndexOf(' ') + 1;
+    const end = rest.indexOf(' ') < 0 ? rest.length : rest.indexOf(' ');
+    typeEl.replaceChildren(
+      done.slice(0, cut),
+      el('span', { class: 'nowrap' }, [
+        done.slice(cut),
+        ...(n < full.length ? [el('span', { class: 'caret', 'aria-hidden': 'true' })] : []),
+        el('span', { class: 'ghost', 'aria-hidden': 'true', text: rest.slice(0, end) }),
+      ]),
+      el('span', { class: 'ghost', 'aria-hidden': 'true', text: rest.slice(end) }),
+    );
     // Progress arrives in uneven chunks, like a real loader.
     const x = clamp(t / DURATION, 0, 1);
     const pct = Math.min(100, Math.floor((1 - Math.pow(1 - x, 2.4)) * 100 + Math.sin(x * 9) * 2));
     loadLabel.textContent = `Loading ${clamp(pct, 0, 100)}%`;
     segs.forEach((s, i) => s.classList.toggle('on', ((i + 1) / SEGMENTS) * 100 <= pct));
-    introSteps.forEach((s, i) => { if (t > 1050 + i * 240) s.classList.add('shown'); });
+    introSteps.forEach((s, i) => { if (t > 300 + i * 120) s.classList.add('shown'); });
     if (t < DURATION + 300) introRaf = requestAnimationFrame(tick);
     else endIntro();
   };
   introRaf = requestAnimationFrame(tick);
 }
-playIntro();
+
+if (fellBack) {
+  endIntro();
+} else {
+  heroName.style.visibility = 'hidden';
+  Promise.race([
+    document.fonts ? document.fonts.load('400 64px "Press Start 2P"') : Promise.resolve(),
+    new Promise(r => setTimeout(r, 1200)),
+  ]).catch(() => {}).then(() => { heroName.style.visibility = ''; playIntro(); });
+}
 
 $('#replay').addEventListener('click', () => {
   window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
@@ -119,6 +145,7 @@ function scramble(node) {
   if (reduceMotion) return;
   const final = node.textContent;
   node.setAttribute('aria-label', final);
+  node.style.height = node.offsetHeight + 'px';
   const DURATION = 650;
   const t0 = performance.now();
   const tick = now => {
@@ -130,7 +157,7 @@ function scramble(node) {
     }
     node.textContent = out;
     if (p < 1) requestAnimationFrame(tick);
-    else node.textContent = final;
+    else { node.textContent = final; node.style.height = ''; }
   };
   requestAnimationFrame(tick);
 }
@@ -144,13 +171,14 @@ const io = new IntersectionObserver(entries => {
     io.unobserve(t);
   });
 }, { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
+if (fellBack) $$('.rv').forEach(n => n.classList.add('in'));
 $$('.rv, [data-scramble]').forEach(n => io.observe(n));
 
 /* ── Pixel avatar ─────────────────────────────────────────── */
 // Palette lives here so the character is easy to re-skin.
 const SPRITE_PALETTE = {
-  H: '#20241f', h: '#30362f', S: '#b97a52', s: '#94603f', E: '#e9e7df', P: '#0a0c0a',
-  M: '#e9e7df', G: '#3f8a4a', g: '#2f6b37', w: '#e9e7df', L: '#8ff09a', D: '#1a1d1a',
+  H: '#1a1b33', h: '#34375e', S: '#b97a52', s: '#94603f', E: '#f5f6ff', P: '#090c26',
+  M: '#f5f6ff', G: '#cf4459', g: '#9b2f45', w: '#f5f6ff', L: '#ffd447', D: '#0d1238',
 };
 const SPRITE_ROWS = [
   '......HHHHHH......',
@@ -353,8 +381,7 @@ const cards = $$('.card');
 
 function openProject(card) {
   const link = $('.card-link', card).href;
-  const slug = link.split('/').filter(Boolean).pop();
-  $('#modal-file').textContent = `${slug}.py`;
+  $('#modal-file').textContent = $('.card-title', card).textContent.toLowerCase().replace(/\W+/g, '_') + '.py';
   $('#modal-title').textContent = $('.card-title', card).textContent;
   $('#modal-tag').textContent = $('.card-tag', card).textContent;
   $('#modal-desc').textContent = $('.card-desc', card).textContent;
@@ -362,20 +389,21 @@ function openProject(card) {
   const list = $('#modal-features');
   list.replaceChildren(...$$('.card-more li', card).map(li => el('li', { text: li.textContent })));
   $('#modal-link').href = link;
+  $('#modal-link').firstChild.textContent = card.dataset.repo ? 'View source ' : 'View GitHub ';
   const shot = $('#modal-shot');
   renderShot(shot, card.dataset.project);
-  shot.append(el('span', { class: 'shot-tag', text: 'Preview · illustrative' }));
+  if (!$('.shot-tag', shot)) shot.append(el('span', { class: 'shot-tag', text: 'Preview · illustrative' }));
   modalReturn = document.activeElement;
   modal.hidden = false;
   html.classList.add('modal-open');
-  setInert(['.header', 'main', '.footer'], true);
+  setInert(['.skip', '.header', 'main', '.footer'], true);
   $('.term-x', modal).focus();
 }
 function closeProject() {
   if (modal.hidden) return;
   modal.hidden = true;
   html.classList.remove('modal-open');
-  setInert(['.header', 'main', '.footer'], false);
+  setInert(['.skip', '.header', 'main', '.footer'], false);
   if (modalReturn) modalReturn.focus();
 }
 cards.forEach(card => $('.explore', card).addEventListener('click', () => openProject(card)));
@@ -386,7 +414,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeProject
 $$('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     $$('.tab').forEach(t => { t.classList.toggle('active', t === tab); t.setAttribute('aria-pressed', String(t === tab)); });
-    $$('.log-list').forEach(l => { l.hidden = l.dataset.panel !== tab.dataset.tab; });
+    $$('.log-list').forEach(l => l.classList.toggle('active', l.dataset.panel === tab.dataset.tab));
   });
 });
 
@@ -407,8 +435,7 @@ function describeEvent(e) {
   switch (e.type) {
     case 'PushEvent': {
       const commit = p.commits?.slice(-1)[0];
-      if (commit) return commit.message.split('\n')[0];
-      return `pushed to ${(p.ref || '').replace('refs/heads/', '') || 'main'}`;
+      return commit ? commit.message.split('\n')[0] : null;
     }
     // Branch/tag creation is noise in a feed; only new repositories are worth showing.
     case 'CreateEvent': return p.ref_type === 'repository' ? 'created repository' : null;
@@ -416,11 +443,11 @@ function describeEvent(e) {
     case 'PullRequestEvent': {
       const pr = p.pull_request || {};
       const action = p.action === 'closed' && pr.merged ? 'merged' : p.action;
-      return pr.title ? `${action} PR: ${pr.title}` : `${action} PR #${p.number ?? pr.number ?? ''}`.trim();
+      return pr.title ? `${action} PR: ${pr.title}` : null;
     }
     case 'IssuesEvent': {
       const issue = p.issue || {};
-      return issue.title ? `${p.action} issue: ${issue.title}` : `${p.action} issue #${issue.number ?? ''}`.trim();
+      return issue.title ? `${p.action} issue: ${issue.title}` : null;
     }
     case 'ReleaseEvent': return `released ${p.release?.tag_name || ''}`;
     case 'PublicEvent': return 'made repository public';
@@ -454,7 +481,7 @@ renderCommits();
       fetch(`https://api.github.com/users/${GH_USER}`),
     ]);
     const user = userRes.ok ? await userRes.json() : {};
-    if (Number.isFinite(user.public_repos)) $('#gh-repos').textContent = user.public_repos;
+    if (Number.isFinite(user.public_repos)) { $('#gh-repos').textContent = user.public_repos; $('.repos').hidden = false; }
     if (!eventsRes.ok) return;
     const events = await eventsRes.json();
     const rows = (Array.isArray(events) ? events : [])
@@ -466,7 +493,7 @@ renderCommits();
         msg,
         ago: timeAgo(new Date(e.created_at)),
       }));
-    if (rows.length) { commits = rows; renderCommits(); }
+    if (rows.length >= 3) { commits = rows; renderCommits(); }
   } catch (_) { /* static data already shown */ }
 })();
 
@@ -499,18 +526,21 @@ renderCommits();
 
   const COMMANDS = {
     help: { desc: 'list commands', run() {
-      Object.entries(COMMANDS).filter(([, c]) => c.desc).forEach(([k, c]) => print(`${k.padEnd(9, ' ')} --> ${c.desc}`));
+      const top = out.lastElementChild;
+      Object.entries(COMMANDS).filter(([, c]) => c.desc).forEach(([k, c]) => print(`${k} --> ${c.desc}`));
       print('tip: tab completes, up/down browses history.', 't-dim');
+      // The list is taller than the window: start reading from the top of it, not the bottom.
+      if (top) out.scrollTop += top.getBoundingClientRect().top - out.getBoundingClientRect().top - 16;
     } },
     about: { desc: 'a little about me', run() {
-      print('Atharv Sharma. Quant developer. Fort Mill, SC.');
-      print('I build Python tools that turn market data into decisions — backtests, optimizers, forecasts. Open to internships & research.');
+      print('Atharv Sharma. Software engineer at Moonshot. 9th grade at Cuthbertson High School. Fort Mill, SC.');
+      print('I build software end to end — APIs, data pipelines, dashboards and ML models — mostly pointed at markets and AI safety.');
     } },
     hello: { desc: 'say hello', run() {
       print('Hey, player 2. Welcome to my corner of the internet. Try "projects", or "note" to send me a message.');
     } },
     projects: { desc: 'see what i have built', run() {
-      PROJECTS.forEach((p, i) => print([`${i + 1}. ${p.name}  `, { href: p.link, text: 'code', ext: true }]));
+      PROJECTS.forEach((p, i) => print([`${i + 1}. ${p.name} `, { href: p.link, text: p.card.dataset.repo ? 'code' : 'github', ext: true }]));
       print('type "open 1" (or any number) to explore one.', 't-dim');
     } },
     open: { run(arg) {
@@ -520,14 +550,15 @@ renderCommits();
       openProject(p.card);
     } },
     skills: { desc: 'my skill tree', run() {
-      print('technical: python, pandas, numpy, sql, scikit-learn, tensorflow, streamlit, plotly, javascript, git');
+      print('engineering: python, javascript, sql, git/github, apis, web scraping, streamlit');
+      print('ml / data: pandas, numpy, scikit-learn, tensorflow, matplotlib, plotly');
       print('quant: backtesting, portfolio theory, monte carlo, volatility, sharpe ratio, options basics, fred api, yfinance');
     } },
     awards: { desc: 'achievements unlocked', run() {
       $$('.log-list[data-panel="achievements"] b').forEach(b => print(`★ ${b.textContent}`));
     } },
     log: { desc: 'recent github activity', run() {
-      commits.slice(0, 6).forEach(c => print([{ cls: 't-dim', text: `${c.ago.padEnd(8, ' ')} ` }, { cls: 't-ok', text: c.repo }, ` ${c.msg}`]));
+      commits.slice(0, 6).forEach(c => print([{ cls: 't-dim', text: `${c.ago} ` }, { cls: 't-ok', text: c.repo }, ` ${c.msg}`]));
     } },
     note: { desc: 'write me a note', run() { startNote(); } },
     copy: { desc: 'copy my email', async run() {
@@ -545,7 +576,7 @@ renderCommits();
     } },
     clear: { desc: 'a fresh terminal', run() { out.replaceChildren(); } },
     replay: { desc: 'play the intro again', run() { $('#replay').click(); } },
-    whoami: { run() { print('guest. (recruiters, you are very welcome — try "note".)'); } },
+    whoami: { run() { print('guest. (the site belongs to atharv — swe at moonshot. try "about" or "note".)'); } },
     date: { run() { print(new Date().toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'full', timeStyle: 'short' }) + ' ET'); } },
     sudo: { run(arg) {
       if (/hire/i.test(arg)) { print('access granted. opening a note…', 't-ok'); startNote('Internship / hiring'); }
@@ -573,7 +604,7 @@ renderCommits();
   const NOTE_STEPS = [
     { key: 'name', q: "what's your name?", ph: 'your name', check: v => v.length >= 2 || 'i need at least a first name.' },
     { key: 'email', q: 'where can i reach you?', ph: 'you@company.com', type: 'email', check: v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) || "that email doesn't look right." },
-    { key: 'topic', q: `what's this about? ${TOPICS.map((t, i) => `${i + 1} ${t.toLowerCase()}`).join(' · ')}`, ph: 'pick a number or type your own', map: v => TOPICS[parseInt(v, 10) - 1] || v },
+    { key: 'topic', q: `what's this about? ${TOPICS.map((t, i) => `${i + 1} ${t.toLowerCase()}`).join(' · ')}`, ph: '1-4 or your own', map: v => (/^[1-4]$/.test(v) ? TOPICS[Number(v) - 1] : v) },
     { key: 'message', q: 'your message — a sentence or two is perfect:', ph: 'type your message', check: v => v.length >= 10 || 'a little more detail helps me reply properly.' },
     { key: 'confirm', q: 'send it? (y/n)', ph: 'y or n' },
   ];
@@ -585,8 +616,10 @@ renderCommits();
   function askNote() {
     const step = NOTE_STEPS[note.i];
     print(step.q, 't-ok');
-    setPrompt(`note ${note.i + 1}/${NOTE_STEPS.length} >`);
+    const steps = NOTE_STEPS.filter(s => !(note.preset && s.key === 'topic'));
+    setPrompt(`note ${steps.indexOf(step) + 1}/${steps.length} >`);
     input.placeholder = step.ph;
+    input.setAttribute('aria-label', `Note: ${step.ph}`);
     input.type = step.type || 'text';
     input.focus({ preventScroll: true });
   }
@@ -600,6 +633,7 @@ renderCommits();
     note = null;
     setPrompt();
     input.placeholder = 'Type a command';
+    input.setAttribute('aria-label', 'Terminal command');
     input.type = 'text';
   }
   function noteAnswer(v) {
@@ -666,19 +700,20 @@ renderCommits();
       e.preventDefault(); hIndex = Math.max(0, hIndex - 1); input.value = history[hIndex];
     } else if (e.key === 'ArrowDown' && history.length) {
       e.preventDefault(); hIndex = Math.min(history.length, hIndex + 1); input.value = history[hIndex] || '';
-    } else if (e.key === 'Tab' && input.value.trim()) {
+    } else if (e.key === 'Tab' && !e.shiftKey && input.value.trim()) {
       const pre = input.value.trim().toLowerCase();
       const names = Object.keys(COMMANDS).filter(k => k.startsWith(pre));
-      if (names.length === 1) { e.preventDefault(); input.value = names[0] + ' '; }
+      if (names.length === 1 && input.value !== names[0] + ' ') { e.preventDefault(); input.value = names[0] + ' '; }
       else if (names.length > 1) { e.preventDefault(); print(names.join('   '), 't-dim'); }
     }
   });
 
   $$('[data-cmd]').forEach(b => b.addEventListener('click', () => {
-    if (note && b.dataset.cmd !== 'note') endNote();
+    if (sending) return;
+    if (note && b.dataset.cmd !== 'note') { print('note cancelled.', 't-dim'); endNote(); }
     if (b.dataset.cmd === 'note' && note) { input.focus({ preventScroll: true }); return; }
     run(b.dataset.cmd);
-    input.focus({ preventScroll: true });
+    if (b.dataset.cmd === 'note' || !matchMedia('(pointer: coarse)').matches) input.focus({ preventScroll: true });
   }));
   $('#term-clear').addEventListener('click', () => { out.replaceChildren(); input.focus({ preventScroll: true }); });
   out.addEventListener('click', e => { if (!e.target.closest('a') && !window.getSelection().toString()) input.focus({ preventScroll: true }); });
@@ -686,4 +721,8 @@ renderCommits();
   // boot screen
   print('guest~ $ about', 't-cmd'); COMMANDS.about.run();
   print('guest~ $ hello', 't-cmd'); COMMANDS.hello.run();
+  // Start reading at the top; line heights change once the pixel font arrives, so re-apply then.
+  const bootTop = () => { if (!history.length && !note) out.scrollTop = 0; };
+  bootTop();
+  if (document.fonts) document.fonts.ready.then(bootTop);
 })();
