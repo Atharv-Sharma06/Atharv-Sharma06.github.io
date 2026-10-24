@@ -96,7 +96,7 @@ b, strong, h1, h2, h3, h4 { font-weight: 400; }
 .hero { padding-top: 96px; padding-bottom: 72px; }
 .hero-name { position: relative; font-size: 64px; line-height: 1.1; margin-bottom: 32px; min-height: 1.1em; }
 /* font roulette: the real name keeps its space while a scaled copy flips faces on top of it */
-.name-roll { display: none; position: absolute; left: 0; top: 0; white-space: nowrap; transform-origin: left top; pointer-events: none; }
+.name-roll { display: none; position: absolute; left: 0; top: 0; white-space: pre; transform-origin: left top; pointer-events: none; }
 .rolling .name-roll { display: block; }
 .rolling .type { visibility: hidden; }
 /* the caret takes no width, and untyped letters are kept as invisible "ghosts", so typing never reflows the page */
@@ -290,7 +290,8 @@ html.js:not(.js-ok) .rv, html.js:not(.js-ok) .intro .intro-step { animation: rev
 .replay:hover { color: var(--green); }
 
 /* ── Project window (modal) ────────────────────────────────── */
-html.modal-open, html.modal-open body { overflow: hidden; }
+html.modal-open { overflow: hidden; }
+html.modal-open body { overflow: clip; }
 .modal { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 16px; }
 .modal[hidden] { display: none; }
 .modal-backdrop { position: absolute; inset: 0; background: rgba(5, 6, 5, 0.86); animation: fade 0.2s steps(3); }

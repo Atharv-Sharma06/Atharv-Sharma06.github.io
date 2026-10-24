@@ -283,7 +283,7 @@ hr { border: 0; height: 2px; background: var(--dash); margin: 22px 0; }
 
 /* ── About: status screen ─────────────────────────────────── */
 .about { gap: 32px; align-items: start; }
-.avatar { position: sticky; top: 24px; padding: 32px 0 26px; align-content: center; }
+.avatar { position: sticky; top: 128px; padding: 32px 0 26px; align-content: center; }
 .sprite { width: 180px; height: 240px; }
 /* re-skin the sprite: crimson tunic, gold crest, navy boots */
 .avatar-shadow {
@@ -436,6 +436,9 @@ hr { border: 0; height: 2px; background: var(--dash); margin: 22px 0; }
 }
 @media (max-width: 840px) {
   .nav {
+    z-index: 1;
+    max-height: calc(100dvh - 120px);
+    overflow-y: auto;
     top: calc(100% + 18px);
     left: -10px;
     right: -10px;
@@ -491,7 +494,7 @@ hr { border: 0; height: 2px; background: var(--dash); margin: 22px 0; }
 }
 
 /* ── Pinned header: stays at the top, content fades out as it slides under ── */
-.header { position: sticky; top: 8px; z-index: 40; }
+@media screen { .header { position: sticky; top: 8px; z-index: 40; } }
 .header::after {
   content: ""; position: absolute; left: -10px; right: -10px; top: calc(100% + 10px); height: 36px;
   background: linear-gradient(rgba(7, 10, 34, 0.9), rgba(7, 10, 34, 0));

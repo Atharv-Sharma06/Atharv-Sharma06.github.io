@@ -106,10 +106,11 @@ function playIntro() {
   heroName.setAttribute('aria-label', full);
   hero.classList.add('intro', 'loading');
   introSteps.forEach(s => s.classList.remove('shown'));
-  // Every face is scaled to the width the final name will occupy, so nothing jumps around it.
+  // Every face is scaled to the width the final name will occupy (line by line where it wraps), so nothing jumps around it.
   const target = Math.min(heroName.clientWidth, typeEl.getBoundingClientRect().width);
+  const wraps = typeEl.getClientRects().length > 1;
   heroName.classList.add('rolling');
-  roll.textContent = full;
+  roll.textContent = wraps ? full.replace(' ', '\n') : full;
   let face = -1;
   const t0 = performance.now();
   const tick = now => {
@@ -118,8 +119,11 @@ function playIntro() {
     if (k !== face) {
       face = k;
       if (k < ROLL_FONTS.length) {
-        roll.style.fontFamily = `"${ROLL_FONTS[k]}", var(--px-d)`;
-        roll.style.transform = `scale(${clamp(target / roll.scrollWidth, 0.4, 1.6)})`;
+        // A face that is still downloading is skipped: the roll keeps the previous one.
+        if (!document.fonts || document.fonts.check(`400 64px "${ROLL_FONTS[k]}"`, full)) {
+          roll.style.fontFamily = `"${ROLL_FONTS[k]}", var(--px-d)`;
+          roll.style.transform = `scale(${clamp(target / roll.scrollWidth, 0.4, 1.6)})`;
+        }
       } else {
         heroName.classList.remove('rolling');
         roll.textContent = '';
@@ -140,12 +144,12 @@ function playIntro() {
 if (fellBack) {
   endIntro();
 } else {
-  // Wait (briefly) for the display face and the roulette faces, so no fallback font flashes by.
+  // Wait (briefly) for the display face only; the roulette faces load alongside and late ones are skipped.
   heroName.style.visibility = 'hidden';
-  const faces = document.fonts
-    ? Promise.all(['Press Start 2P', ...ROLL_FONTS].map(f => document.fonts.load(`400 64px "${f}"`, typeEl.dataset.text)))
-    : Promise.resolve();
-  Promise.race([faces, new Promise(r => setTimeout(r, 1400))])
+  const load = f => document.fonts.load(`400 64px "${f}"`, typeEl.dataset.text);
+  if (document.fonts) ROLL_FONTS.forEach(f => load(f).catch(() => {}));
+  const display = document.fonts ? load('Press Start 2P') : Promise.resolve();
+  Promise.race([display, new Promise(r => setTimeout(r, 1200))])
     .catch(() => {}).then(() => { heroName.style.visibility = ''; playIntro(); });
 }
 
