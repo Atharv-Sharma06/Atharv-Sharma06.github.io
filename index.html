@@ -4,9 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Atharv Sharma — Software Engineer</title>
-  <meta name="description" content="Atharv Sharma — software engineer at Moonshot and 9th grader at Cuthbertson High School, building Python and JavaScript tools for data, markets and machine learning." />
+  <meta name="description" content="Atharv Sharma — software engineer at Moonshot (YC) and 9th grader at Cuthbertson High School, building Python and AI tools for markets, machine learning and LLM security." />
   <meta name="theme-color" content="#0d1340" />
-  <script>document.documentElement.classList.add('js');</script>
+  <script>
+    // js: animations may hide things until main.js reveals them. one-sec: sections start folded, like dropdowns.
+    // If main.js never takes over, unfold everything so no content is stranded.
+    document.documentElement.classList.add('js', 'one-sec');
+    setTimeout(function () { var h = document.documentElement; if (!h.classList.contains('js-ok')) h.classList.remove('one-sec'); }, 2500);
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Pixelify+Sans:wght@400;500&family=DotGothic16&family=Silkscreen&display=swap" rel="stylesheet" />
@@ -24,14 +29,11 @@
     <symbol id="i-explore" viewBox="0 0 8 8" shape-rendering="crispEdges">
       <path fill="currentColor" d="M0 0h3v1H1v2H0zM5 0h3v3H7V1H5zM0 5h1v2h2v1H0zM7 5h1v3H5V7h2z" />
     </symbol>
-    <symbol id="i-trophy" viewBox="0 0 9 9" shape-rendering="crispEdges">
-      <path fill="currentColor" d="M2 0h5v1h2v2H8v1H7v1H6v1H5v1h2v2H2V7h2V6H3V5H2V4H1V3H0V1h2zm-1 1v1h1V1zm7 0H7v1h1z" />
+    <symbol id="i-ext" viewBox="0 0 8 8" shape-rendering="crispEdges">
+      <path fill="currentColor" d="M2 0h6v6H7V2H6v1H5v1H4v1H3v1H2v1H1v1H0V7h1V6h1V5h1V4h1V3h1V2h1V1H2z" />
     </symbol>
-    <symbol id="i-scroll" viewBox="0 0 9 9" shape-rendering="crispEdges">
-      <path fill="currentColor" d="M1 0h7v1h1v2H8v5H7v1H1V8H0V6h1zm1 2v1h5V2zm0 2v1h5V4zm0 2v1h3V6z" />
-    </symbol>
-    <symbol id="i-mic" viewBox="0 0 9 9" shape-rendering="crispEdges">
-      <path fill="currentColor" d="M3 0h3v1h1v4H6v1H3V5H2V1h1zM1 3h1v2h1v1h3V5h1V3h1v3H7v1H5v1h2v1H2V8h2V7H2V6H1z" />
+    <symbol id="i-next" viewBox="0 0 8 8" shape-rendering="crispEdges">
+      <path fill="currentColor" d="M2 0h1v8H2zM3 1h1v6H3zM4 2h1v4H4zM5 3h1v2H5z" />
     </symbol>
   </svg>
 
@@ -41,294 +43,504 @@
     <button class="menu-btn" id="menu-btn" aria-expanded="false" aria-controls="nav">Menu</button>
     <nav class="nav" id="nav" aria-label="Primary">
       <a href="#projects">Projects</a>
-      <a href="#about">About</a>
+      <a href="#research">Research</a>
+      <a href="#experience">Experience</a>
+      <a href="#awards">Awards</a>
+      <a href="#skills">Skills</a>
       <a href="#contact">Contact</a>
-      <a href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener" class="nav-hi">GitHub <span aria-hidden="true">↗</span></a>
     </nav>
   </header>
 
   <main id="top">
 
-    <!-- ── Hero ──────────────────────────────────────────────── -->
-    <section class="hero wrap intro" id="hero">
+    <!-- ── Profile ───────────────────────────────────────────── -->
+    <section class="hero wrap intro" id="hero" aria-labelledby="hero-name">
       <h1 class="hero-name px-shadow" id="hero-name"><span class="type" data-text="Atharv Sharma">Atharv Sharma</span></h1>
-      <p class="hero-line intro-step">Software engineer.</p>
-      <p class="hero-line intro-step">SWE at <a href="#about" class="coral">Moonshot</a> · 9th grade at Cuthbertson High School.</p>
-      <div class="hero-actions intro-step">
-        <a href="#projects" class="btn btn-solid">See projects <span aria-hidden="true">↓</span></a>
-        <span class="status"><i class="blink-dot" aria-hidden="true"></i>Open to internships &amp; research</span>
-      </div>
+      <p class="hero-line intro-step">Software engineer · <span class="nowrap">SWE at <b class="gold">Moonshot (YC)</b></span> · <span class="nowrap">9th grade at</span> <span class="nowrap">Cuthbertson High School</span></p>
       <ul class="hero-links intro-step">
+        <li><a href="mailto:atharv.eck@gmail.com">atharv.eck@gmail.com</a></li>
         <li><a href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener">GitHub</a></li>
-        <li><a href="mailto:atharv.eck@gmail.com">Email</a></li>
+        <li><a href="https://www.linkedin.com/in/atharv-sharma-150232408" target="_blank" rel="noopener">LinkedIn</a></li>
         <li><a href="resume.pdf" target="_blank" rel="noopener">Résumé</a></li>
       </ul>
-      <div class="loadbar" aria-hidden="true">
-        <span class="loadbar-label" id="load-label">Loading 0%</span>
-        <div class="segbar" id="segbar"></div>
-      </div>
-    </section>
-
-    <!-- ── Projects ──────────────────────────────────────────── -->
-    <section class="section wrap" id="projects" aria-labelledby="projects-h">
-      <h2 class="section-h px-shadow" id="projects-h" data-scramble>Selected projects</h2>
-
-      <div class="cards">
-
-        <article class="card rv" data-project="macro" data-repo="ECONOMIC-data-reader">
-          <div class="shot" data-shot="macro"><span class="shot-tag">Preview · illustrative</span></div>
-          <div class="card-body">
-            <h3 class="card-title">Economic Data Dashboard</h3>
-            <p class="card-desc">Interactive dashboard tracking CPI inflation, unemployment, GDP growth and interest rates — with multi-country comparison and 20-year trends.</p>
-            <p class="card-tag">Macro, visualized <span class="nowrap">· <span class="state live">Live</span></span></p>
-            <div class="card-foot">
-              <a class="card-link" href="https://github.com/Atharv-Sharma06/ECONOMIC-data-reader" target="_blank" rel="noopener">Source on GitHub <span aria-hidden="true">↗</span></a>
-              <button class="btn btn-line explore" type="button">Explore <svg class="ico" aria-hidden="true"><use href="#i-explore" /></svg></button>
-            </div>
-          </div>
-          <div class="card-more">
-            <p class="more-stack">Python · Streamlit · FRED API · Plotly</p>
-            <ul>
-              <li>Real-time inflation &amp; unemployment tracking</li>
-              <li>Multi-country economic comparison</li>
-              <li>Interactive Plotly charts with date filters</li>
-              <li>Historical trend analysis (2000–present)</li>
-            </ul>
-          </div>
-        </article>
-
-        <article class="card rv" data-project="candles" data-repo="stock-analyser">
-          <div class="shot" data-shot="candles"><span class="shot-tag">Preview · illustrative</span></div>
-          <div class="card-body">
-            <h3 class="card-title">Stock Analysis Tool</h3>
-            <p class="card-desc">Built on yfinance — trend detection, volatility metrics, SMA/EMA crossovers and annotated chart output for any ticker.</p>
-            <p class="card-tag">Signals from price <span class="nowrap">· <span class="state live">Live</span></span></p>
-            <div class="card-foot">
-              <a class="card-link" href="https://github.com/Atharv-Sharma06/stock-analyser" target="_blank" rel="noopener">Source on GitHub <span aria-hidden="true">↗</span></a>
-              <button class="btn btn-line explore" type="button">Explore <svg class="ico" aria-hidden="true"><use href="#i-explore" /></svg></button>
-            </div>
-          </div>
-          <div class="card-more">
-            <p class="more-stack">Python · yfinance · Pandas · Matplotlib</p>
-            <ul>
-              <li>RSI/MACD trend &amp; momentum analysis</li>
-              <li>SMA/EMA moving average calculations</li>
-              <li>Multi-stock performance comparison</li>
-              <li>Annotated Matplotlib chart export</li>
-            </ul>
-          </div>
-        </article>
-
-        <article class="card card-wide rv" data-project="frontier">
-          <div class="shot" data-shot="frontier"><span class="shot-tag">Preview · illustrative</span></div>
-          <div class="card-body">
-            <h3 class="card-title">Portfolio Optimizer</h3>
-            <p class="card-desc">Modern Portfolio Theory in practice — Markowitz optimization to find the efficient frontier, maximize the Sharpe ratio, and visualize risk/return trade-offs for any basket of stocks.</p>
-            <p class="card-tag">Risk, balanced <span class="nowrap">· <span class="state live">Live</span></span></p>
-            <div class="card-foot">
-              <a class="card-link" href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener">More on GitHub <span aria-hidden="true">↗</span></a>
-              <button class="btn btn-line explore" type="button">Explore <svg class="ico" aria-hidden="true"><use href="#i-explore" /></svg></button>
-            </div>
-          </div>
-          <div class="card-more">
-            <p class="more-stack">Python · SciPy · NumPy · Streamlit</p>
-            <ul>
-              <li>Efficient frontier visualization</li>
-              <li>Sharpe ratio maximization via SciPy</li>
-              <li>Monte Carlo simulation (10,000+ paths)</li>
-              <li>Custom asset allocation &amp; rebalancing</li>
-            </ul>
-          </div>
-        </article>
-
-        <article class="card rv" data-project="forecast">
-          <div class="shot" data-shot="forecast"><span class="shot-tag">Preview · illustrative</span></div>
-          <div class="card-body">
-            <h3 class="card-title">AI Market Predictor</h3>
-            <p class="card-desc">ML models trained on historical prices, technical indicators and sentiment signals to forecast short-term direction, with backtested performance metrics.</p>
-            <p class="card-tag">ML on markets <span class="nowrap">· <span class="state wip">In progress</span></span></p>
-            <div class="card-foot">
-              <a class="card-link" href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener">More on GitHub <span aria-hidden="true">↗</span></a>
-              <button class="btn btn-line explore" type="button">Explore <svg class="ico" aria-hidden="true"><use href="#i-explore" /></svg></button>
-            </div>
-          </div>
-          <div class="card-more">
-            <p class="more-stack">Python · LSTM · TensorFlow · scikit-learn</p>
-            <ul>
-              <li>LSTM neural network for price forecasting</li>
-              <li>Feature engineering from 20+ technical indicators</li>
-              <li>Backtesting framework for strategy validation</li>
-              <li>Confidence interval &amp; uncertainty quantification</li>
-            </ul>
-          </div>
-        </article>
-
-        <article class="card rv" data-project="sentiment">
-          <div class="shot" data-shot="sentiment"><span class="shot-tag">Preview · illustrative</span></div>
-          <div class="card-body">
-            <h3 class="card-title">Market Sentiment Analyzer</h3>
-            <p class="card-desc">Scores financial news and Reddit with VADER to gauge market mood, correlate it with price movement, and flag contrarian signals.</p>
-            <p class="card-tag">Reading the room <span class="nowrap">· <span class="state live">Live</span></span></p>
-            <div class="card-foot">
-              <a class="card-link" href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener">More on GitHub <span aria-hidden="true">↗</span></a>
-              <button class="btn btn-line explore" type="button">Explore <svg class="ico" aria-hidden="true"><use href="#i-explore" /></svg></button>
-            </div>
-          </div>
-          <div class="card-more">
-            <p class="more-stack">Python · NLP · VADER · News API</p>
-            <ul>
-              <li>News API &amp; Reddit sentiment scoring via VADER</li>
-              <li>Sentiment–price correlation analysis</li>
-              <li>Fear &amp; Greed index dashboard</li>
-              <li>Contrarian signal detection alerts</li>
-            </ul>
-          </div>
-        </article>
-
-      </div>
-    </section>
-
-    <!-- ── About ─────────────────────────────────────────────── -->
-    <section class="section wrap" id="about" aria-labelledby="about-h">
-      <h2 class="section-h px-shadow" id="about-h" data-scramble>About me</h2>
-
-      <div class="about">
-        <div class="avatar rv" aria-hidden="true">
-          <svg class="sprite" id="sprite" viewBox="0 0 18 24" shape-rendering="crispEdges"></svg>
+      <div class="profile">
+        <div class="avatar" aria-hidden="true">
+          <svg class="sprite" id="sprite" viewBox="0 0 18 24" shape-rendering="crispEdges">
+            <!-- 18×24 pixels: one rect per horizontal run of a colour. The eyes are their own group so they can blink. -->
+            <g>
+              <rect x="6" y="0" width="6" height="1" fill="#1a1b33"/>
+              <rect x="4" y="1" width="10" height="1" fill="#1a1b33"/>
+              <rect x="3" y="2" width="12" height="1" fill="#1a1b33"/>
+              <rect x="2" y="3" width="3" height="1" fill="#1a1b33"/><rect x="5" y="3" width="1" height="1" fill="#34375e"/><rect x="6" y="3" width="6" height="1" fill="#1a1b33"/><rect x="12" y="3" width="1" height="1" fill="#34375e"/><rect x="13" y="3" width="3" height="1" fill="#1a1b33"/>
+              <rect x="2" y="4" width="14" height="1" fill="#1a1b33"/>
+              <rect x="2" y="5" width="3" height="1" fill="#1a1b33"/><rect x="5" y="5" width="3" height="1" fill="#dba680"/><rect x="8" y="5" width="2" height="1" fill="#1a1b33"/><rect x="10" y="5" width="3" height="1" fill="#dba680"/><rect x="13" y="5" width="3" height="1" fill="#1a1b33"/>
+              <rect x="2" y="6" width="2" height="1" fill="#1a1b33"/><rect x="4" y="6" width="10" height="1" fill="#dba680"/><rect x="14" y="6" width="2" height="1" fill="#1a1b33"/>
+              <rect x="2" y="7" width="1" height="1" fill="#1a1b33"/><rect x="3" y="7" width="12" height="1" fill="#dba680"/><rect x="15" y="7" width="1" height="1" fill="#1a1b33"/>
+              <rect x="1" y="8" width="1" height="1" fill="#bb8763"/><rect x="2" y="8" width="3" height="1" fill="#dba680"/><rect x="5" y="8" width="2" height="1" fill="#dba680"/><rect x="7" y="8" width="4" height="1" fill="#dba680"/><rect x="11" y="8" width="2" height="1" fill="#dba680"/><rect x="13" y="8" width="3" height="1" fill="#dba680"/><rect x="16" y="8" width="1" height="1" fill="#bb8763"/>
+              <rect x="1" y="9" width="1" height="1" fill="#bb8763"/><rect x="2" y="9" width="3" height="1" fill="#dba680"/><rect x="5" y="9" width="1" height="1" fill="#dba680"/><rect x="6" y="9" width="1" height="1" fill="#dba680"/><rect x="7" y="9" width="4" height="1" fill="#dba680"/><rect x="11" y="9" width="1" height="1" fill="#dba680"/><rect x="12" y="9" width="1" height="1" fill="#dba680"/><rect x="13" y="9" width="3" height="1" fill="#dba680"/><rect x="16" y="9" width="1" height="1" fill="#bb8763"/>
+              <rect x="2" y="10" width="14" height="1" fill="#dba680"/>
+              <rect x="2" y="11" width="7" height="1" fill="#dba680"/><rect x="9" y="11" width="2" height="1" fill="#bb8763"/><rect x="11" y="11" width="5" height="1" fill="#dba680"/>
+              <rect x="2" y="12" width="14" height="1" fill="#dba680"/>
+              <rect x="2" y="13" width="1" height="1" fill="#bb8763"/><rect x="3" y="13" width="4" height="1" fill="#dba680"/><rect x="7" y="13" width="4" height="1" fill="#f5f6ff"/><rect x="11" y="13" width="4" height="1" fill="#dba680"/><rect x="15" y="13" width="1" height="1" fill="#bb8763"/>
+              <rect x="3" y="14" width="1" height="1" fill="#bb8763"/><rect x="4" y="14" width="10" height="1" fill="#dba680"/><rect x="14" y="14" width="1" height="1" fill="#bb8763"/>
+              <rect x="5" y="15" width="2" height="1" fill="#bb8763"/><rect x="7" y="15" width="4" height="1" fill="#dba680"/><rect x="11" y="15" width="2" height="1" fill="#bb8763"/>
+              <rect x="3" y="16" width="4" height="1" fill="#eef0f8"/><rect x="7" y="16" width="1" height="1" fill="#bb8763"/><rect x="8" y="16" width="2" height="1" fill="#dba680"/><rect x="10" y="16" width="1" height="1" fill="#bb8763"/><rect x="11" y="16" width="4" height="1" fill="#eef0f8"/>
+              <rect x="2" y="17" width="6" height="1" fill="#eef0f8"/><rect x="8" y="17" width="2" height="1" fill="#c5cadf"/><rect x="10" y="17" width="6" height="1" fill="#eef0f8"/>
+              <rect x="1" y="18" width="16" height="1" fill="#eef0f8"/>
+              <rect x="1" y="19" width="1" height="1" fill="#c5cadf"/><rect x="2" y="19" width="10" height="1" fill="#eef0f8"/><rect x="12" y="19" width="1" height="1" fill="#2b3da4"/><rect x="13" y="19" width="3" height="1" fill="#eef0f8"/><rect x="16" y="19" width="1" height="1" fill="#c5cadf"/>
+              <rect x="1" y="20" width="2" height="1" fill="#dba680"/><rect x="3" y="20" width="7" height="1" fill="#eef0f8"/><rect x="10" y="20" width="2" height="1" fill="#2b3da4"/><rect x="12" y="20" width="3" height="1" fill="#eef0f8"/><rect x="15" y="20" width="2" height="1" fill="#dba680"/>
+              <rect x="1" y="21" width="2" height="1" fill="#dba680"/><rect x="3" y="21" width="6" height="1" fill="#eef0f8"/><rect x="9" y="21" width="1" height="1" fill="#2b3da4"/><rect x="10" y="21" width="5" height="1" fill="#eef0f8"/><rect x="15" y="21" width="2" height="1" fill="#dba680"/>
+              <rect x="1" y="22" width="2" height="1" fill="#bb8763"/><rect x="3" y="22" width="12" height="1" fill="#eef0f8"/><rect x="15" y="22" width="2" height="1" fill="#bb8763"/>
+              <rect x="3" y="23" width="5" height="1" fill="#1f2a5c"/><rect x="10" y="23" width="5" height="1" fill="#1f2a5c"/>
+            </g>
+            <g class="eyes"><rect x="5" y="8" width="2" height="1" fill="#f5f6ff"/><rect x="11" y="8" width="2" height="1" fill="#f5f6ff"/><rect x="5" y="9" width="1" height="1" fill="#090c26"/><rect x="6" y="9" width="1" height="1" fill="#f5f6ff"/><rect x="11" y="9" width="1" height="1" fill="#090c26"/><rect x="12" y="9" width="1" height="1" fill="#f5f6ff"/></g>
+          </svg>
           <span class="avatar-shadow"></span>
         </div>
-
-        <div class="panel sheet rv">
-          <p class="sheet-name px-shadow">Atharv Sharma</p>
-          <p class="sheet-class">Class: Software engineer <span class="muted">· Lv. 9th grade · <span class="nowrap">Fort Mill, SC</span></span></p>
-          <hr />
-          <h3 class="label">Experience</h3>
-          <ul class="xp">
-            <li><b>Software engineer</b><span>Moonshot</span><em>Now</em></li>
-            <li><b>Student · 9th grade</b><span>Cuthbertson High School</span><em>Now</em></li>
-          </ul>
-          <hr />
-          <h3 class="label">Inventory</h3>
-          <dl class="inventory">
-            <div><dt>Python</dt><dd>Main weapon</dd></div>
-            <div><dt>JavaScript</dt><dd>Web</dd></div>
-            <div><dt>Git · GitHub</dt><dd>Version control</dd></div>
-            <div><dt>SQL</dt><dd>Data stores</dd></div>
-            <div><dt>APIs · web scraping</dt><dd>Integrations</dd></div>
-            <div><dt>Streamlit · Plotly</dt><dd>Dashboards</dd></div>
-            <div><dt>Pandas · NumPy</dt><dd>Data</dd></div>
-            <div><dt>scikit-learn · TensorFlow</dt><dd>Machine learning</dd></div>
-          </dl>
-          <hr />
-          <h3 class="label">What I do</h3>
-          <p class="sheet-text">I write Python that pulls and cleans financial data, then models it. Institutional desks see a lot that retail investors don't, and I want to close that gap. Right now I'm analyzing economic data, backtesting strategies, and running ML on price data.</p>
-          <hr />
-          <h3 class="label">Watchlist</h3>
-          <ul class="watch">
-            <li><b>SPY</b> S&amp;P 500</li>
-            <li><b>QQQ</b> Nasdaq 100</li>
-            <li><b>VIX</b> Volatility</li>
-            <li><b>TNX</b> 10Y yield</li>
-          </ul>
+        <div class="profile-text">
+          <p class="hero-bio intro-step">I write Python that pulls and cleans financial data, then models it. Institutional desks see a lot that retail investors don't, and I want to close that gap. Right now I'm analyzing economic data, backtesting strategies, and running ML on price data.</p>
+          <p class="status intro-step"><i class="blink-dot" aria-hidden="true"></i>Open to internships &amp; research</p>
         </div>
       </div>
 
-      <div class="about-grid">
-        <div class="panel rv">
-          <h3 class="label">Current quests</h3>
-          <ul class="quests">
-            <li><span class="q-mark main" aria-hidden="true">!</span><div><b>SoK: Prompt Injection Attacks and Defenses in Large Language Model Systems</b><span>Lead author — systematization of knowledge on prompt-injection attack vectors &amp; defenses in LLMs.</span></div></li>
-            <li><span class="q-mark" aria-hidden="true">?</span><div><b>AI safety research</b><span>Prompt-injection attack vectors &amp; defense strategies.</span></div></li>
-            <li><span class="q-mark" aria-hidden="true">?</span><div><b>AI Market Predictor</b><span>LSTM price forecasting, backtesting framework &amp; confidence-interval modeling.</span></div></li>
-            <li><span class="q-mark" aria-hidden="true">?</span><div><b>Finance analysis app</b><span>Stock trend detection, return calculations, volatility modeling.</span></div></li>
-          </ul>
-        </div>
-        <div class="panel rv">
-          <h3 class="label">Commit log <a href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener" class="label-link">@Atharv-Sharma06 <span aria-hidden="true">↗</span></a></h3>
-          <ul class="commits" id="commit-list">
-            <li class="muted">Recent activity on <a href="https://github.com/Atharv-Sharma06">GitHub ↗</a></li>
-          </ul>
-          <p class="repos muted" hidden><span id="gh-repos"></span> public repos</p>
-        </div>
-      </div>
-
-      <div class="panel skills rv">
-        <h3 class="label">Skill tree</h3>
-        <div class="skill-cols">
-          <div>
-            <h4>Engineering</h4>
-            <ul class="chips">
-              <li>Python</li><li>JavaScript</li><li>SQL</li><li>Git / GitHub</li><li>APIs</li><li>Web scraping</li><li>Streamlit</li>
-            </ul>
-          </div>
-          <div>
-            <h4>ML / data</h4>
-            <ul class="chips">
-              <li>Pandas</li><li>NumPy</li><li>scikit-learn</li><li>TensorFlow</li><li>Matplotlib</li><li>Plotly</li><li>Data visualization</li>
-            </ul>
-          </div>
-          <div>
-            <h4>Finance / quant</h4>
-            <ul class="chips">
-              <li>Stock analysis</li><li>Economic research</li><li>Trend analysis</li><li>Financial data analysis</li><li>Quantitative thinking</li>
-              <li>Backtesting</li><li>yfinance</li><li>FRED API</li><li>Portfolio theory</li><li>Volatility</li><li>Options basics</li><li>Sharpe ratio</li><li>Monte Carlo</li>
-            </ul>
-          </div>
-          <div>
-            <h4>Soft skills</h4>
-            <ul class="chips">
-              <li>Public speaking</li><li>Research</li><li>Leadership</li><li>Problem solving</li><li>Communication</li>
-            </ul>
-          </div>
-        </div>
-      </div>
+      <!-- dropdowns: each toggle unfolds its section below and folds the others; without JS these are plain links -->
+      <nav class="toggles intro-step" id="toggles" aria-label="Sections">
+        <a class="tg" href="#projects" aria-controls="projects">projects<i class="tg-arrow" aria-hidden="true"></i></a>
+        <a class="tg" href="#research" aria-controls="research">research<i class="tg-arrow" aria-hidden="true"></i></a>
+        <a class="tg" href="#experience" aria-controls="experience">experience<i class="tg-arrow" aria-hidden="true"></i></a>
+        <a class="tg" href="#awards" aria-controls="awards">awards<i class="tg-arrow" aria-hidden="true"></i></a>
+        <a class="tg" href="#skills" aria-controls="skills">skills<i class="tg-arrow" aria-hidden="true"></i></a>
+        <a class="tg" href="#contact" aria-controls="contact">contact<i class="tg-arrow" aria-hidden="true"></i></a>
+      </nav>
     </section>
 
-    <!-- ── Quest log ─────────────────────────────────────────── -->
-    <section class="section wrap" id="quests" aria-labelledby="quests-h">
-      <h2 class="section-h px-shadow" id="quests-h" data-scramble>Quest log</h2>
+    <div class="book wrap" id="book">
 
-      <div class="tabs rv" role="group" aria-label="Quest log">
-        <button class="tab active" type="button" data-tab="achievements" aria-pressed="true"><svg class="ico" aria-hidden="true"><use href="#i-trophy" /></svg>Achievements</button>
-        <button class="tab" type="button" data-tab="training" aria-pressed="false"><svg class="ico" aria-hidden="true"><use href="#i-scroll" /></svg>Training</button>
-        <button class="tab" type="button" data-tab="speaking" aria-pressed="false"><svg class="ico" aria-hidden="true"><use href="#i-mic" /></svg>Speaking</button>
-      </div>
+      <!-- ── 01 · Projects ─────────────────────────────────────── -->
+      <section class="sec" id="projects" aria-labelledby="projects-h">
+        <div class="sec-head">
+          <span class="sec-n" aria-hidden="true">01</span>
+          <h2 id="projects-h" data-scramble>Projects</h2>
+          <span class="sec-count">9 entries</span>
+        </div>
+        <ol class="entries">
+          <li class="entry">
+            <p class="e-when"><span class="state live">Built</span></p>
+            <div class="e-body">
+              <h3 class="e-title">Llama QLoRA Chatbot &amp; Prompt-Injection Defense Harness</h3>
+              <p class="e-desc">Fine-tuned Llama 3.1 8B Instruct with QLoRA (a rank-16 adapter) on OASST1 and Dolly-15k, sized to train end to end on a single 32GB consumer GPU. An evaluation harness tests the model against documented injection attacks, scored by an LLM judge, and an instruction-hierarchy and input-classifier defense layer cut the attack success rate from 40% to 0% on the five-attack battery.</p>
+              <ul class="e-tags" aria-label="Stack"><li>Llama 3.1 8B</li><li>QLoRA</li><li>Prompt injection</li><li>LLM judge</li></ul>
+            </div>
+            <div class="e-meta"><p>Attack success</p><p class="gold">40% to 0%</p></div>
+          </li>
 
-      <div class="panel log rv">
-        <ul class="log-list active" data-panel="achievements">
-          <li><span class="log-y">2026</span><div><b>Daughters of the American Revolution — Youth Leadership Award</b><span>Selected as the sole recipient in the entire grade — awarded for outstanding leadership, character and community impact.</span></div><span class="badge gold">Unlocked</span></li>
-          <li><span class="log-y">Present</span><div><b>National Beta Club</b><span>Member — recognizing academic excellence, leadership and commitment to service.</span></div><span class="badge">Unlocked</span></li>
-          <li><span class="log-y">Present</span><div><b>Honor Roll</b><span>Consistent placement, maintaining a high GPA across rigorous coursework.</span></div><span class="badge">Unlocked</span></li>
-          <li><span class="log-y">Present</span><div><b>Hackathon participant</b><span>Built financial data tools under time constraints — competing in coding challenges and pitching to judges.</span></div><span class="badge">Unlocked</span></li>
-          <li><span class="log-y">2023–26</span><div><b>Public speaker</b><span>Presented data-driven financial research to panels of educators, peers and community stakeholders.</span></div><span class="badge">Unlocked</span></li>
-          <li><span class="log-y">2024</span><div><b>Research excellence</b><span>Independent economic research on inflation trends and their correlation with consumer spending.</span></div><span class="badge">Unlocked</span></li>
-          <li><span class="log-y">2023–26</span><div><b>Team leader</b><span>Led multi-person data science and finance projects from concept through final presentation.</span></div><span class="badge">Unlocked</span></li>
-        </ul>
-        <ul class="log-list" data-panel="training">
-          <li><span class="log-y">Udemy / self-study</span><div><b>Python for Finance</b><span>pandas, NumPy, financial APIs and quantitative analysis workflows.</span></div><span class="badge done">Complete</span></li>
-          <li><span class="log-y">Coursera</span><div><b>Machine Learning Fundamentals — Andrew Ng</b><span>Regression, classification, neural networks and model evaluation on real datasets.</span></div><span class="badge done">Complete</span></li>
-          <li><span class="log-y">CFA Inst.</span><div><b>CFA Investment Foundations</b><span>Equity, fixed income, derivatives and portfolio management.</span></div><span class="badge wip">In progress</span></li>
-          <li><span class="log-y">DL.AI</span><div><b>Deep Learning Specialization</b><span>CNNs, RNNs and LSTMs — applying deep learning to financial time series.</span></div><span class="badge wip">In progress</span></li>
-          <li><span class="log-y">Reading</span><div><b>Books &amp; research papers</b><span>Flash Boys · The Intelligent Investor · Advances in Financial Machine Learning</span></div><span class="badge">Ongoing</span></li>
-          <li><span class="log-y">Research</span><div><b>Research interests</b><span>Algorithmic trading · behavioral finance · NLP for market signals · macroeconomics</span></div><span class="badge">Ongoing</span></li>
-          <li><span class="log-y">Learning</span><div><b>Currently levelling up</b><span>ML concepts · AI safety · LLM systems · AI-based analysis · advanced tutorials</span></div><span class="badge">Ongoing</span></li>
-        </ul>
-        <ul class="log-list" data-panel="speaking">
-          <li><span class="log-y">Research</span><div><b>Research presentations</b><span>Independent economic research on inflation and consumer spending, presented to panels of educators and community stakeholders as clear, visual narratives.</span></div><span class="badge">Speech</span></li>
-          <li><span class="log-y">Pitch</span><div><b>Hackathon pitches</b><span>Financial data tools and AI solutions pitched to technical judges — product value, architecture and real-world impact in under five minutes.</span></div><span class="badge">Speech</span></li>
-          <li><span class="log-y">Demo</span><div><b>Project walkthroughs</b><span>Explaining portfolio optimizers and ML models to audiences without technical backgrounds through story-driven demos.</span></div><span class="badge">Speech</span></li>
-          <li><span class="log-y">Team</span><div><b>Team collaboration</b><span>Led multi-person data science teams from ideation through delivery — stand-ups, shared goals and concise progress reports.</span></div><span class="badge">Speech</span></li>
-          <li class="log-quote"><q>The ability to communicate complex ideas simply is the most underrated skill in quantitative finance.</q></li>
-        </ul>
-      </div>
-    </section>
+          <li class="entry">
+            <p class="e-when"><span class="state gold">1st place</span></p>
+            <div class="e-body">
+              <h3 class="e-title">QuantifyAI</h3>
+              <p class="e-desc">Built solo, and won 1st Place in the Education category at a Minorities in STEM hackathon.</p>
+            </div>
+            <div class="e-meta"><p>Minorities in STEM</p><p>Hackathon</p></div>
+          </li>
 
-    <!-- ── Contact ───────────────────────────────────────────── -->
-    <section class="section wrap" id="contact" aria-labelledby="contact-h">
-      <h2 class="section-h px-shadow" id="contact-h" data-scramble>Contact</h2>
+          <li class="entry">
+            <p class="e-when"><span class="state gold">2nd place</span></p>
+            <div class="e-body">
+              <h3 class="e-title">Math Scan AI</h3>
+              <p class="e-desc">AI-powered app that evaluates students' math work using OCR and gives detailed feedback.</p>
+              <ul class="e-tags" aria-label="Stack"><li>OCR</li><li>AI feedback</li></ul>
+            </div>
+            <div class="e-meta"><p>Science fair</p></div>
+          </li>
 
-      <div class="contact">
-        <div class="term rv" id="term">
+          <li class="entry project" data-project="macro" data-repo="ECONOMIC-data-reader">
+            <p class="e-when"><span class="state live">Live</span></p>
+            <div class="e-body">
+              <h3 class="e-title">Economic Data Dashboard</h3>
+              <p class="e-desc">Interactive dashboard tracking CPI inflation, unemployment, GDP growth and interest rates — with multi-country comparison and 20-year trends.</p>
+              <ul class="e-tags" aria-label="Stack"><li>Python</li><li>Streamlit</li><li>FRED API</li><li>Plotly</li></ul>
+              <ul class="e-more">
+                <li>Real-time inflation &amp; unemployment tracking</li>
+                <li>Multi-country economic comparison</li>
+                <li>Interactive Plotly charts with date filters</li>
+                <li>Historical trend analysis (2000–present)</li>
+              </ul>
+            </div>
+            <div class="e-meta">
+              <p class="e-tagline">Macro, visualized</p>
+              <a class="e-act e-link" href="https://github.com/Atharv-Sharma06/ECONOMIC-data-reader" target="_blank" rel="noopener">Source <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a>
+              <button class="e-act explore" type="button">Details <svg class="ico" aria-hidden="true"><use href="#i-explore" /></svg></button>
+            </div>
+          </li>
+
+          <li class="entry project" data-project="candles" data-repo="stock-analyser">
+            <p class="e-when"><span class="state live">Live</span></p>
+            <div class="e-body">
+              <h3 class="e-title">Stock Analysis Tool</h3>
+              <p class="e-desc">Built on yfinance — trend detection, volatility metrics, SMA/EMA crossovers and annotated chart output for any ticker.</p>
+              <ul class="e-tags" aria-label="Stack"><li>Python</li><li>yfinance</li><li>Pandas</li><li>Matplotlib</li></ul>
+              <ul class="e-more">
+                <li>RSI/MACD trend &amp; momentum analysis</li>
+                <li>SMA/EMA moving average calculations</li>
+                <li>Multi-stock performance comparison</li>
+                <li>Annotated Matplotlib chart export</li>
+              </ul>
+            </div>
+            <div class="e-meta">
+              <p class="e-tagline">Signals from price</p>
+              <a class="e-act e-link" href="https://github.com/Atharv-Sharma06/stock-analyser" target="_blank" rel="noopener">Source <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a>
+              <button class="e-act explore" type="button">Details <svg class="ico" aria-hidden="true"><use href="#i-explore" /></svg></button>
+            </div>
+          </li>
+
+          <li class="entry project" data-project="frontier">
+            <p class="e-when"><span class="state live">Live</span></p>
+            <div class="e-body">
+              <h3 class="e-title">Portfolio Optimizer</h3>
+              <p class="e-desc">Modern Portfolio Theory in practice — Markowitz optimization to find the efficient frontier, maximize the Sharpe ratio, and visualize risk/return trade-offs for any basket of stocks.</p>
+              <ul class="e-tags" aria-label="Stack"><li>Python</li><li>SciPy</li><li>NumPy</li><li>Streamlit</li></ul>
+              <ul class="e-more">
+                <li>Efficient frontier visualization</li>
+                <li>Sharpe ratio maximization via SciPy</li>
+                <li>Monte Carlo simulation (10,000+ paths)</li>
+                <li>Custom asset allocation &amp; rebalancing</li>
+              </ul>
+            </div>
+            <div class="e-meta">
+              <p class="e-tagline">Risk, balanced</p>
+              <a class="e-act e-link" href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener">GitHub <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a>
+              <button class="e-act explore" type="button">Details <svg class="ico" aria-hidden="true"><use href="#i-explore" /></svg></button>
+            </div>
+          </li>
+
+          <li class="entry project" data-project="forecast">
+            <p class="e-when"><span class="state wip">In progress</span></p>
+            <div class="e-body">
+              <h3 class="e-title">AI Market Predictor</h3>
+              <p class="e-desc">ML models trained on historical prices, technical indicators and sentiment signals to forecast short-term direction, with backtested performance metrics.</p>
+              <ul class="e-tags" aria-label="Stack"><li>Python</li><li>LSTM</li><li>TensorFlow</li><li>scikit-learn</li></ul>
+              <ul class="e-more">
+                <li>LSTM neural network for price forecasting</li>
+                <li>Feature engineering from 20+ technical indicators</li>
+                <li>Backtesting framework for strategy validation</li>
+                <li>Confidence interval &amp; uncertainty quantification</li>
+              </ul>
+            </div>
+            <div class="e-meta">
+              <p class="e-tagline">ML on markets</p>
+              <a class="e-act e-link" href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener">GitHub <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a>
+              <button class="e-act explore" type="button">Details <svg class="ico" aria-hidden="true"><use href="#i-explore" /></svg></button>
+            </div>
+          </li>
+
+          <li class="entry">
+            <p class="e-when"><span class="state wip">In progress</span></p>
+            <div class="e-body">
+              <h3 class="e-title">Finance analysis app</h3>
+              <p class="e-desc">Stock trend detection, return calculations, volatility modeling.</p>
+            </div>
+          </li>
+
+          <li class="entry project" data-project="sentiment">
+            <p class="e-when"><span class="state live">Live</span></p>
+            <div class="e-body">
+              <h3 class="e-title">Market Sentiment Analyzer</h3>
+              <p class="e-desc">Scores financial news and Reddit with VADER to gauge market mood, correlate it with price movement, and flag contrarian signals.</p>
+              <ul class="e-tags" aria-label="Stack"><li>Python</li><li>NLP</li><li>VADER</li><li>News API</li></ul>
+              <ul class="e-more">
+                <li>News API &amp; Reddit sentiment scoring via VADER</li>
+                <li>Sentiment–price correlation analysis</li>
+                <li>Fear &amp; Greed index dashboard</li>
+                <li>Contrarian signal detection alerts</li>
+              </ul>
+            </div>
+            <div class="e-meta">
+              <p class="e-tagline">Reading the room</p>
+              <a class="e-act e-link" href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener">GitHub <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a>
+              <button class="e-act explore" type="button">Details <svg class="ico" aria-hidden="true"><use href="#i-explore" /></svg></button>
+            </div>
+          </li>
+        </ol>
+
+        <div class="sec-sub">
+          <h3>Recent commits</h3>
+          <a href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener" class="e-act">@Atharv-Sharma06 <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a>
+        </div>
+        <ol class="entries commits" id="commit-list">
+          <li class="entry"><p class="e-when">Live</p><div class="e-body"><p class="e-desc">Recent activity on <a href="https://github.com/Atharv-Sharma06">GitHub ↗</a></p></div></li>
+        </ol>
+        <p class="repos muted" hidden><span id="gh-repos"></span> public repos</p>
+      </section>
+
+      <!-- ── 02 · Research ─────────────────────────────────────── -->
+      <section class="sec" id="research" aria-labelledby="research-h">
+        <div class="sec-head">
+          <span class="sec-n" aria-hidden="true">02</span>
+          <h2 id="research-h" data-scramble>Research</h2>
+          <span class="sec-count">3 entries</span>
+        </div>
+        <ol class="entries">
+          <li class="entry">
+            <p class="e-when">Aug 2026</p>
+            <div class="e-body">
+              <h3 class="e-title">Does Deviation from Prior Earnings-Call Language Predict Stock Returns? A TF-IDF Pilot Study on SEC EDGAR Transcripts</h3>
+              <p class="e-desc">Tested whether year-over-year change in a firm's own earnings-call language is associated with subsequent returns, using TF-IDF cosine similarity on verbatim Exhibit 99 transcripts scraped from SEC EDGAR — the first such test on fully public data. Built the end-to-end pipeline across 24 firms and 358 firm-quarters (2018–2024): the long-short deviation portfolio earned 1.27%/month (t = 0.88) against the Fama-French five factors plus momentum — economically large, statistically null. A power analysis showed the test could only detect effects of 6%/month or more, so the null is a detection-limit finding, not a rejection. Revised after peer review to narrow the claim, add a sentiment benchmark and expand to 30 verified references.</p>
+              <ul class="e-tags" aria-label="Methods"><li>TF-IDF</li><li>SEC EDGAR</li><li>Fama-French factors</li><li>Power analysis</li></ul>
+              <p class="e-cite">Sharma, A. · Zenodo, Aug 2026 · <a href="https://doi.org/10.5281/zenodo.21875292" target="_blank" rel="noopener">doi.org/10.5281/zenodo.21875292</a></p>
+            </div>
+            <div class="e-meta">
+              <p>Sole author</p>
+              <p><span class="state wip">Major revision</span></p>
+              <p>NHSJS</p>
+              <a class="e-act" href="https://doi.org/10.5281/zenodo.21875292" target="_blank" rel="noopener">Preprint <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a>
+            </div>
+          </li>
+          <li class="entry">
+            <p class="e-when">Now</p>
+            <div class="e-body">
+              <h3 class="e-title">SoK: Prompt Injection Attacks and Defenses in Large Language Model Systems</h3>
+              <p class="e-desc">A systematization of knowledge on prompt-injection attack vectors in large language model systems, and the defense strategies against them.</p>
+              <ul class="e-tags" aria-label="Topics"><li>Prompt injection</li><li>LLM security</li><li>AI safety</li></ul>
+            </div>
+            <div class="e-meta">
+              <p>Lead author</p>
+              <p><span class="state wip">In progress</span></p>
+            </div>
+          </li>
+          <li class="entry">
+            <p class="e-when">2024</p>
+            <div class="e-body">
+              <h3 class="e-title">Inflation trends and consumer spending</h3>
+              <p class="e-desc">Independent economic research on inflation trends and their correlation with consumer spending, presented to panels of educators and community stakeholders as clear, visual narratives.</p>
+              <ul class="e-tags" aria-label="Topics"><li>Macroeconomics</li><li>Inflation</li><li>Data visualization</li></ul>
+            </div>
+            <div class="e-meta">
+              <p>Independent</p>
+              <p>Research excellence</p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <!-- ── 03 · Experience ───────────────────────────────────── -->
+      <section class="sec" id="experience" aria-labelledby="experience-h">
+        <div class="sec-head">
+          <span class="sec-n" aria-hidden="true">03</span>
+          <h2 id="experience-h" data-scramble>Experience</h2>
+          <span class="sec-count">7 entries</span>
+        </div>
+        <ol class="entries">
+          <li class="entry">
+            <p class="e-when">Aug 2026 – now</p>
+            <div class="e-body">
+              <h3 class="e-title">Software engineer</h3>
+            </div>
+            <div class="e-meta"><p class="gold">Moonshot (YC)</p></div>
+          </li>
+          <li class="entry">
+            <p class="e-when">Now</p>
+            <div class="e-body">
+              <h3 class="e-title">Independent software developer</h3>
+              <p class="e-desc">Design, develop and maintain software projects focused on AI, finance and data science, and run each one from research and planning through deployment and iteration.</p>
+            </div>
+          </li>
+          <li class="entry">
+            <p class="e-when">Now</p>
+            <div class="e-body">
+              <h3 class="e-title">Student · 9th grade</h3>
+              <p class="e-desc">Cuthbertson High School.</p>
+            </div>
+            <div class="e-meta"><p>Waxhaw, NC</p></div>
+          </li>
+          <li class="entry">
+            <p class="e-when">Now</p>
+            <div class="e-body">
+              <h3 class="e-title">Contributor, FinanceMeta</h3>
+              <p class="e-desc">Developing financial-literacy project ideas and member engagement.</p>
+            </div>
+          </li>
+          <li class="entry">
+            <p class="e-when">2023 – 26</p>
+            <div class="e-body">
+              <h3 class="e-title">Team leader</h3>
+              <p class="e-desc">Led multi-person data science and finance projects from concept through final presentation — stand-ups, shared goals and concise progress reports.</p>
+            </div>
+            <div class="e-meta"><p>Data science teams</p></div>
+          </li>
+          <li class="entry">
+            <p class="e-when">2023 – 26</p>
+            <div class="e-body">
+              <h3 class="e-title">Public speaker</h3>
+              <p class="e-desc">Presented data-driven financial research to panels of educators, peers and community stakeholders, and walked audiences without technical backgrounds through portfolio optimizers and ML models with story-driven demos.</p>
+              <ul class="e-tags" aria-label="Formats"><li>Research talks</li><li>Project demos</li><li>Pitches</li></ul>
+              <blockquote class="e-quote"><p>The ability to communicate complex ideas simply is the most underrated skill in quantitative finance.</p></blockquote>
+            </div>
+            <div class="e-meta"><p>Speaking</p></div>
+          </li>
+          <li class="entry">
+            <p class="e-when">Present</p>
+            <div class="e-body">
+              <h3 class="e-title">Hackathons</h3>
+              <p class="e-desc">Built financial data tools under time constraints, then pitched them to technical judges — product value, architecture and real-world impact in under five minutes. Built QuantifyAI solo and won 1st Place in Education at a Minorities in STEM hackathon.</p>
+              <ul class="e-tags" aria-label="Skills"><li>Pitching</li></ul>
+            </div>
+            <div class="e-meta"><p>Competitor</p></div>
+          </li>
+        </ol>
+      </section>
+
+      <!-- ── 04 · Awards & courses ─────────────────────────────── -->
+      <section class="sec" id="awards" aria-labelledby="awards-h">
+        <div class="sec-head">
+          <span class="sec-n" aria-hidden="true">04</span>
+          <h2 id="awards-h" data-scramble>Awards &amp; courses</h2>
+          <span class="sec-count">9 entries</span>
+        </div>
+        <ol class="entries">
+          <li class="entry">
+            <p class="e-when"><span class="state gold">1st place</span></p>
+            <div class="e-body">
+              <h3 class="e-title">Education — Minorities in STEM hackathon</h3>
+              <p class="e-desc">For QuantifyAI, built solo.</p>
+            </div>
+            <div class="e-meta"><p>Hackathon</p></div>
+          </li>
+          <li class="entry">
+            <p class="e-when"><span class="state gold">2nd place</span></p>
+            <div class="e-body">
+              <h3 class="e-title">Science fair</h3>
+              <p class="e-desc">For Math Scan AI, an app that reads students' math work and gives feedback.</p>
+            </div>
+          </li>
+          <li class="entry">
+            <p class="e-when">2026</p>
+            <div class="e-body">
+              <h3 class="e-title">Youth Leadership Award — Daughters of the American Revolution</h3>
+              <p class="e-desc">Selected as the sole recipient in the entire grade — awarded for outstanding leadership, character and community impact.</p>
+            </div>
+            <div class="e-meta"><p><span class="state gold">Sole recipient</span></p><p>DAR</p></div>
+          </li>
+          <li class="entry">
+            <p class="e-when">Present</p>
+            <div class="e-body">
+              <h3 class="e-title">National Beta Club</h3>
+              <p class="e-desc">Member — recognizing academic excellence, leadership and commitment to service.</p>
+            </div>
+          </li>
+          <li class="entry">
+            <p class="e-when">Present</p>
+            <div class="e-body">
+              <h3 class="e-title">Honor Roll</h3>
+              <p class="e-desc">Consistent placement, maintaining a high GPA across rigorous coursework.</p>
+            </div>
+          </li>
+          <li class="entry course">
+            <p class="e-when"><span class="state live">Complete</span></p>
+            <div class="e-body">
+              <h3 class="e-title">Python for Finance</h3>
+              <p class="e-desc">pandas, NumPy, financial APIs and quantitative analysis workflows.</p>
+            </div>
+            <div class="e-meta"><p>Udemy · self-study</p></div>
+          </li>
+          <li class="entry course">
+            <p class="e-when"><span class="state live">Complete</span></p>
+            <div class="e-body">
+              <h3 class="e-title">Machine Learning Fundamentals — Andrew Ng</h3>
+              <p class="e-desc">Regression, classification, neural networks and model evaluation on real datasets.</p>
+            </div>
+            <div class="e-meta"><p>Coursera</p></div>
+          </li>
+          <li class="entry course">
+            <p class="e-when"><span class="state wip">In progress</span></p>
+            <div class="e-body">
+              <h3 class="e-title">CFA Investment Foundations</h3>
+              <p class="e-desc">Equity, fixed income, derivatives and portfolio management.</p>
+            </div>
+            <div class="e-meta"><p>CFA Institute</p></div>
+          </li>
+          <li class="entry course">
+            <p class="e-when"><span class="state wip">In progress</span></p>
+            <div class="e-body">
+              <h3 class="e-title">Deep Learning Specialization</h3>
+              <p class="e-desc">CNNs, RNNs and LSTMs — applying deep learning to financial time series.</p>
+            </div>
+            <div class="e-meta"><p>DeepLearning.AI</p></div>
+          </li>
+        </ol>
+      </section>
+
+      <!-- ── 05 · Skills ───────────────────────────────────────── -->
+      <section class="sec" id="skills" aria-labelledby="skills-h">
+        <div class="sec-head">
+          <span class="sec-n" aria-hidden="true">05</span>
+          <h2 id="skills-h" data-scramble>Skills</h2>
+          <span class="sec-count">8 entries</span>
+        </div>
+        <ol class="entries skill-rows">
+          <li class="entry">
+            <p class="e-when">Engineering</p>
+            <div class="e-body">
+              <ul class="e-tags big"><li>Python</li><li>JavaScript / TypeScript</li><li>React / Next.js</li><li>SQL</li><li>Git / GitHub</li><li>APIs</li><li>Web scraping</li><li>Streamlit</li></ul>
+            </div>
+            <div class="e-meta"><p>Main: Python</p></div>
+          </li>
+          <li class="entry">
+            <p class="e-when">ML / data</p>
+            <div class="e-body">
+              <ul class="e-tags big"><li>AI / machine learning</li><li>Data science</li><li>LLM fine-tuning</li><li>Pandas</li><li>NumPy</li><li>scikit-learn</li><li>TensorFlow</li><li>Matplotlib</li><li>Plotly</li><li>Tableau / Power BI</li><li>Data visualization</li></ul>
+            </div>
+          </li>
+          <li class="entry">
+            <p class="e-when">Finance / quant</p>
+            <div class="e-body">
+              <ul class="e-tags big"><li>Stock analysis</li><li>Economic research</li><li>Trend analysis</li><li>Financial data analysis</li><li>Quantitative thinking</li><li>Backtesting</li><li>yfinance</li><li>FRED API</li><li>Portfolio theory</li><li>Volatility</li><li>Options basics</li><li>Sharpe ratio</li><li>Monte Carlo</li></ul>
+            </div>
+          </li>
+          <li class="entry">
+            <p class="e-when">Soft skills</p>
+            <div class="e-body">
+              <ul class="e-tags big"><li>Public speaking</li><li>Research</li><li>Leadership</li><li>Problem solving</li><li>Communication</li></ul>
+            </div>
+          </li>
+          <li class="entry">
+            <p class="e-when">Watchlist</p>
+            <div class="e-body">
+              <ul class="watch"><li><b>SPY</b> S&amp;P 500</li><li><b>QQQ</b> Nasdaq 100</li><li><b>VIX</b> Volatility</li><li><b>TNX</b> 10Y yield</li></ul>
+            </div>
+          </li>
+          <li class="entry">
+            <p class="e-when">Reading</p>
+            <div class="e-body">
+              <p class="e-desc">Flash Boys · The Intelligent Investor · Advances in Financial Machine Learning</p>
+            </div>
+            <div class="e-meta"><p>Books &amp; papers</p></div>
+          </li>
+          <li class="entry">
+            <p class="e-when">Interests</p>
+            <div class="e-body">
+              <p class="e-desc">Quantitative finance · machine learning · software engineering · data science · algorithmic trading · behavioral finance · NLP for market signals · macroeconomics</p>
+            </div>
+            <div class="e-meta"><p>Research</p></div>
+          </li>
+          <li class="entry">
+            <p class="e-when">Learning now</p>
+            <div class="e-body">
+              <p class="e-desc">ML concepts · AI safety · LLM systems · AI-based analysis · advanced tutorials</p>
+            </div>
+            <div class="e-meta"><p>Levelling up</p></div>
+          </li>
+        </ol>
+      </section>
+
+      <!-- ── 06 · Contact ──────────────────────────────────────── -->
+      <section class="sec" id="contact" aria-labelledby="contact-h">
+        <div class="sec-head">
+          <span class="sec-n" aria-hidden="true">06</span>
+          <h2 id="contact-h" data-scramble>Contact</h2>
+          <span class="sec-count">5 ways</span>
+        </div>
+
+        <div class="term" id="term">
           <div class="term-bar">
             <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
             <span class="term-title">guest@atharv-sharma06.github.io</span>
@@ -350,25 +562,43 @@
           </div>
         </div>
 
-        <ul class="contact-list rv">
-          <li><a href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener"><span class="cl-name">GitHub</span><span class="cl-meta">@Atharv-Sharma06</span><span class="cl-arrow" aria-hidden="true">↗</span></a></li>
-          <li><a href="mailto:atharv.eck@gmail.com"><span class="cl-name">Email</span><span class="cl-sub">atharv.eck@gmail.com</span><span class="cl-arrow" aria-hidden="true">↗</span></a></li>
-          <li><a href="tel:+18032038096"><span class="cl-name">Phone</span><span class="cl-sub">(803) 203-8096</span><span class="cl-arrow" aria-hidden="true">↗</span></a></li>
-          <li><a href="resume.pdf" target="_blank" rel="noopener"><span class="cl-name">Résumé</span><span class="cl-sub">One page · PDF</span><span class="cl-arrow" aria-hidden="true">↗</span></a></li>
-        </ul>
-      </div>
-    </section>
+        <ol class="entries contact-rows">
+          <li class="entry">
+            <p class="e-when">Email</p>
+            <div class="e-body"><a class="e-title e-row-link" href="mailto:atharv.eck@gmail.com">atharv.eck@gmail.com</a></div>
+          </li>
+          <li class="entry">
+            <p class="e-when">GitHub</p>
+            <div class="e-body"><a class="e-title e-row-link" href="https://github.com/Atharv-Sharma06" target="_blank" rel="noopener">@Atharv-Sharma06 <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a></div>
+          </li>
+          <li class="entry">
+            <p class="e-when">LinkedIn</p>
+            <div class="e-body"><a class="e-title e-row-link" href="https://www.linkedin.com/in/atharv-sharma-150232408" target="_blank" rel="noopener">atharv-sharma-150232408 <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a></div>
+          </li>
+          <li class="entry">
+            <p class="e-when">Phone</p>
+            <div class="e-body"><a class="e-title e-row-link" href="tel:+18032038096">(803) 203-8096</a></div>
+          </li>
+          <li class="entry">
+            <p class="e-when">Résumé</p>
+            <div class="e-body"><a class="e-title e-row-link" href="resume.pdf" target="_blank" rel="noopener">resume.pdf <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a></div>
+            <div class="e-meta"><p>One page · PDF</p></div>
+          </li>
+        </ol>
+      </section>
+
+    </div>
   </main>
 
   <footer class="footer wrap">
-    <p>Shipped with curiosity and a lot of commits. © <span class="js-year">2026</span> Atharv Sharma</p>
+    <p>© <span class="js-year">2026</span> Atharv Sharma · Charlotte, NC · Shipped with curiosity and a lot of commits.</p>
     <button type="button" class="replay" id="replay">Replay intro <span aria-hidden="true">↺</span></button>
   </footer>
 
   <!-- ── Project window ────────────────────────────────────────── -->
   <div class="modal" id="modal" hidden>
     <div class="modal-backdrop" data-close></div>
-    <div class="modal-win" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-win" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1">
       <div class="term-bar">
         <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
         <span class="term-title" id="modal-file"></span>
@@ -380,21 +610,25 @@
           <div class="modal-help">
             <p class="label">Stack</p>
             <p class="more-stack" id="modal-stack"></p>
-            <p class="keys"><kbd>Esc</kbd> close · <kbd>Tab</kbd> next · <kbd>Enter</kbd> select</p>
+            <!-- each key works when pressed, and when tapped -->
+            <p class="keys"><button type="button" class="key" data-key="Escape" tabindex="-1" aria-label="Close (Esc)"><kbd>Esc</kbd></button> close · <button type="button" class="key" data-key="Tab" tabindex="-1" aria-label="Next command (Tab)"><kbd>Tab</kbd></button> next · <button type="button" class="key" data-key="Enter" tabindex="-1" aria-label="Select (Enter)"><kbd>Enter</kbd></button> select</p>
           </div>
         </div>
         <div class="modal-text">
-          <h3 class="card-title" id="modal-title"></h3>
+          <h3 class="card-title" id="modal-title" tabindex="-1"></h3>
           <p class="card-tag" id="modal-tag"></p>
           <p class="card-desc" id="modal-desc"></p>
           <p class="label">Features</p>
           <ul class="features" id="modal-features"></ul>
-          <div class="modal-actions">
-            <a class="btn btn-solid" id="modal-link" target="_blank" rel="noopener">View on GitHub <span aria-hidden="true">↗</span></a>
-            <button class="btn btn-line" type="button" data-close>Close</button>
-          </div>
         </div>
       </div>
+      <!-- the window's commands: always in view at the bottom; the ▶ marks the one Enter selects -->
+      <div class="modal-actions">
+        <a class="btn btn-solid" id="modal-link" target="_blank" rel="noopener">View on GitHub <svg class="ico" aria-hidden="true"><use href="#i-ext" /></svg></a>
+        <button class="btn btn-line" type="button" id="modal-next">Next project <svg class="ico" aria-hidden="true"><use href="#i-next" /></svg></button>
+        <button class="btn btn-line" type="button" data-close>Close</button>
+      </div>
+      <p class="sr-only" id="modal-status" aria-live="polite"></p>
     </div>
   </div>
 
