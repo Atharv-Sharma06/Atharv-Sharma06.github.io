@@ -25,7 +25,8 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { scroll-behavior: smooth; scrollbar-gutter: stable; -webkit-text-size-adjust: 100%; }
+/* scroll-padding keeps anchors and keyboard focus clear of the pinned header */
+html { scroll-behavior: smooth; scroll-padding-top: 128px; scrollbar-gutter: stable; -webkit-text-size-adjust: 100%; }
 
 body {
   background-color: var(--bg);
@@ -40,6 +41,7 @@ body {
   -webkit-font-smoothing: none;
   font-smooth: never;
   overflow-x: hidden;
+  overflow-x: clip; /* clip, unlike hidden, keeps position: sticky working */
 }
 
 a { color: inherit; text-decoration: none; }
@@ -92,7 +94,11 @@ b, strong, h1, h2, h3, h4 { font-weight: 400; }
 
 /* ── Hero ──────────────────────────────────────────────────── */
 .hero { padding-top: 96px; padding-bottom: 72px; }
-.hero-name { font-size: 64px; line-height: 1.1; margin-bottom: 32px; min-height: 1.1em; }
+.hero-name { position: relative; font-size: 64px; line-height: 1.1; margin-bottom: 32px; min-height: 1.1em; }
+/* font roulette: the real name keeps its space while a scaled copy flips faces on top of it */
+.name-roll { display: none; position: absolute; left: 0; top: 0; white-space: pre; transform-origin: left top; pointer-events: none; }
+.rolling .name-roll { display: block; }
+.rolling .type { visibility: hidden; }
 /* the caret takes no width, and untyped letters are kept as invisible "ghosts", so typing never reflows the page */
 .caret { display: inline-block; width: 0.5em; height: 0.8em; margin: 0 -0.6em 0 0.1em; background: var(--fg); vertical-align: -0.04em; }
 .ghost { visibility: hidden; }
@@ -172,6 +178,9 @@ html.js:not(.js-ok) .rv, html.js:not(.js-ok) .intro .intro-step { animation: rev
 .avatar { position: relative; display: grid; place-items: center; padding: 24px 0; }
 .sprite { width: 216px; height: 288px; }
 .in .sprite { animation: bob 1.2s steps(1) 4; }
+/* the avatar materialises row by row as it scrolls in */
+.js .avatar .sprite { clip-path: inset(0 0 100% 0); }
+.js .avatar.in .sprite { clip-path: inset(0); transition: clip-path 0.72s steps(12, end) 0.2s; }
 .avatar:hover .sprite { animation: bob 1.2s steps(1) infinite; }
 .sprite .eyes { transform-origin: 50% 37.5%; transform-box: view-box; }
 /* every looping animation stops within 5s unless the visitor hovers the avatar */
@@ -229,6 +238,10 @@ html.js:not(.js-ok) .rv, html.js:not(.js-ok) .intro .intro-step { animation: rev
 .badge.done { color: var(--green); border-color: var(--green); }
 .badge.wip { color: var(--coral); border-color: var(--coral); }
 .log-list li.log-quote { display: block; color: var(--green); padding-top: 20px; }
+/* quest log page turn: the old page fades out, the new rows step in one after another */
+.log-list.leaving { opacity: 0; transition: opacity 0.14s steps(2, end); }
+.log-list.entering > li { animation: row-in 0.32s steps(4, end) both; animation-delay: calc(var(--i, 0) * 45ms); }
+@keyframes row-in { from { opacity: 0; transform: translateX(-12px); } }
 /* with JS, only the chosen tab and no card details show (hidden before first paint, so nothing vanishes later) */
 .js .card-more, .js .log-list:not(.active) { display: none; }
 .log-quote q { quotes: "“" "”"; }
@@ -277,7 +290,8 @@ html.js:not(.js-ok) .rv, html.js:not(.js-ok) .intro .intro-step { animation: rev
 .replay:hover { color: var(--green); }
 
 /* ── Project window (modal) ────────────────────────────────── */
-html.modal-open, html.modal-open body { overflow: hidden; }
+html.modal-open { overflow: hidden; }
+html.modal-open body { overflow: clip; }
 .modal { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 16px; }
 .modal[hidden] { display: none; }
 .modal-backdrop { position: absolute; inset: 0; background: rgba(5, 6, 5, 0.86); animation: fade 0.2s steps(3); }
@@ -359,6 +373,7 @@ html.modal-open, html.modal-open body { overflow: hidden; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
   html { scroll-behavior: auto; }
   .js .rv, .js .intro .intro-step { opacity: 1; transform: none; clip-path: none; }
+  .js .avatar .sprite { clip-path: none; }
 }
 
 @media print {

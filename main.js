@@ -41,6 +41,12 @@ function setInert(selectors, on) {
 
 $$('.js-year').forEach(n => { n.textContent = new Date().getFullYear(); });
 
+/* ── Pinned header ────────────────────────────────────────── */
+const headerEl = $('.header');
+const onScrollHeader = () => headerEl.classList.toggle('stuck', window.scrollY > 24);
+window.addEventListener('scroll', onScrollHeader, { passive: true });
+onScrollHeader();
+
 /* ── Mobile menu ──────────────────────────────────────────── */
 const menuBtn = $('#menu-btn');
 const nav = $('#nav');
@@ -61,7 +67,7 @@ const wideMQ = matchMedia('(min-width: 841px)');
 const onWide = e => { if (e.matches) setMenu(false); };
 if (wideMQ.addEventListener) wideMQ.addEventListener('change', onWide); else wideMQ.addListener(onWide);
 
-/* ── Intro: type the name, fill the loading bar ───────────── */
+/* ── Intro: a font roulette that lands on the name, while the gauge fills ── */
 const hero = $('#hero');
 const heroName = $('#hero-name');
 const typeEl = $('.type', heroName);
@@ -73,11 +79,19 @@ const segs = $$('i', segbar);
 const introSteps = $$('.intro-step', hero);
 let introRaf = 0;
 
+// The name flips through pixel typefaces, slot-machine style, before settling on the display face.
+const ROLL_FONTS = ['Silkscreen', 'VT323', 'Jacquard 12', 'Sixtyfour', 'Pixelify Sans', 'Micro 5', 'Workbench', 'DotGothic16', 'Jersey 10', 'Handjet'];
+const ROLL_MS = 110;
+const roll = el('span', { class: 'name-roll', 'aria-hidden': 'true' });
+heroName.append(roll);
+
 function endIntro() {
   cancelAnimationFrame(introRaf);
   typeEl.textContent = typeEl.dataset.text;
-  heroName.classList.remove('typing');
+  heroName.classList.remove('rolling');
   heroName.removeAttribute('aria-label');
+  roll.textContent = '';
+  roll.removeAttribute('style');
   hero.classList.remove('intro', 'loading');
   introSteps.forEach(s => s.classList.add('shown'));
   segs.forEach(s => s.classList.remove('on'));
@@ -87,35 +101,40 @@ function playIntro() {
   cancelAnimationFrame(introRaf);
   if (reduceMotion) { endIntro(); return; }
   const full = typeEl.dataset.text;
-  const TYPE_MS = 28;
+  const ROLL_END = ROLL_FONTS.length * ROLL_MS;
   const DURATION = 2100;
   heroName.setAttribute('aria-label', full);
-  heroName.classList.add('typing');
   hero.classList.add('intro', 'loading');
   introSteps.forEach(s => s.classList.remove('shown'));
+  // Every face is scaled to the width the final name will occupy (line by line where it wraps), so nothing jumps around it.
+  const target = Math.min(heroName.clientWidth, typeEl.getBoundingClientRect().width);
+  const wraps = typeEl.getClientRects().length > 1;
+  heroName.classList.add('rolling');
+  roll.textContent = wraps ? full.replace(' ', '\n') : full;
+  let face = -1;
   const t0 = performance.now();
   const tick = now => {
     const t = now - t0;
-    const n = Math.min(full.length, Math.floor(t / TYPE_MS));
-    // Keep the word being typed in one unbreakable run, so it never starts on the wrong line.
-    const done = full.slice(0, n), rest = full.slice(n);
-    const cut = done.lastIndexOf(' ') + 1;
-    const end = rest.indexOf(' ') < 0 ? rest.length : rest.indexOf(' ');
-    typeEl.replaceChildren(
-      done.slice(0, cut),
-      el('span', { class: 'nowrap' }, [
-        done.slice(cut),
-        ...(n < full.length ? [el('span', { class: 'caret', 'aria-hidden': 'true' })] : []),
-        el('span', { class: 'ghost', 'aria-hidden': 'true', text: rest.slice(0, end) }),
-      ]),
-      el('span', { class: 'ghost', 'aria-hidden': 'true', text: rest.slice(end) }),
-    );
+    const k = Math.min(ROLL_FONTS.length, Math.floor(t / ROLL_MS));
+    if (k !== face) {
+      face = k;
+      if (k < ROLL_FONTS.length) {
+        // A face that is still downloading is skipped: the roll keeps the previous one.
+        if (!document.fonts || document.fonts.check(`400 64px "${ROLL_FONTS[k]}"`, full)) {
+          roll.style.fontFamily = `"${ROLL_FONTS[k]}", var(--px-d)`;
+          roll.style.transform = `scale(${clamp(target / roll.scrollWidth, 0.4, 1.6)})`;
+        }
+      } else {
+        heroName.classList.remove('rolling');
+        roll.textContent = '';
+      }
+    }
     // Progress arrives in uneven chunks, like a real loader.
     const x = clamp(t / DURATION, 0, 1);
     const pct = Math.min(100, Math.floor((1 - Math.pow(1 - x, 2.4)) * 100 + Math.sin(x * 9) * 2));
     loadLabel.textContent = `Loading ${clamp(pct, 0, 100)}%`;
     segs.forEach((s, i) => s.classList.toggle('on', ((i + 1) / SEGMENTS) * 100 <= pct));
-    introSteps.forEach((s, i) => { if (t > 300 + i * 120) s.classList.add('shown'); });
+    introSteps.forEach((s, i) => { if (t > ROLL_END + 120 + i * 120) s.classList.add('shown'); });
     if (t < DURATION + 300) introRaf = requestAnimationFrame(tick);
     else endIntro();
   };
@@ -125,11 +144,13 @@ function playIntro() {
 if (fellBack) {
   endIntro();
 } else {
+  // Wait (briefly) for the display face only; the roulette faces load alongside and late ones are skipped.
   heroName.style.visibility = 'hidden';
-  Promise.race([
-    document.fonts ? document.fonts.load('400 64px "Press Start 2P"') : Promise.resolve(),
-    new Promise(r => setTimeout(r, 1200)),
-  ]).catch(() => {}).then(() => { heroName.style.visibility = ''; playIntro(); });
+  const load = f => document.fonts.load(`400 64px "${f}"`, typeEl.dataset.text);
+  if (document.fonts) ROLL_FONTS.forEach(f => load(f).catch(() => {}));
+  const display = document.fonts ? load('Press Start 2P') : Promise.resolve();
+  Promise.race([display, new Promise(r => setTimeout(r, 1200))])
+    .catch(() => {}).then(() => { heroName.style.visibility = ''; playIntro(); });
 }
 
 $('#replay').addEventListener('click', () => {
@@ -411,10 +432,29 @@ $$('[data-close]', modal).forEach(n => n.addEventListener('click', closeProject)
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeProject(); });
 
 /* ── Quest log tabs ───────────────────────────────────────── */
+const logPanel = $('.log');
+let pageTurn = 0;
 $$('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
+    if (tab.classList.contains('active')) return;
     $$('.tab').forEach(t => { t.classList.toggle('active', t === tab); t.setAttribute('aria-pressed', String(t === tab)); });
-    $$('.log-list').forEach(l => l.classList.toggle('active', l.dataset.panel === tab.dataset.tab));
+    const next = $(`.log-list[data-panel="${tab.dataset.tab}"]`);
+    const current = $('.log-list.active');
+    const show = () => {
+      $$('.log-list').forEach(l => l.classList.remove('active', 'leaving', 'entering'));
+      next.classList.add('active');
+      if (!reduceMotion) {
+        $$('li', next).forEach((li, i) => li.style.setProperty('--i', i));
+        void next.offsetWidth;
+        next.classList.add('entering');
+      }
+      // Like a menu jumping to its page: bring the list into view if it is off screen.
+      const top = logPanel.getBoundingClientRect().top;
+      if (top < 0 || top > window.innerHeight * 0.75) $('.tabs').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+    };
+    clearTimeout(pageTurn);
+    if (reduceMotion || !current) show();
+    else { current.classList.add('leaving'); pageTurn = setTimeout(show, 140); }
   });
 });
 
