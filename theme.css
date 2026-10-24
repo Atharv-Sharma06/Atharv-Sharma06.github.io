@@ -485,7 +485,23 @@ hr { border: 0; height: 2px; background: var(--dash); margin: 22px 0; }
     border: 2px solid #000; border-image: none; background: #fff;
   }
   .avatar::after { display: none; }
+  .header { position: static; }
+  .header::after, .header::before { display: none; }
+  .js .avatar .sprite { clip-path: none; }
 }
+
+/* ── Pinned header: stays at the top, content fades out as it slides under ── */
+.header { position: sticky; top: 8px; z-index: 40; }
+.header::after {
+  content: ""; position: absolute; left: -10px; right: -10px; top: calc(100% + 10px); height: 36px;
+  background: linear-gradient(rgba(7, 10, 34, 0.9), rgba(7, 10, 34, 0));
+  pointer-events: none; opacity: 0; transition: opacity 0.2s steps(2, end);
+}
+.header::before {
+  content: ""; position: absolute; left: -10px; right: -10px; top: -18px; height: 8px;
+  background: var(--bg); pointer-events: none; opacity: 0;
+}
+.header.stuck::after, .header.stuck::before { opacity: 1; }
 
 /* ── Fixes from the design review ─────────────────────────── */
 /* the terminal stays monospaced */
