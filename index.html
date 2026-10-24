@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Atharv Sharma — Software Engineer</title>
   <meta name="description" content="Atharv Sharma — software engineer at Moonshot and 9th grader at Cuthbertson High School, building Python and JavaScript tools for data, markets and machine learning." />
-  <meta name="theme-color" content="#0a0c0a" />
+  <meta name="theme-color" content="#0d1340" />
   <script>document.documentElement.classList.add('js');</script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Silkscreen&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Pixelify+Sans:wght@400;500&family=DotGothic16&family=Silkscreen&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="theme.css" />
 </head>
 <body>
 
@@ -372,13 +373,18 @@
         <button class="term-x" type="button" data-close aria-label="Close">✕</button>
       </div>
       <div class="modal-body">
-        <div class="shot modal-shot" id="modal-shot"></div>
+        <div class="modal-left">
+          <div class="shot modal-shot" id="modal-shot"></div>
+          <div class="modal-help">
+            <p class="label">Stack</p>
+            <p class="more-stack" id="modal-stack"></p>
+            <p class="keys"><kbd>Esc</kbd> close · <kbd>Tab</kbd> next · <kbd>Enter</kbd> select</p>
+          </div>
+        </div>
         <div class="modal-text">
           <h3 class="card-title" id="modal-title"></h3>
           <p class="card-tag" id="modal-tag"></p>
           <p class="card-desc" id="modal-desc"></p>
-          <p class="label">Stack</p>
-          <p class="more-stack" id="modal-stack"></p>
           <p class="label">Features</p>
           <ul class="features" id="modal-features"></ul>
           <div class="modal-actions">

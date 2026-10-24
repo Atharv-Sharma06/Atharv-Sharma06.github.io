@@ -299,8 +299,10 @@ html.modal-open, html.modal-open body { overflow: hidden; }
   .sprite { width: 162px; height: 216px; }
   .about-grid, .contact { grid-template-columns: minmax(0, 1fr); }
   .modal-body { grid-template-columns: minmax(0, 1fr); }
-  .log-list li { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; }
-  .log-y { grid-column: 1 / -1; }
+  .log-list li { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "year badge" "entry entry"; gap: 4px 12px; }
+  .log-y { grid-area: year; }
+  .log-list li > div { grid-area: entry; }
+  .log-list .badge { grid-area: badge; justify-self: end; }
 }
 
 @media (max-width: 840px) {

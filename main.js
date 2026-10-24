@@ -127,7 +127,7 @@ if (fellBack) {
 } else {
   heroName.style.visibility = 'hidden';
   Promise.race([
-    document.fonts ? document.fonts.load('400 64px Silkscreen') : Promise.resolve(),
+    document.fonts ? document.fonts.load('400 64px "Press Start 2P"') : Promise.resolve(),
     new Promise(r => setTimeout(r, 1200)),
   ]).catch(() => {}).then(() => { heroName.style.visibility = ''; playIntro(); });
 }
@@ -177,8 +177,8 @@ $$('.rv, [data-scramble]').forEach(n => io.observe(n));
 /* ── Pixel avatar ─────────────────────────────────────────── */
 // Palette lives here so the character is easy to re-skin.
 const SPRITE_PALETTE = {
-  H: '#20241f', h: '#30362f', S: '#b97a52', s: '#94603f', E: '#e9e7df', P: '#0a0c0a',
-  M: '#e9e7df', G: '#3f8a4a', g: '#2f6b37', w: '#e9e7df', L: '#8ff09a', D: '#1a1d1a',
+  H: '#1a1b33', h: '#34375e', S: '#b97a52', s: '#94603f', E: '#f5f6ff', P: '#090c26',
+  M: '#f5f6ff', G: '#cf4459', g: '#9b2f45', w: '#f5f6ff', L: '#ffd447', D: '#0d1238',
 };
 const SPRITE_ROWS = [
   '......HHHHHH......',
