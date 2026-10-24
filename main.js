@@ -177,8 +177,8 @@ $$('.rv, [data-scramble]').forEach(n => io.observe(n));
 /* ── Pixel avatar ─────────────────────────────────────────── */
 // Palette lives here so the character is easy to re-skin.
 const SPRITE_PALETTE = {
-  H: '#1a1b33', h: '#34375e', S: '#b97a52', s: '#94603f', E: '#f5f6ff', P: '#090c26',
-  M: '#f5f6ff', G: '#cf4459', g: '#9b2f45', w: '#f5f6ff', L: '#ffd447', D: '#0d1238',
+  H: '#1a1b33', h: '#34375e', S: '#dba680', s: '#bb8763', E: '#f5f6ff', P: '#090c26',
+  M: '#f5f6ff', G: '#eef0f8', g: '#c5cadf', L: '#2b3da4', D: '#1f2a5c',
 };
 const SPRITE_ROWS = [
   '......HHHHHH......',
@@ -197,13 +197,13 @@ const SPRITE_ROWS = [
   '..sSSSSMMMMSSSSs..',
   '...sSSSSSSSSSSs...',
   '.....ssSSSSss.....',
-  '...GGGGGggGGGGG...',
-  '..GGGGGGGGGGGGGG..',
-  '.GGGwGGGGGGGGwGGG.',
-  '.GGGwGGGGGGGLwGGG.',
-  '.GGGGGGGGGLLGGGGG.',
+  '...GGGGsSSsGGGG...',
+  '..GGGGGGggGGGGGG..',
+  '.GGGGGGGGGGGGGGGG.',
+  '.gGGGGGGGGGGLGGGg.',
+  '.SSGGGGGGGLLGGGSS.',
   '.SSGGGGGGLGGGGGSS.',
-  '.SSGGGGGGGGGGGGSS.',
+  '.ssGGGGGGGGGGGGss.',
   '...DDDDD..DDDDD...',
 ];
 
