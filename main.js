@@ -660,6 +660,8 @@ renderCommits();
     return p;
   }
   const echo = cmd => print(`${note ? 'note' : 'guest~'} $ ${cmd}`, 't-cmd');
+  // A reply taller than the window is read from its first line, not its last.
+  const readFromTop = top => { if (top) out.scrollTop += top.getBoundingClientRect().top - out.getBoundingClientRect().top - 16; };
 
   const PROJECTS = $$('#projects > .entries:not(.commits) > .entry').map(row => ({
     row, name: $('.e-title', row).textContent, link: $('.e-link', row)?.href, windowed: row.classList.contains('project'),
@@ -670,8 +672,7 @@ renderCommits();
       const top = out.lastElementChild;
       Object.entries(COMMANDS).filter(([, c]) => c.desc).forEach(([k, c]) => print(`${k} --> ${c.desc}`));
       print('tip: tab completes, up/down browses history.', 't-dim');
-      // The list is taller than the window: start reading from the top of it, not the bottom.
-      if (top) out.scrollTop += top.getBoundingClientRect().top - out.getBoundingClientRect().top - 16;
+      readFromTop(top);
     } },
     about: { desc: 'a little about me', run() {
       print('Atharv Sharma. Software engineer at Moonshot (YC). 9th grade at Cuthbertson High School. Charlotte, NC.');
@@ -681,8 +682,10 @@ renderCommits();
       print('Hey, player 2. Welcome to my corner of the internet. Try "projects", or "note" to send me a message.');
     } },
     projects: { desc: 'see what i have built', run() {
+      const top = out.lastElementChild;
       PROJECTS.forEach((p, i) => print([`${i + 1}. ${p.name} `, ...(p.link ? [{ href: p.link, text: p.row.dataset.repo ? 'code' : 'github', ext: true }] : [])]));
       print('type "open 1" (or any number) to explore one.', 't-dim');
+      readFromTop(top);
     } },
     open: { run(arg) {
       const p = PROJECTS[parseInt(arg, 10) - 1];
