@@ -1,6 +1,7 @@
 /* ─────────────────────────────────────────────────────────────
    Atharv Sharma — portfolio (8-bit edition)
-   Silkscreen is drawn on an 8px grid, so type sizes stay on multiples of 8.
+   Layout and behaviour. theme.css is the skin and loads after this file.
+   The page is one profile block, then a row of section toggles: one section is open at a time.
    ───────────────────────────────────────────────────────────── */
 
 :root {
@@ -21,6 +22,7 @@
   --px: "Silkscreen", ui-monospace, "Courier New", monospace;
   --step: steps(4, end);
   --wrap: 1120px;
+  --book: 960px;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -30,14 +32,11 @@ html { scroll-behavior: smooth; scroll-padding-top: 128px; scrollbar-gutter: sta
 
 body {
   background-color: var(--bg);
-  background-image: radial-gradient(rgba(233, 231, 223, 0.045) 1px, transparent 1.2px);
-  background-size: 24px 24px;
   color: var(--fg);
   font-family: var(--px);
   font-size: 16px;
   font-weight: 400;
   line-height: 1.5;
-  text-transform: uppercase;
   -webkit-font-smoothing: none;
   font-smooth: never;
   overflow-x: hidden;
@@ -59,6 +58,7 @@ b, strong, h1, h2, h3, h4 { font-weight: 400; }
 .muted { color: var(--fg-3); }
 .green { color: var(--green); }
 .coral { color: var(--coral); }
+.gold { color: var(--gold); }
 .nowrap { white-space: nowrap; }
 .sr-only, .sr-sprites { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .skip { position: absolute; left: 12px; top: -60px; z-index: 50; background: var(--fg); color: var(--bg); padding: 8px 14px; }
@@ -76,11 +76,8 @@ b, strong, h1, h2, h3, h4 { font-weight: 400; }
   white-space: nowrap;
   transition: transform 0.15s var(--step), box-shadow 0.15s var(--step), background 0.15s, color 0.15s;
 }
-.btn-solid { background: var(--fg); color: var(--bg); box-shadow: 4px 4px 0 var(--line-2); }
-.btn-solid:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 var(--green-2); }
-.btn-solid:active { transform: translate(2px, 2px); box-shadow: 0 0 0 var(--line-2); }
+.btn-solid { background: var(--fg); color: var(--bg); }
 .btn-line { border: 2px solid var(--line-2); color: var(--fg); }
-.btn-line:hover { border-color: var(--green); color: var(--green); }
 .btn-sm { padding: 12px 16px; }
 
 /* ── Header ────────────────────────────────────────────────── */
@@ -88,36 +85,47 @@ b, strong, h1, h2, h3, h4 { font-weight: 400; }
 .brand { white-space: nowrap; }
 .nav { display: flex; gap: 32px; color: var(--fg-3); }
 .nav a { position: relative; white-space: nowrap; transition: color 0.15s; }
-.nav a.nav-hi { color: var(--fg); }
 .nav a:hover { color: var(--green); }
 .menu-btn { display: none; border: 2px solid var(--line-2); padding: 8px 12px; }
 
-/* ── Hero ──────────────────────────────────────────────────── */
-.hero { padding-top: 96px; padding-bottom: 72px; }
-.hero-name { position: relative; font-size: 64px; line-height: 1.1; margin-bottom: 32px; min-height: 1.1em; }
+/* ── Profile (centered, like a title card) ─────────────────── */
+.hero { display: flex; flex-direction: column; align-items: center; text-align: center; padding-top: 88px; padding-bottom: 40px; }
+/* the heading hugs the name, so the roulette copy can sit exactly on top of it */
+.hero-name { position: relative; width: fit-content; max-width: 100%; font-size: 64px; line-height: 1.1; margin-bottom: 24px; min-height: 1.1em; }
 /* font roulette: the real name keeps its space while a scaled copy flips faces on top of it */
-.name-roll { display: none; position: absolute; left: 0; top: 0; white-space: pre; transform-origin: left top; pointer-events: none; }
+.name-roll { display: none; position: absolute; left: 50%; top: 0; white-space: pre; transform-origin: 50% 0; pointer-events: none; }
 .rolling .name-roll { display: block; }
 .rolling .type { visibility: hidden; }
-/* the caret takes no width, and untyped letters are kept as invisible "ghosts", so typing never reflows the page */
-.caret { display: inline-block; width: 0.5em; height: 0.8em; margin: 0 -0.6em 0 0.1em; background: var(--fg); vertical-align: -0.04em; }
-.ghost { visibility: hidden; }
-@keyframes caret { 50% { opacity: 0; } }
-.hero-line { font-size: 24px; line-height: 40px; }
-.hero-line a { text-decoration: underline; text-decoration-thickness: 3px; text-underline-offset: 6px; }
-.hero-line a:hover { color: var(--green); }
-.hero-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 20px 32px; margin-top: 32px; }
-.status { display: inline-flex; align-items: center; gap: 12px; color: var(--green); }
-.blink-dot { width: 8px; height: 8px; background: var(--green); animation: caret 1s steps(1) 4; }
-.hero-links { display: flex; flex-wrap: wrap; gap: 8px 32px; margin-top: 32px; color: var(--fg-3); }
+.hero-line { font-size: 20px; line-height: 32px; max-width: 46em; }
+.hero-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 32px; margin-top: 24px; color: var(--fg-3); }
 .hero-links a:hover { color: var(--green); }
+.hero-bio { max-width: 60ch; margin-top: 28px; }
+.status { display: inline-flex; align-items: center; gap: 12px; margin-top: 16px; color: var(--green); }
+.blink-dot { width: 8px; height: 8px; background: var(--green); animation: caret 1s steps(1) 4; }
+@keyframes caret { 50% { opacity: 0; } }
 
-.loadbar { margin-top: 56px; }
-.loadbar-label { display: block; height: 24px; color: var(--green); visibility: hidden; }
-.loading .loadbar-label { visibility: visible; }
-.segbar { display: grid; grid-template-columns: repeat(20, 1fr); gap: 6px; }
-.segbar i { height: 6px; background: var(--fg-2); transition: background 0.1s; }
-.segbar i.on { background: var(--green); }
+/* avatar: materialises row by row once the name lands */
+.avatar { position: relative; display: grid; place-items: center; margin-top: 32px; padding: 24px 32px; }
+.sprite { width: 144px; height: 192px; }
+.js .avatar .sprite { clip-path: inset(0 0 100% 0); }
+.js .avatar.in .sprite { clip-path: inset(0); transition: clip-path 0.72s steps(12, end) 0.1s; }
+.avatar.in .sprite { animation: bob 1.2s steps(1) 4; }
+.avatar:hover .sprite { animation: bob 1.2s steps(1) infinite; }
+.sprite .eyes { transform-origin: 50% 37.5%; transform-box: view-box; }
+/* every looping animation stops within 5s unless the visitor hovers the avatar */
+.avatar.in .sprite .eyes { animation: blink 2.1s steps(1) 2; }
+.avatar:hover .sprite .eyes { animation: blink 4.2s steps(1) infinite; }
+@keyframes bob { 50% { transform: translateY(6px); } }
+@keyframes blink { 0%, 93%, 100% { transform: none; } 95% { transform: scaleY(0.15); } }
+.avatar-shadow { width: 120px; height: 12px; background: #121512; margin-top: -6px; }
+
+/* section toggles: lowercase words with an arrow that turns when a section is open */
+.toggles { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 36px; margin-top: 32px; }
+.tg { position: relative; display: inline-flex; align-items: center; gap: 10px; padding: 8px 2px; font-size: 20px; line-height: 1.2; color: var(--fg-3); white-space: nowrap; transition: color 0.15s; }
+.tg:hover { color: var(--fg); }
+.tg[aria-expanded="true"] { color: var(--fg); }
+.tg-arrow { width: 12px; height: 8px; flex-shrink: 0; background: currentColor; clip-path: polygon(0 0, 100% 0, 50% 100%); transition: transform 0.2s steps(2, end); }
+.tg[aria-expanded="true"] .tg-arrow { transform: rotate(180deg); }
 
 /* intro choreography: lines wipe in pixel by pixel; only hidden when JS runs */
 .js .intro .intro-step { opacity: 0.35; clip-path: inset(-12px calc(100% + 12px) -12px -12px); }
@@ -127,129 +135,64 @@ b, strong, h1, h2, h3, h4 { font-weight: 400; }
 
 /* if main.js never runs, nothing stays hidden */
 @keyframes reveal-fallback { to { opacity: 1; transform: none; clip-path: none; } }
-html.js:not(.js-ok) .rv, html.js:not(.js-ok) .intro .intro-step { animation: reveal-fallback 0s 2.5s forwards; }
-
-/* ── Sections ──────────────────────────────────────────────── */
-.section { padding-top: 72px; padding-bottom: 72px; scroll-margin-top: 16px; }
-.section-h { font-size: 32px; line-height: 1.25; margin-bottom: 40px; }
-.label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; font-size: 16px; color: var(--fg-3); margin-bottom: 12px; }
-.label-link { margin-left: auto; color: var(--fg-3); white-space: nowrap; }
-.label-link:hover { color: var(--green); }
-
-.panel { background: var(--panel); box-shadow: 6px 6px 0 var(--shadow); padding: 24px; }
+html.js:not(.js-ok) .rv, html.js:not(.js-ok) .intro .intro-step, html.js:not(.js-ok) .avatar .sprite { animation: reveal-fallback 0s 2.5s forwards; }
 
 /* scroll reveals: stepped, like sprites */
 .js .rv { opacity: 0; transform: translateY(24px); transition: opacity 0.5s var(--step), transform 0.5s var(--step); }
 .js .rv.in { opacity: 1; transform: none; }
-.js .card.rv.in { transition: opacity 0.5s var(--step), transform 0.2s var(--step), box-shadow 0.2s var(--step); }
 
-/* ── Project cards ─────────────────────────────────────────── */
-.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; }
-.card {
-  background: var(--panel);
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 6px 6px 0 var(--shadow);
-  transition: box-shadow 0.2s var(--step), opacity 0.5s var(--step);
-}
-.card:hover { box-shadow: 6px 6px 0 #3a4f31; }
-.card-wide { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 24px; align-items: center; }
-.card-wide .card-body { padding: 8px 8px 8px 0; }
+/* ── The book: numbered sections, one open at a time ───────── */
+.book { max-width: calc(var(--book) + 48px); padding-bottom: 48px; }
+.sec { scroll-margin-top: 112px; }
+.sec + .sec { margin-top: 32px; }
+/* once main.js has taken over the toggles, only the open section shows; if it never runs, every section stays readable */
+.one-sec .sec:not(.open) { display: none; }
+.one-sec .sec + .sec { margin-top: 0; }
 
-.shot { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: var(--panel-2); border: 2px solid var(--line); image-rendering: pixelated; }
-.shot > svg { width: 100%; height: 100%; }
-.shot::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 3px); }
-.shot-tag { position: absolute; z-index: 1; right: 8px; bottom: 8px; background: rgba(10, 12, 10, 0.82); color: var(--fg-2); font-size: 8px; line-height: 1; padding: 5px 7px; }
+.sec-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.sec-head::after { content: ""; order: 3; flex: 1 1 24px; min-width: 24px; height: 2px; background: var(--line-2); }
+.sec-n { order: 1; }
+.sec-head h2 { order: 2; }
+.sec-count { order: 4; white-space: nowrap; color: var(--fg-3); }
 
-.card-body { display: flex; flex-direction: column; flex: 1; padding: 20px 6px 4px; }
-.card-title { font-size: 24px; line-height: 1.3; margin-bottom: 12px; }
-.card-desc { margin-bottom: 12px; }
-.card-tag { color: var(--green); margin-bottom: 20px; }
-.state { padding: 2px 6px; font-size: 8px; border: 2px solid currentColor; margin-left: 4px; white-space: nowrap; vertical-align: 2px; }
-.state.live { color: var(--green); }
-.state.wip { color: var(--gold); }
-.card-foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-.card-link { padding-bottom: 2px; border-bottom: 2px solid var(--line-2); transition: color 0.15s, border-color 0.15s; }
-.card-link:hover { color: var(--green); border-color: var(--green); }
-
-/* ── About ─────────────────────────────────────────────────── */
-.about { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 48px; align-items: center; margin-bottom: 32px; }
-.avatar { position: relative; display: grid; place-items: center; padding: 24px 0; }
-.sprite { width: 216px; height: 288px; }
-.in .sprite { animation: bob 1.2s steps(1) 4; }
-/* the avatar materialises row by row as it scrolls in */
-.js .avatar .sprite { clip-path: inset(0 0 100% 0); }
-.js .avatar.in .sprite { clip-path: inset(0); transition: clip-path 0.72s steps(12, end) 0.2s; }
-.avatar:hover .sprite { animation: bob 1.2s steps(1) infinite; }
-.sprite .eyes { transform-origin: 50% 37.5%; transform-box: view-box; }
-/* every looping animation stops within 5s unless the visitor hovers the avatar */
-.in .sprite .eyes { animation: blink 2.1s steps(1) 2; }
-.avatar:hover .sprite .eyes { animation: blink 4.2s steps(1) infinite; }
-@keyframes bob { 50% { transform: translateY(6px); } }
-@keyframes blink { 0%, 93%, 100% { transform: none; } 95% { transform: scaleY(0.15); } }
-.avatar-shadow { width: 150px; height: 12px; background: #121512; margin-top: -6px; }
-.sheet-name { font-size: 40px; line-height: 1.25; }
-.sheet-class { margin-top: 4px; }
-.inventory { display: grid; grid-template-columns: 1fr; gap: 6px; }
-.inventory div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 16px; }
-.inventory dd { color: var(--green); text-align: right; white-space: nowrap; margin-left: auto; }
-.xp li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 16px; align-items: baseline; padding: 4px 0; }
-.xp span { color: var(--green); }
-.xp em { font-style: normal; font-size: 8px; color: var(--bg); background: var(--green); padding: 3px 6px; line-height: 1.4; }
-.watch { display: flex; flex-wrap: wrap; gap: 8px 32px; color: var(--fg-3); }
+.entry { display: grid; grid-template-columns: 8.5em minmax(0, 1fr) minmax(0, 11em); gap: 6px 28px; align-items: baseline; padding: 22px 0; border-top: 2px solid var(--line); }
+.entry:first-child { border-top: 0; padding-top: 6px; }
+.e-when { color: var(--fg-3); }
+.e-title { position: relative; display: block; font-size: 20px; line-height: 1.4; }
+.e-desc { color: var(--fg-2); max-width: 62ch; margin-top: 6px; }
+.e-title + .e-desc { margin-top: 6px; }
+.e-body > .e-desc:first-child { margin-top: 0; }
+.e-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.e-body > .e-tags:first-child { margin-top: 0; }
+.e-tags li { line-height: 1; padding: 5px 7px; border: 2px solid var(--line-2); color: var(--fg-2); }
+.e-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; text-align: right; color: var(--fg-3); }
+.e-act { display: inline-flex; align-items: center; gap: 8px; color: var(--fg-2); white-space: nowrap; }
+.e-act:hover, .e-act:focus-visible { color: var(--green); }
+.e-quote { margin-top: 14px; padding-left: 14px; border-left: 4px solid var(--line-2); color: var(--green); }
+.e-quote p { quotes: "“" "”"; }
+.e-quote p::before { content: open-quote; }
+.e-quote p::after { content: close-quote; }
+.watch { display: flex; flex-wrap: wrap; gap: 6px 28px; color: var(--fg-3); }
 .watch b { color: var(--fg); margin-right: 8px; }
+/* project features live in the row for no-JS readers; with JS they open in the project window */
+.one-sec .e-more { display: none; }
+.e-more { margin-top: 12px; }
+.e-more li::before { content: "> "; color: var(--green); }
 
-.about-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; margin-bottom: 32px; }
-.quests li { display: flex; gap: 16px; padding: 12px 0; border-top: 2px solid var(--line); }
-.quests li:first-child { border-top: 0; padding-top: 4px; }
-.quests b { display: block; color: var(--fg); }
-.quests span:not(.q-mark) { display: block; color: var(--fg-3); }
-.q-mark { flex-shrink: 0; width: 24px; height: 24px; display: grid; place-items: center; color: var(--bg); background: var(--fg-3); line-height: 1; }
-.q-mark.main { background: var(--gold); }
-.in .q-mark.main { animation: caret 1.4s steps(1) 3; }
-
-.commits { min-height: 160px; }
-.commits li { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "repo time" "msg msg"; column-gap: 16px; padding: 8px 0; border-top: 2px solid var(--line); }
-.commits li:first-child { border-top: 0; padding-top: 0; }
-.commits .c-time { grid-area: time; color: var(--fg-3); white-space: nowrap; }
-.commits .c-repo { grid-area: repo; color: var(--green); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.commits .c-msg { grid-area: msg; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sec-sub { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; margin-top: 28px; padding-top: 20px; border-top: 2px solid var(--line-2); }
+.commits .entry { padding: 12px 0; grid-template-columns: 8.5em minmax(0, 1fr) minmax(0, 14em); }
+.commits .entry:first-child { padding-top: 8px; }
+.commits .e-desc { margin-top: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commits .e-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
 .repos { margin-top: 12px; }
 
-.skill-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; }
-.skill-cols h4 { margin-bottom: 12px; }
-.chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.chips li { line-height: 1; padding: 8px 10px; border: 2px solid var(--line-2); color: var(--fg-2); transition: color 0.15s, border-color 0.15s; }
-.chips li:hover { color: var(--green); border-color: var(--green); }
+.state { padding: 2px 6px; font-size: 8px; border: 2px solid currentColor; white-space: nowrap; }
+.state.live { color: var(--green); }
+.state.wip { color: var(--gold); }
+.state.gold { color: var(--gold); }
 
-/* ── Quest log ─────────────────────────────────────────────── */
-.tabs { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
-.tab { display: inline-flex; align-items: center; gap: 12px; padding: 12px 16px; border: 2px solid var(--line-2); color: var(--fg-3); }
-.tab:hover { color: var(--fg); border-color: var(--fg-3); }
-.tab.active { color: var(--bg); background: var(--fg); border-color: var(--fg); }
-.log-list li { display: grid; grid-template-columns: 13em minmax(0, 1fr) auto; gap: 20px; align-items: baseline; padding: 16px 0; border-top: 2px solid var(--line); }
-.log-list li:first-child { border-top: 0; padding-top: 0; }
-.log-y { color: var(--fg-3); }
-.log-list b { display: block; color: var(--fg); }
-.log-list div span { display: block; color: var(--fg-3); }
-.badge { font-size: 8px; line-height: 1; padding: 5px 7px; border: 2px solid var(--line-2); color: var(--fg-3); white-space: nowrap; }
-.badge.gold { color: var(--gold); border-color: var(--gold); }
-.badge.done { color: var(--green); border-color: var(--green); }
-.badge.wip { color: var(--coral); border-color: var(--coral); }
-.log-list li.log-quote { display: block; color: var(--green); padding-top: 20px; }
-/* quest log page turn: the old page fades out, the new rows step in one after another */
-.log-list.leaving { opacity: 0; transition: opacity 0.14s steps(2, end); }
-.log-list.entering > li { animation: row-in 0.32s steps(4, end) both; animation-delay: calc(var(--i, 0) * 45ms); }
-@keyframes row-in { from { opacity: 0; transform: translateX(-12px); } }
-/* with JS, only the chosen tab and no card details show (hidden before first paint, so nothing vanishes later) */
-.js .card-more, .js .log-list:not(.active) { display: none; }
-.log-quote q { quotes: "“" "”"; }
-
-/* ── Contact ───────────────────────────────────────────────── */
-.contact { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; align-items: start; }
-
-.term { background: var(--panel); border: 2px solid var(--line); box-shadow: 6px 6px 0 var(--shadow); display: flex; flex-direction: column; }
+/* contact: the terminal, then the same rows as every other section */
+.term { background: var(--panel); border: 2px solid var(--line); display: flex; flex-direction: column; margin: 8px 0 20px; }
 .term-bar { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 2px solid var(--line); font-size: 12px; color: var(--fg-3); }
 .dots { display: flex; gap: 6px; }
 .dots i { width: 8px; height: 8px; background: var(--line-2); }
@@ -257,7 +200,7 @@ html.js:not(.js-ok) .rv, html.js:not(.js-ok) .intro .intro-step { animation: rev
 .term-title { flex: 1; text-align: center; text-transform: lowercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .term-x { width: 24px; height: 24px; line-height: 1; color: var(--fg-3); }
 .term-x:hover { color: var(--coral); }
-.term-out { height: 352px; overflow-y: auto; padding: 16px 20px 4px; line-height: 2; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; overscroll-behavior: contain; }
+.term-out { height: 320px; overflow-y: auto; padding: 16px 20px 4px; line-height: 2; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; overscroll-behavior: contain; }
 .term-out:focus-visible { outline-offset: -4px; }
 .term-out p { white-space: pre-wrap; word-break: break-word; }
 .term-out .t-cmd { color: var(--fg-3); margin-top: 12px; }
@@ -274,31 +217,28 @@ html.js:not(.js-ok) .rv, html.js:not(.js-ok) .intro .intro-step { animation: rev
 .term-go { color: var(--fg-2); }
 .term-go:hover { color: var(--green); }
 .term-actions { display: flex; flex-wrap: wrap; gap: 12px; padding: 20px; margin-top: 12px; border-top: 2px solid var(--line); }
-
-.contact-list li { border-bottom: 2px solid var(--line); }
-.contact-list a { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name arrow" "sub arrow"; align-items: center; column-gap: 16px; padding: 24px 0; transition: color 0.15s; }
-.contact-list a:hover { color: var(--green); }
-.contact-list li:has(a:hover) { border-color: var(--green); }
-.cl-name { grid-area: name; font-size: 32px; line-height: 1.25; }
-.cl-meta, .cl-sub { grid-area: sub; color: var(--fg-3); text-transform: none; overflow-wrap: anywhere; }
-.cl-arrow { grid-area: arrow; color: var(--fg-3); }
-.contact-list a:hover .cl-arrow, .contact-list a:hover .cl-sub, .contact-list a:hover .cl-meta { color: var(--green); }
+.e-row-link { overflow-wrap: anywhere; }
+.e-row-link:hover, .e-row-link:focus-visible { color: var(--green); }
 
 /* ── Footer ────────────────────────────────────────────────── */
-.footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; padding-top: 32px; padding-bottom: 40px; color: var(--fg-3); }
+.footer { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; padding-top: 24px; padding-bottom: 40px; color: var(--fg-3); max-width: calc(var(--book) + 48px); }
 .replay { display: inline-flex; gap: 8px; color: var(--fg-3); }
 .replay:hover { color: var(--green); }
 
 /* ── Project window (modal) ────────────────────────────────── */
 html.modal-open { overflow: hidden; }
-html.modal-open body { overflow: clip; }
+html.modal-open body { overflow: clip; } /* a body scroll container would unpin the header */
 .modal { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 16px; }
 .modal[hidden] { display: none; }
 .modal-backdrop { position: absolute; inset: 0; background: rgba(5, 6, 5, 0.86); animation: fade 0.2s steps(3); }
-.modal-win { position: relative; width: min(1040px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; background: var(--panel); box-shadow: 8px 8px 0 var(--green-2); animation: pop 0.24s steps(3); }
+.modal-win { position: relative; width: min(1040px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; background: var(--panel); animation: pop 0.24s steps(3); }
 .modal-body { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 28px; padding: 24px; }
 .modal-shot { align-self: start; }
 .modal-text .label { margin-top: 20px; margin-bottom: 6px; }
+.label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; font-size: 16px; color: var(--fg-3); margin-bottom: 12px; }
+.card-title { font-size: 24px; line-height: 1.3; margin-bottom: 12px; }
+.card-desc { margin-bottom: 12px; }
+.card-tag { color: var(--green); margin-bottom: 20px; }
 .features li { display: flex; gap: 12px; padding: 8px 0; border-top: 2px solid var(--line); }
 .features li::before { content: ">"; color: var(--green); }
 .more-stack { color: var(--fg-2); }
@@ -306,20 +246,21 @@ html.modal-open body { overflow: clip; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes pop { from { opacity: 0; transform: translateY(16px) scale(0.98); } }
 
+.shot { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: var(--panel-2); border: 2px solid var(--line); image-rendering: pixelated; }
+.shot > svg { width: 100%; height: 100%; }
+.shot::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 3px); }
+.shot-tag { position: absolute; z-index: 1; right: 8px; bottom: 8px; background: rgba(10, 12, 10, 0.82); color: var(--fg-2); font-size: 8px; line-height: 1; padding: 5px 7px; }
+
+/* section page turn: the old section fades out, the new rows step in one after another */
+.sec.leaving { opacity: 0; transition: opacity 0.14s steps(2, end); }
+.sec.entering .sec-head { animation: row-in 0.24s steps(3, end) both; }
+.sec.entering .entries > li, .sec.entering .term, .sec.entering .sec-sub { animation: row-in 0.32s steps(4, end) both; animation-delay: calc(60ms + var(--i, 0) * 45ms); }
+@keyframes row-in { from { opacity: 0; transform: translateX(-12px); } }
+
 /* ── Responsive ────────────────────────────────────────────── */
 @media (max-width: 960px) {
   .hero-name { font-size: 56px; }
-  .about { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-  .sprite { width: 162px; height: 216px; }
-  .about-grid, .contact { grid-template-columns: minmax(0, 1fr); }
   .modal-body { grid-template-columns: minmax(0, 1fr); }
-  .log-list li { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "year badge" "entry entry"; gap: 4px 12px; }
-  .log-y { grid-area: year; }
-  .log-list li > div { grid-area: entry; }
-  .log-list .badge { grid-area: badge; justify-self: end; }
-}
-
-@media (max-width: 840px) {
   .menu-btn { display: block; }
   .nav {
     display: none;
@@ -330,7 +271,6 @@ html.modal-open body { overflow: clip; }
     flex-direction: column;
     gap: 0;
     background: var(--panel);
-    box-shadow: 6px 6px 0 var(--shadow);
     padding: 8px 20px;
   }
   .nav.open { display: flex; }
@@ -341,18 +281,17 @@ html.modal-open body { overflow: clip; }
 @media (max-width: 720px) {
   .hero { padding-top: 48px; }
   .hero-name { font-size: 40px; }
-  .hero-line { font-size: 16px; line-height: 32px; }
-  .section-h { font-size: 24px; }
-  .cards { grid-template-columns: minmax(0, 1fr); gap: 28px; }
-  .card-wide { display: flex; }
-  .card-wide .card-body { padding: 20px 6px 4px; }
+  .hero-line { font-size: 16px; line-height: 28px; }
+  .tg { font-size: 16px; }
+  .toggles { gap: 2px 28px; }
+  /* rows fold: date and meta share the top line, the entry runs full width under them */
+  .entry, .commits .entry { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "when meta" "body body"; gap: 6px 16px; }
+  .e-when { grid-area: when; }
+  .e-body { grid-area: body; }
+  .e-meta { grid-area: meta; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px; }
+  .commits .e-meta { max-width: 12em; }
+  .e-title { font-size: 18px; }
   .card-title { font-size: 16px; }
-  .xp li { grid-template-columns: minmax(0, 1fr) auto; }
-  .xp span { grid-column: 1; grid-row: 2; }
-  .xp li { row-gap: 4px; padding: 8px 0; }
-  .skill-cols { grid-template-columns: minmax(0, 1fr); gap: 24px; }
-  .cl-name { font-size: 24px; }
-  .segbar { gap: 4px; }
 }
 
 @media (max-width: 480px) {
@@ -362,8 +301,6 @@ html.modal-open body { overflow: clip; }
 
 @media (max-width: 400px) {
   .hero-name { font-size: 32px; }
-  .sheet-name { font-size: 24px; }
-  .panel { padding: 18px; }
   .term-out { padding-inline: 14px; }
   .term-in { margin-inline: 14px; }
   .term-actions { padding-inline: 14px; }
@@ -379,8 +316,9 @@ html.modal-open body { overflow: clip; }
 @media print {
   :root { --fg: #000; --fg-2: #222; --fg-3: #555; --green: #1e6b2a; --coral: #a33a17; --gold: #7a5d00; }
   body { background: #fff; color: #000; }
-  .panel, .card, .term { box-shadow: none; }
   .px-shadow { text-shadow: none; }
   .js .rv, .js .intro .intro-step { opacity: 1 !important; transform: none !important; clip-path: none !important; }
-  .header .nav, .menu-btn, .loadbar, .term-in, .term-actions, .replay, .modal, .explore { display: none !important; }
+  .one-sec .sec, .one-sec .e-more { display: block !important; }
+  .one-sec .sec + .sec { margin-top: 24px; }
+  .header .nav, .menu-btn, .toggles, .term, .replay, .modal, .explore { display: none !important; }
 }

@@ -63,19 +63,15 @@ document.addEventListener('keydown', e => {
   setMenu(false);
   if (inHeader) menuBtn.focus();
 });
-const wideMQ = matchMedia('(min-width: 841px)');
+const wideMQ = matchMedia('(min-width: 961px)');
 const onWide = e => { if (e.matches) setMenu(false); };
 if (wideMQ.addEventListener) wideMQ.addEventListener('change', onWide); else wideMQ.addListener(onWide);
 
-/* ── Intro: a font roulette that lands on the name, while the gauge fills ── */
+/* ── Intro: a font roulette that lands on the name, then the profile steps in ── */
 const hero = $('#hero');
 const heroName = $('#hero-name');
 const typeEl = $('.type', heroName);
-const loadLabel = $('#load-label');
-const segbar = $('#segbar');
-const SEGMENTS = 20;
-for (let i = 0; i < SEGMENTS; i++) segbar.append(el('i'));
-const segs = $$('i', segbar);
+const avatar = $('.avatar', hero);
 const introSteps = $$('.intro-step', hero);
 let introRaf = 0;
 
@@ -92,9 +88,9 @@ function endIntro() {
   heroName.removeAttribute('aria-label');
   roll.textContent = '';
   roll.removeAttribute('style');
-  hero.classList.remove('intro', 'loading');
+  hero.classList.remove('intro');
   introSteps.forEach(s => s.classList.add('shown'));
-  segs.forEach(s => s.classList.remove('on'));
+  avatar.classList.add('in');
 }
 
 function playIntro() {
@@ -102,11 +98,14 @@ function playIntro() {
   if (reduceMotion) { endIntro(); return; }
   const full = typeEl.dataset.text;
   const ROLL_END = ROLL_FONTS.length * ROLL_MS;
-  const DURATION = 2100;
+  const STEP_MS = 120;
+  const AVATAR_AT = ROLL_END + STEP_MS * 3;
+  const DURATION = ROLL_END + STEP_MS * (introSteps.length + 1);
   heroName.setAttribute('aria-label', full);
-  hero.classList.add('intro', 'loading');
+  hero.classList.add('intro');
   introSteps.forEach(s => s.classList.remove('shown'));
-  // Every face is scaled to the width the final name will occupy (line by line where it wraps), so nothing jumps around it.
+  avatar.classList.remove('in');
+  // Every face is scaled toward the width the final name will occupy (line by line where it wraps), without growing much taller than it.
   const target = Math.min(heroName.clientWidth, typeEl.getBoundingClientRect().width);
   const wraps = typeEl.getClientRects().length > 1;
   heroName.classList.add('rolling');
@@ -122,19 +121,15 @@ function playIntro() {
         // A face that is still downloading is skipped: the roll keeps the previous one.
         if (!document.fonts || document.fonts.check(`400 64px "${ROLL_FONTS[k]}"`, full)) {
           roll.style.fontFamily = `"${ROLL_FONTS[k]}", var(--px-d)`;
-          roll.style.transform = `scale(${clamp(target / roll.scrollWidth, 0.4, 1.6)})`;
+          roll.style.transform = `translateX(-50%) scale(${clamp(target / roll.scrollWidth, 0.4, 1.25)})`;
         }
       } else {
         heroName.classList.remove('rolling');
         roll.textContent = '';
       }
     }
-    // Progress arrives in uneven chunks, like a real loader.
-    const x = clamp(t / DURATION, 0, 1);
-    const pct = Math.min(100, Math.floor((1 - Math.pow(1 - x, 2.4)) * 100 + Math.sin(x * 9) * 2));
-    loadLabel.textContent = `Loading ${clamp(pct, 0, 100)}%`;
-    segs.forEach((s, i) => s.classList.toggle('on', ((i + 1) / SEGMENTS) * 100 <= pct));
-    introSteps.forEach((s, i) => { if (t > ROLL_END + 120 + i * 120) s.classList.add('shown'); });
+    introSteps.forEach((s, i) => { if (t > ROLL_END + STEP_MS + i * STEP_MS) s.classList.add('shown'); });
+    if (t > AVATAR_AT) avatar.classList.add('in');
     if (t < DURATION + 300) introRaf = requestAnimationFrame(tick);
     else endIntro();
   };
@@ -154,10 +149,22 @@ if (fellBack) {
 }
 
 $('#replay').addEventListener('click', () => {
-  window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
   heroName.setAttribute('tabindex', '-1');
   heroName.focus({ preventScroll: true });
-  playIntro();
+  if (reduceMotion || window.scrollY < 4) { window.scrollTo(0, 0); playIntro(); return; }
+  // Start once the page is back at the top, so the roulette is actually seen.
+  let started = false;
+  const go = () => {
+    if (started) return;
+    started = true;
+    window.removeEventListener('scroll', onScroll);
+    clearTimeout(fallback);
+    playIntro();
+  };
+  const onScroll = () => { if (window.scrollY < 4) go(); };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  const fallback = setTimeout(go, 1600);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 });
 
 /* ── Reveals + heading scramble ───────────────────────────── */
@@ -398,17 +405,18 @@ $$('.shot[data-shot]').forEach(s => renderShot(s, s.dataset.shot));
 /* ── Project window ───────────────────────────────────────── */
 const modal = $('#modal');
 let modalReturn = null;
-const cards = $$('.card');
+const cards = $$('.entry.project');
 
 function openProject(card) {
-  const link = $('.card-link', card).href;
-  $('#modal-file').textContent = $('.card-title', card).textContent.toLowerCase().replace(/\W+/g, '_') + '.py';
-  $('#modal-title').textContent = $('.card-title', card).textContent;
-  $('#modal-tag').textContent = $('.card-tag', card).textContent;
-  $('#modal-desc').textContent = $('.card-desc', card).textContent;
-  $('#modal-stack').textContent = $('.more-stack', card).textContent;
+  const link = $('.e-link', card).href;
+  const title = $('.e-title', card).textContent;
+  $('#modal-file').textContent = title.toLowerCase().replace(/\W+/g, '_') + '.py';
+  $('#modal-title').textContent = title;
+  $('#modal-tag').textContent = `${$('.e-tagline', card).textContent} · ${$('.e-when', card).textContent.trim()}`;
+  $('#modal-desc').textContent = $('.e-desc', card).textContent;
+  $('#modal-stack').textContent = $$('.e-tags li', card).map(li => li.textContent).join(' · ');
   const list = $('#modal-features');
-  list.replaceChildren(...$$('.card-more li', card).map(li => el('li', { text: li.textContent })));
+  list.replaceChildren(...$$('.e-more li', card).map(li => el('li', { text: li.textContent })));
   $('#modal-link').href = link;
   $('#modal-link').firstChild.textContent = card.dataset.repo ? 'View source ' : 'View GitHub ';
   const shot = $('#modal-shot');
@@ -431,32 +439,94 @@ cards.forEach(card => $('.explore', card).addEventListener('click', () => openPr
 $$('[data-close]', modal).forEach(n => n.addEventListener('click', closeProject));
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeProject(); });
 
-/* ── Quest log tabs ───────────────────────────────────────── */
-const logPanel = $('.log');
+/* ── Sections: one open at a time ─────────────────────────── */
+// The profile's toggles (and the header links) open one numbered section below them; the open one closes the others.
+const secs = $$('.sec');
+const togglesEl = $('#toggles');
+const tgs = $$('.tg');
+const navLinks = $$('.nav a[href^="#"]');
+const isSection = id => !!id && secs.some(s => s.id === id);
+const narrowMQ = matchMedia('(max-width: 720px)');
+let openSec = $('.sec.open');
 let pageTurn = 0;
-$$('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    if (tab.classList.contains('active')) return;
-    $$('.tab').forEach(t => { t.classList.toggle('active', t === tab); t.setAttribute('aria-pressed', String(t === tab)); });
-    const next = $(`.log-list[data-panel="${tab.dataset.tab}"]`);
-    const current = $('.log-list.active');
-    const show = () => {
-      $$('.log-list').forEach(l => l.classList.remove('active', 'leaving', 'entering'));
-      next.classList.add('active');
-      if (!reduceMotion) {
-        $$('li', next).forEach((li, i) => li.style.setProperty('--i', i));
-        void next.offsetWidth;
-        next.classList.add('entering');
-      }
-      // Like a menu jumping to its page: bring the list into view if it is off screen.
-      const top = logPanel.getBoundingClientRect().top;
-      if (top < 0 || top > window.innerHeight * 0.75) $('.tabs').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
-    };
-    clearTimeout(pageTurn);
-    if (reduceMotion || !current) show();
-    else { current.classList.add('leaving'); pageTurn = setTimeout(show, 140); }
-  });
+html.classList.add('one-sec');
+
+$$('.sec-count').forEach(c => {
+  const list = $('.entries', c.closest('.sec'));
+  if (list && /entr(y|ies)$/.test(c.textContent)) c.textContent = `${list.children.length} ${list.children.length === 1 ? 'entry' : 'entries'}`;
 });
+
+function syncSections() {
+  const id = openSec ? openSec.id : '';
+  tgs.forEach(t => t.setAttribute('aria-expanded', String(t.getAttribute('aria-controls') === id)));
+  navLinks.forEach(a => { if (a.hash === `#${id}`) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current'); });
+}
+
+// Land with the toggles just under the pinned header (on phones, the section itself), clear of its fade.
+function bringIntoView(sec) {
+  const clear = headerEl.getBoundingClientRect().bottom + 40;
+  const top = sec.getBoundingClientRect().top;
+  if (top >= clear - 8 && top < window.innerHeight * 0.55) return;
+  const anchor = narrowMQ.matches ? sec : togglesEl;
+  const y = anchor.getBoundingClientRect().top + window.scrollY - clear;
+  window.scrollTo({ top: Math.max(0, y), behavior: reduceMotion ? 'auto' : 'smooth' });
+}
+
+function openSection(id, { toggle = false, focus = false, scroll = true, animate = !reduceMotion } = {}) {
+  const next = isSection(id) ? document.getElementById(id) : null;
+  const prev = openSec;
+  clearTimeout(pageTurn);
+  // pressing the open section's toggle folds it away again
+  const closing = toggle && next && next === prev;
+  openSec = closing ? null : next;
+  syncSections();
+  history.replaceState(null, '', openSec ? `#${openSec.id}` : location.pathname + location.search);
+  const show = () => {
+    secs.forEach(s => { s.classList.remove('leaving', 'entering'); if (s !== openSec) s.classList.remove('open'); });
+    if (!openSec) return;
+    openSec.classList.add('open');
+    if (animate && openSec !== prev) {
+      $$('.entries > li, .term, .sec-sub', openSec).forEach((n, i) => n.style.setProperty('--i', Math.min(i, 10)));
+      void openSec.offsetWidth;
+      openSec.classList.add('entering');
+    }
+    if (scroll) bringIntoView(openSec);
+    if (focus) {
+      const h = $('h2', openSec);
+      h.setAttribute('tabindex', '-1');
+      h.focus({ preventScroll: true });
+    }
+  };
+  if (animate && prev && prev !== openSec) { prev.classList.add('leaving'); pageTurn = setTimeout(show, 140); }
+  else show();
+}
+
+const plainClick = e => e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+tgs.forEach(t => t.addEventListener('click', e => {
+  if (!plainClick(e)) return;
+  e.preventDefault();
+  openSection(t.getAttribute('aria-controls'), { toggle: true });
+}));
+// Any other link to a section (header, skip link) opens it and moves focus there.
+document.addEventListener('click', e => {
+  const a = e.target.closest('a[href^="#"]');
+  if (!a || a.classList.contains('tg') || !plainClick(e) || !isSection(a.hash.slice(1))) return;
+  e.preventDefault();
+  openSection(a.hash.slice(1), { focus: true });
+});
+window.addEventListener('hashchange', () => {
+  const id = location.hash.slice(1);
+  if (isSection(id) && document.getElementById(id) !== openSec) openSection(id, { focus: true });
+});
+
+// A link straight to a section (…/#awards) opens it; the browser's own jump ran while it was still hidden.
+const firstHash = location.hash.slice(1);
+if (isSection(firstHash) && document.getElementById(firstHash) !== openSec) {
+  openSection(firstHash, { scroll: false, animate: false });
+  requestAnimationFrame(() => openSec.scrollIntoView());
+} else {
+  syncSections();
+}
 
 /* ── GitHub activity ──────────────────────────────────────── */
 function timeAgo(date) {
@@ -506,10 +576,10 @@ let commits = [
 ].map(c => ({ ...c, ago: timeAgo(new Date(`${c.date}T12:00:00`)) }));
 
 function renderCommits() {
-  $('#commit-list').replaceChildren(...commits.slice(0, 7).map(c => el('li', {}, [
-    el('span', { class: 'c-time', text: c.ago }),
-    el('span', { class: 'c-repo', text: c.repo }),
-    el('span', { class: 'c-msg', text: c.msg.slice(0, 80) }),
+  $('#commit-list').replaceChildren(...commits.slice(0, 7).map(c => el('li', { class: 'entry' }, [
+    el('p', { class: 'e-when', text: c.ago }),
+    el('div', { class: 'e-body' }, [el('p', { class: 'e-desc', text: c.msg.slice(0, 80) })]),
+    el('div', { class: 'e-meta', title: c.repo, text: c.repo }),
   ])));
 }
 renderCommits();
@@ -562,7 +632,7 @@ renderCommits();
   }
   const echo = cmd => print(`${note ? 'note' : 'guest~'} $ ${cmd}`, 't-cmd');
 
-  const PROJECTS = cards.map(c => ({ card: c, name: $('.card-title', c).textContent, link: $('.card-link', c).href }));
+  const PROJECTS = cards.map(c => ({ card: c, name: $('.e-title', c).textContent, link: $('.e-link', c).href }));
 
   const COMMANDS = {
     help: { desc: 'list commands', run() {
@@ -595,10 +665,16 @@ renderCommits();
       print('quant: backtesting, portfolio theory, monte carlo, volatility, sharpe ratio, options basics, fred api, yfinance');
     } },
     awards: { desc: 'achievements unlocked', run() {
-      $$('.log-list[data-panel="achievements"] b').forEach(b => print(`★ ${b.textContent}`));
+      $$('#awards .e-title').forEach(b => print(`★ ${b.textContent}`));
     } },
     log: { desc: 'recent github activity', run() {
       commits.slice(0, 6).forEach(c => print([{ cls: 't-dim', text: `${c.ago} ` }, { cls: 't-ok', text: c.repo }, ` ${c.msg}`]));
+    } },
+    cd: { desc: 'open a section — cd research', run(arg) {
+      const id = arg.trim().toLowerCase().replace(/^[#/.]+|\/$/g, '');
+      if (!isSection(id)) { print(`usage: cd <${secs.map(s => s.id).join(' | ')}>`, 't-err'); return; }
+      print(`opening ${id}…`, 't-ok');
+      openSection(id, { focus: true });
     } },
     note: { desc: 'write me a note', run() { startNote(); } },
     copy: { desc: 'copy my email', async run() {
