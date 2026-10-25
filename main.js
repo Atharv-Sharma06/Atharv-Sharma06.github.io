@@ -221,7 +221,7 @@ const SHOTS = {
   macro() {
     const rand = seeded(7);
     let b = `<rect x="0" y="14" width="66" height="166" fill="#132748"/>${txt(8, 28, 'FILTERS')}`;
-    ['US', 'UK', 'EU', 'JP'].forEach((c, i) => {
+    ['US', 'UK', 'DE', 'JP'].forEach((c, i) => {
       b += `<rect x="8" y="${36 + i * 14}" width="50" height="9" fill="${i === 0 ? '#7cc4ff' : '#1d3866'}"/>${txt(12, 43 + i * 14, c, i === 0 ? '#0f1d36' : '#ffffff', 6, 0.8)}`;
     });
     ['CPI', 'UNRATE', 'GDP'].forEach((k, i) => {
@@ -232,6 +232,7 @@ const SHOTS = {
     });
     b += `<rect x="76" y="64" width="232" height="106" fill="#16294a"/>`;
     for (let g = 0; g < 4; g++) b += `<rect x="84" y="${78 + g * 22}" width="216" height="1" fill="#ffffff" opacity=".08"/>`;
+    b += `<rect x="203" y="70" width="13" height="96" fill="#ffffff" opacity=".07"/>`; // recession shading behind the spike
     const n = 40, a = [], u = [];
     for (let i = 0; i < n; i++) {
       const t = i / (n - 1);
@@ -244,21 +245,25 @@ const SHOTS = {
 
   candles() {
     const rand = seeded(11);
-    let b = `${txt(10, 28, 'TICKER · 1D')}`;
+    // what the app draws: closing price with SMA and EMA overlays, and drawdown from peak below
+    let b = `${txt(10, 28, 'TICKER · 1D')}${txt(78, 28, 'SMA 20', '#ffffff', 6, 0.6)}${txt(122, 28, 'EMA 20', '#ffd166', 6, 0.9)}`;
     ['1M', '6M', '1Y'].forEach((l, i) => { b += `<rect x="${236 + i * 26}" y="20" width="22" height="10" fill="${i === 2 ? '#5fd068' : '#1c2328'}"/>${txt(247 + i * 26, 28, l, i === 2 ? '#0f1417' : '#ffffff', 6, 0.8, 'middle')}`; });
-    const n = 30; let c = 100; const data = [];
-    for (let i = 0; i < n; i++) { const o = c; c = o + (rand() - 0.42) * 6; data.push({ o, c, h: Math.max(o, c) + rand() * 3, l: Math.min(o, c) - rand() * 3 }); }
-    const lo = Math.min(...data.map(d => d.l)), hi = Math.max(...data.map(d => d.h));
-    const Y = v => 118 - (v - lo) / (hi - lo) * 80;
-    data.forEach((d, i) => {
-      const x = 14 + i * 9.8, col = d.c >= d.o ? '#5fd068' : '#e8673f';
-      b += `<rect x="${x + 2.5}" y="${Y(d.h)}" width="1" height="${Y(d.l) - Y(d.h)}" fill="${col}"/><rect x="${x}" y="${Y(Math.max(d.o, d.c))}" width="6" height="${Math.max(2, Y(Math.min(d.o, d.c)) - Y(Math.max(d.o, d.c)))}" fill="${col}"/>`;
-    });
-    const sma = data.map((_, i) => { const s = data.slice(Math.max(0, i - 6), i + 1); return [17 + i * 9.8, Y(s.reduce((a, d) => a + d.c, 0) / s.length)]; });
-    b += `<polyline points="${pts(sma)}" fill="none" stroke="#ffffff" stroke-width="1" stroke-dasharray="3 2" opacity=".7"/>`;
-    b += `<rect x="10" y="128" width="300" height="44" fill="#151b1f"/>${txt(16, 138, 'RSI')}<rect x="16" y="146" width="288" height="1" fill="#e8673f" opacity=".4"/><rect x="16" y="162" width="288" height="1" fill="#5fd068" opacity=".4"/>`;
-    const rsi = Array.from({ length: 48 }, (_, i) => [16 + i * 6.1, 154 + Math.sin(i / 3) * 9 + (rand() - 0.5) * 6]);
-    b += `<polyline points="${pts(rsi)}" fill="none" stroke="#c9a6ff" stroke-width="1.2"/>`;
+    const n = 60; let c = 100; const close = [];
+    for (let i = 0; i < n; i++) { c += (rand() - 0.42) * 4; close.push(c); }
+    const lo = Math.min(...close) - 2, hi = Math.max(...close) + 2;
+    const X = i => 16 + i * (288 / (n - 1)), Y = v => 118 - (v - lo) / (hi - lo) * 80;
+    // 20-bar SMA (starts once 20 bars exist, like rolling(20)) and a span-20 EMA, as the app computes them
+    const sma = close.map((_, i) => (i < 19 ? null : close.slice(i - 19, i + 1).reduce((a, v) => a + v, 0) / 20));
+    let e = close[0];
+    const ema = close.map(v => (e += (v - e) * 2 / 21));
+    const line = (vals, attrs) => `<polyline points="${pts(vals.map((v, i) => (v === null ? null : [X(i), Y(v)])).filter(Boolean))}" fill="none" ${attrs}/>`;
+    b += line(close, 'stroke="#5fd068" stroke-width="1.5"') + line(sma, 'stroke="#ffffff" stroke-width="1" stroke-dasharray="3 2" opacity=".7"') + line(ema, 'stroke="#ffd166" stroke-width="1" opacity=".8"');
+    b += `<rect x="10" y="128" width="300" height="44" fill="#151b1f"/>${txt(16, 138, 'DRAWDOWN')}<rect x="16" y="146" width="288" height="1" fill="#ffffff" opacity=".15"/>`;
+    let peak = -Infinity;
+    const dd = close.map(v => { peak = Math.max(peak, v); return (v - peak) / peak; });
+    const deepest = Math.min(...dd) || -1;
+    const dds = dd.map((d, i) => [X(i), 146 + d / deepest * 22]);
+    b += `<polygon points="${pts([[X(0), 146], ...dds, [X(n - 1), 146]])}" fill="#e8673f" opacity=".3"/><polyline points="${pts(dds)}" fill="none" stroke="#e8673f" stroke-width="1.2"/>`;
     return windowFrame('#0f1417', '#0a0e10', 'stock_analysis', b);
   },
 
