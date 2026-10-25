@@ -248,14 +248,15 @@ const SHOTS = {
     // what the app draws: closing price with SMA and EMA overlays, and drawdown from peak below
     let b = `${txt(10, 28, 'TICKER · 1D')}${txt(78, 28, 'SMA 20', '#ffffff', 6, 0.6)}${txt(122, 28, 'EMA 20', '#ffd166', 6, 0.9)}`;
     ['1M', '6M', '1Y'].forEach((l, i) => { b += `<rect x="${236 + i * 26}" y="20" width="22" height="10" fill="${i === 2 ? '#5fd068' : '#1c2328'}"/>${txt(247 + i * 26, 28, l, i === 2 ? '#0f1417' : '#ffffff', 6, 0.8, 'middle')}`; });
-    const n = 40; let c = 100; const close = [];
-    for (let i = 0; i < n; i++) { c += (rand() - 0.42) * 6; close.push(c); }
+    const n = 60; let c = 100; const close = [];
+    for (let i = 0; i < n; i++) { c += (rand() - 0.42) * 4; close.push(c); }
     const lo = Math.min(...close) - 2, hi = Math.max(...close) + 2;
     const X = i => 16 + i * (288 / (n - 1)), Y = v => 118 - (v - lo) / (hi - lo) * 80;
-    const sma = close.map((_, i) => { const s = close.slice(Math.max(0, i - 6), i + 1); return s.reduce((a, v) => a + v, 0) / s.length; });
+    // 20-bar SMA (starts once 20 bars exist, like rolling(20)) and a span-20 EMA, as the app computes them
+    const sma = close.map((_, i) => (i < 19 ? null : close.slice(i - 19, i + 1).reduce((a, v) => a + v, 0) / 20));
     let e = close[0];
-    const ema = close.map(v => (e += (v - e) / 4));
-    const line = (vals, attrs) => `<polyline points="${pts(vals.map((v, i) => [X(i), Y(v)]))}" fill="none" ${attrs}/>`;
+    const ema = close.map(v => (e += (v - e) * 2 / 21));
+    const line = (vals, attrs) => `<polyline points="${pts(vals.map((v, i) => (v === null ? null : [X(i), Y(v)])).filter(Boolean))}" fill="none" ${attrs}/>`;
     b += line(close, 'stroke="#5fd068" stroke-width="1.5"') + line(sma, 'stroke="#ffffff" stroke-width="1" stroke-dasharray="3 2" opacity=".7"') + line(ema, 'stroke="#ffd166" stroke-width="1" opacity=".8"');
     b += `<rect x="10" y="128" width="300" height="44" fill="#151b1f"/>${txt(16, 138, 'DRAWDOWN')}<rect x="16" y="146" width="288" height="1" fill="#ffffff" opacity=".15"/>`;
     let peak = -Infinity;
