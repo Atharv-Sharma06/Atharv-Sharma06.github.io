@@ -574,15 +574,17 @@ function timeAgo(date) {
   return d < 30 ? `${d}d ago` : `${Math.floor(d / 30)}mo ago`;
 }
 
-// GitHub's public events API stopped carrying commit messages in October 2025, but it still lists every
-// push (repo, branch, head commit). Work here often lands on claude/* branches rather than one default
-// branch, so the feed follows the pushes and looks each one's commits up: one request for the events,
-// one per push. If that finds too little, it reads the newest repos' main branches instead.
+// GitHub's public events API stopped carrying commit messages in October 2025; it still lists pushes
+// (repo, branch, head commit), but it also drops some and can lag for hours. Work here often lands on
+// claude/* branches rather than one default branch, so the feed follows pushes: the newest repos' own
+// activity logs (complete) plus the events (for everything else), newest first, and looks up the
+// commits each push added. If that finds too little, it adds the newest repos' main and default branches.
 const FEED_PUSHES = 6;
+const FEED_LOGS = 2;
 const FEED_REPOS = 4;
 const FEED_ROWS = 7;
 const FEED_CACHE = 'gh-feed-v2';
-const FEED_TTL = 10 * 60 * 1000; // stay well inside the 60 requests/hour GitHub allows without a token
+const FEED_TTL = 15 * 60 * 1000; // ~10 requests a load: keeps a visitor near 40/hour, under GitHub's 60 without a token
 const API = 'https://api.github.com';
 const shortRepo = full => (full.startsWith(`${GH_USER}/`) ? full.slice(GH_USER.length + 1) : full);
 
@@ -666,7 +668,7 @@ async function getJSON(url, missingOk = [404, 409, 422]) {
 
 // The commits a push added: walk back from its head to the commit it replaced (only the head for a new branch).
 async function pushCommits(p) {
-  const list = await getJSON(`${API}/repos/${p.repo}/commits?sha=${p.head}&per_page=5`);
+  const list = await getJSON(`${API}/repos/${p.repo}/commits?sha=${p.head}&per_page=${FEED_ROWS}`);
   if (!Array.isArray(list)) return [];
   const newBranch = !p.before || /^0+$/.test(p.before);
   const added = [];
@@ -678,29 +680,38 @@ async function pushCommits(p) {
   return added;
 }
 
-async function feedFromPushes() {
-  const events = await getJSON(`${API}/users/${GH_USER}/events/public?per_page=50`, []);
-  if (!Array.isArray(events)) return [];
-  const pushes = [];
+// Every ref update in a repo (push, new branch, PR merge), recorded as it happens. 401 is tolerated in case the
+// endpoint ever wants a token: the events still cover the feed then.
+async function repoPushes(name) {
+  const acts = await getJSON(`${API}/repos/${GH_USER}/${name}/activity?per_page=${FEED_PUSHES}`, [401, 404, 409, 422]);
+  return Array.isArray(acts)
+    ? acts.filter(a => a && a.after && !/^0+$/.test(a.after)) // a branch deletion has nothing to show
+        .map(a => ({ repo: `${GH_USER}/${name}`, head: a.after, before: a.before, t: a.timestamp }))
+    : [];
+}
+
+async function feedFromPushes(repos, eventsReq) {
+  const logs = Promise.all(repos.filter(r => r && !r.fork && r.name).slice(0, FEED_LOGS).map(r => repoPushes(r.name)));
+  const events = await eventsReq;
+  const fromEvents = (Array.isArray(events) ? events : [])
+    .filter(e => e && e.type === 'PushEvent' && e.payload && e.payload.head && e.repo && e.repo.name)
+    .map(e => ({ repo: e.repo.name, head: e.payload.head, before: e.payload.before, t: e.created_at }));
+  const when = p => Date.parse(p.t) || 0;
   const seen = new Set();
-  for (const e of events) {
-    const head = e && e.type === 'PushEvent' && e.payload && e.payload.head;
-    if (!head || !e.repo || seen.has(`${e.repo.name}@${head}`)) continue;
-    seen.add(`${e.repo.name}@${head}`);
-    pushes.push({ repo: e.repo.name, head, before: e.payload.before });
-    if (pushes.length === FEED_PUSHES) break;
-  }
+  const pushes = [...(await logs).flat(), ...fromEvents]
+    .sort((a, b) => when(b) - when(a)) // events can arrive out of order
+    .filter(p => !seen.has(`${p.repo}@${p.head}`) && seen.add(`${p.repo}@${p.head}`))
+    .slice(0, FEED_PUSHES);
   return feedRows(await Promise.all(pushes.map(pushCommits)));
 }
 
-// Fallback: the newest repos' main branch (a claude/* default branch can be months stale), else their default.
+// Fallback: the newest repos' default branch and main together; either can be the stale one here.
 async function feedFromRepos(repos) {
   const recent = repos.filter(r => r && !r.fork && r.name).slice(0, FEED_REPOS);
   return feedRows(await Promise.all(recent.map(async r => {
     const base = `${API}/repos/${GH_USER}/${r.name}/commits?per_page=8`;
-    let list = r.default_branch && r.default_branch !== 'main' ? await getJSON(`${base}&sha=main`) : null;
-    if (!Array.isArray(list)) list = await getJSON(base);
-    return Array.isArray(list) ? list.filter(c => c && c.commit && c.html_url).map(c => commitRow(r.name, c)) : [];
+    const lists = await Promise.all([getJSON(base), r.default_branch && r.default_branch !== 'main' ? getJSON(`${base}&sha=main`) : null]);
+    return lists.flatMap(l => (Array.isArray(l) ? l : [])).filter(c => c && c.commit && c.html_url).map(c => commitRow(r.name, c));
   })));
 }
 
@@ -710,12 +721,13 @@ renderCommits();
 
 (async function loadGitHubActivity() {
   if (cachedFeed && Date.now() - cachedFeed.t < FEED_TTL) return;
-  const reposReq = getJSON(`${API}/users/${GH_USER}/repos?sort=pushed&per_page=100`, []); // in parallel with the pushes
-  let rows = await feedFromPushes();
-  const repos = await reposReq;
+  const eventsReq = getJSON(`${API}/users/${GH_USER}/events/public?per_page=100`, []); // in parallel with the repo list
+  const repos = await getJSON(`${API}/users/${GH_USER}/repos?sort=pushed&per_page=100`, []);
+  const list = Array.isArray(repos) ? repos : [];
   const count = Array.isArray(repos) && repos.length < 100 ? repos.length : NaN;
   showRepoCount(count);
-  if (rows.length < 3 && Array.isArray(repos)) rows = await feedFromRepos(repos);
+  let rows = await feedFromPushes(list, eventsReq);
+  if (rows.length < 3 && list.length) rows = feedRows([rows, await feedFromRepos(list)]);
   if (rows.length < 3) return; // the snapshot or cached rows stay
   if (feedPartial && cachedFeed && cachedFeed.rows.length >= 3) return; // a complete older feed beats a partial new one
   commits = withAgo(rows);
