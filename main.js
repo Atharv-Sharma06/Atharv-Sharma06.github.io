@@ -574,12 +574,17 @@ function timeAgo(date) {
   return d < 30 ? `${d}d ago` : `${Math.floor(d / 30)}mo ago`;
 }
 
-// GitHub's public events API stopped carrying commit messages in October 2025, so the feed reads
-// commits straight from the most recently pushed repos: one request for the list, one per repo.
+// GitHub's public events API stopped carrying commit messages in October 2025, but it still lists every
+// push (repo, branch, head commit). Work here often lands on claude/* branches rather than one default
+// branch, so the feed follows the pushes and looks each one's commits up: one request for the events,
+// one per push. If that finds too little, it reads the newest repos' main branches instead.
+const FEED_PUSHES = 6;
 const FEED_REPOS = 4;
 const FEED_ROWS = 7;
 const FEED_CACHE = 'gh-feed-v2';
 const FEED_TTL = 10 * 60 * 1000; // stay well inside the 60 requests/hour GitHub allows without a token
+const API = 'https://api.github.com';
+const shortRepo = full => (full.startsWith(`${GH_USER}/`) ? full.slice(GH_USER.length + 1) : full);
 
 function commitRow(repo, c) {
   const [subject, ...body] = c.commit.message.split('\n');
@@ -594,9 +599,9 @@ function commitRow(repo, c) {
   };
 }
 
-// A PR's merge commit repeats the PR's own commit when the titles match; keep just the commit.
-function feedRows(perRepo) {
-  const all = perRepo.flat();
+// One row per commit; a PR's merge commit repeats the PR's own commit when the titles match, so keep just the commit.
+function feedRows(groups) {
+  const all = [...new Map(groups.flat().map(r => [r.url, r])).values()];
   const subjects = new Set(all.filter(r => !r.prTitle).map(r => `${r.repo}\n${r.msg}`));
   return all
     .filter(r => !r.prTitle || !subjects.has(`${r.repo}\n${r.prTitle}`))
@@ -609,13 +614,13 @@ const withAgo = rows => rows.map(r => ({ ...r, ago: timeAgo(new Date(r.date)) })
 
 // Shown immediately, and kept if GitHub is rate-limited or unreachable (snapshot of 2026-10-26).
 let commits = [
+  { repo: 'hacker', msg: 'Add patches for six open generalaction/emdash issues', date: '2026-10-26T02:30:12Z', sha: '67f634118228b2a62828c2be1c1eb90dffc49c1c' },
+  { repo: 'hacker', msg: 'Remove team website (moved to robotics-websitr repo)', date: '2026-10-25T16:22:08Z', sha: 'fac580c03e366b185a6123c2f73d4e1a8975e586' },
+  { repo: 'robotics-websitr', msg: 'Add team website for VEX 42285B, The Mechanical Mooses', date: '2026-10-25T16:21:58Z', sha: '9f2d06d09722d9b7f134774b5d9224a04acb30c8' },
   { repo: 'robotics-websitr', msg: 'Initial commit', date: '2026-10-25T16:21:56Z', sha: '5c529cc597c903e0509bad6f886f81e6ef8f66ca' },
+  { repo: 'hacker', msg: 'WIP: start team website for VEX 42285B (The Mechanical Mooses)', date: '2026-10-25T16:17:52Z', sha: '4b0ce5d4f5de004941420d2dd26a68b663e7b08d' },
   { repo: 'hacker', msg: 'Add edge-case spec-conformance eval for the micro1 Eval Hackathon', date: '2026-10-25T16:10:20Z', sha: 'd15d4a09ccda2fcaec0740d6e6fefe52a317fa60' },
   { repo: 'ECONOMIC-data-reader', msg: 'US Summary: pick the 12-month trend windows by date', date: '2026-10-25T07:51:01Z', sha: 'bf2615b528e5c4305e6fd50d1b945a9527724a54' },
-  { repo: 'ECONOMIC-data-reader', msg: 'US mode: compare with a year ago by date; guard short and empty ranges', date: '2026-10-25T07:28:48Z', sha: '9c96cfe9fb81cc3783841f46ccbe374b173f16ec' },
-  { repo: 'ECONOMIC-data-reader', msg: 'Follow-ups from verifying the Country-mode fix', date: '2026-10-25T06:21:43Z', sha: 'd396ef8b3cfc364ae771bc1e78598b421ea9036d' },
-  { repo: 'Atharv-Sharma06.github.io', msg: 'Economic Data Dashboard: bring back the scorecard feature', date: '2026-10-25T04:11:32Z', sha: 'e1a9812cff2904b984416c78fcd1bb5827918807' },
-  { repo: 'ECONOMIC-data-reader', msg: 'Country mode: fix the Forecast crash and the tabs it was hiding', date: '2026-10-25T04:06:22Z', sha: '643d5d61d19cb280476f22c0423299220558d570' },
 ].map(({ sha, ...c }) => ({
   ...c,
   url: `https://github.com/${GH_USER}/${c.repo}/commit/${sha}`,
@@ -648,35 +653,74 @@ function writeFeedCache(rows, repos) {
   try { localStorage.setItem(FEED_CACHE, JSON.stringify({ t: Date.now(), rows, repos })); } catch (_) { /* private mode */ }
 }
 
+// A request that failed for a reason other than "not there" makes the result partial: show it, never cache it.
+let feedPartial = false;
+async function getJSON(url, missingOk = [404, 409, 422]) {
+  try {
+    const res = await fetch(url);
+    if (res.ok) return await res.json();
+    if (!missingOk.includes(res.status)) feedPartial = true;
+  } catch (_) { feedPartial = true; }
+  return null;
+}
+
+// The commits a push added: walk back from its head to the commit it replaced (only the head for a new branch).
+async function pushCommits(p) {
+  const list = await getJSON(`${API}/repos/${p.repo}/commits?sha=${p.head}&per_page=5`);
+  if (!Array.isArray(list)) return [];
+  const newBranch = !p.before || /^0+$/.test(p.before);
+  const added = [];
+  for (const c of list) {
+    if (!c || !c.commit || !c.html_url || c.sha === p.before) break;
+    added.push(commitRow(shortRepo(p.repo), c));
+    if (newBranch) break;
+  }
+  return added;
+}
+
+async function feedFromPushes() {
+  const events = await getJSON(`${API}/users/${GH_USER}/events/public?per_page=50`, []);
+  if (!Array.isArray(events)) return [];
+  const pushes = [];
+  const seen = new Set();
+  for (const e of events) {
+    const head = e && e.type === 'PushEvent' && e.payload && e.payload.head;
+    if (!head || !e.repo || seen.has(`${e.repo.name}@${head}`)) continue;
+    seen.add(`${e.repo.name}@${head}`);
+    pushes.push({ repo: e.repo.name, head, before: e.payload.before });
+    if (pushes.length === FEED_PUSHES) break;
+  }
+  return feedRows(await Promise.all(pushes.map(pushCommits)));
+}
+
+// Fallback: the newest repos' main branch (a claude/* default branch can be months stale), else their default.
+async function feedFromRepos(repos) {
+  const recent = repos.filter(r => r && !r.fork && r.name).slice(0, FEED_REPOS);
+  return feedRows(await Promise.all(recent.map(async r => {
+    const base = `${API}/repos/${GH_USER}/${r.name}/commits?per_page=8`;
+    let list = r.default_branch && r.default_branch !== 'main' ? await getJSON(`${base}&sha=main`) : null;
+    if (!Array.isArray(list)) list = await getJSON(base);
+    return Array.isArray(list) ? list.filter(c => c && c.commit && c.html_url).map(c => commitRow(r.name, c)) : [];
+  })));
+}
+
 const cachedFeed = readFeedCache();
 if (cachedFeed && cachedFeed.rows.length >= 3) { commits = withAgo(cachedFeed.rows); showRepoCount(cachedFeed.repos); }
 renderCommits();
 
 (async function loadGitHubActivity() {
   if (cachedFeed && Date.now() - cachedFeed.t < FEED_TTL) return;
-  try {
-    const listRes = await fetch(`https://api.github.com/users/${GH_USER}/repos?sort=pushed&per_page=100`);
-    if (!listRes.ok) return;
-    const repos = await listRes.json();
-    if (!Array.isArray(repos)) return;
-    const count = repos.length < 100 ? repos.length : NaN;
-    showRepoCount(count);
-    // forks are someone else's history; an empty repo answers 409 and simply adds nothing
-    const recent = repos.filter(r => !r.fork).slice(0, FEED_REPOS);
-    const perRepo = await Promise.all(recent.map(async r => {
-      try {
-        const res = await fetch(`https://api.github.com/repos/${GH_USER}/${r.name}/commits?per_page=8`);
-        const list = res.ok ? await res.json() : [];
-        return Array.isArray(list) ? list.filter(c => c && c.commit && c.html_url).map(c => commitRow(r.name, c)) : [];
-      } catch (_) { return []; }
-    }));
-    const rows = feedRows(perRepo);
-    if (rows.length >= 3) {
-      commits = withAgo(rows);
-      renderCommits();
-      writeFeedCache(rows, count);
-    }
-  } catch (_) { /* the snapshot or cached rows are already shown */ }
+  const reposReq = getJSON(`${API}/users/${GH_USER}/repos?sort=pushed&per_page=100`, []); // in parallel with the pushes
+  let rows = await feedFromPushes();
+  const repos = await reposReq;
+  const count = Array.isArray(repos) && repos.length < 100 ? repos.length : NaN;
+  showRepoCount(count);
+  if (rows.length < 3 && Array.isArray(repos)) rows = await feedFromRepos(repos);
+  if (rows.length < 3) return; // the snapshot or cached rows stay
+  if (feedPartial && cachedFeed && cachedFeed.rows.length >= 3) return; // a complete older feed beats a partial new one
+  commits = withAgo(rows);
+  renderCommits();
+  if (!feedPartial) writeFeedCache(rows, count);
 })();
 
 /* ── Terminal ─────────────────────────────────────────────── */
