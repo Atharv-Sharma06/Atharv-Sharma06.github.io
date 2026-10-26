@@ -574,71 +574,109 @@ function timeAgo(date) {
   return d < 30 ? `${d}d ago` : `${Math.floor(d / 30)}mo ago`;
 }
 
-function describeEvent(e) {
-  const p = e.payload || {};
-  switch (e.type) {
-    case 'PushEvent': {
-      const commit = p.commits?.slice(-1)[0];
-      return commit ? commit.message.split('\n')[0] : null;
-    }
-    // Branch/tag creation is noise in a feed; only new repositories are worth showing.
-    case 'CreateEvent': return p.ref_type === 'repository' ? 'created repository' : null;
-    // The public events API no longer always includes titles, so fall back to the number.
-    case 'PullRequestEvent': {
-      const pr = p.pull_request || {};
-      const action = p.action === 'closed' && pr.merged ? 'merged' : p.action;
-      return pr.title ? `${action} PR: ${pr.title}` : null;
-    }
-    case 'IssuesEvent': {
-      const issue = p.issue || {};
-      return issue.title ? `${p.action} issue: ${issue.title}` : null;
-    }
-    case 'ReleaseEvent': return `released ${p.release?.tag_name || ''}`;
-    case 'PublicEvent': return 'made repository public';
-    default: return null;
-  }
+// GitHub's public events API stopped carrying commit messages in October 2025, so the feed reads
+// commits straight from the most recently pushed repos: one request for the list, one per repo.
+const FEED_REPOS = 4;
+const FEED_ROWS = 7;
+const FEED_CACHE = 'gh-feed-v2';
+const FEED_TTL = 10 * 60 * 1000; // stay well inside the 60 requests/hour GitHub allows without a token
+
+function commitRow(repo, c) {
+  const [subject, ...body] = c.commit.message.split('\n');
+  const pr = subject.match(/^Merge pull request #(\d+) from /);
+  const prTitle = pr ? (body.find(l => l.trim()) || '').trim() : '';
+  return {
+    repo,
+    url: c.html_url,
+    date: c.commit.committer?.date || c.commit.author?.date,
+    msg: pr ? `merged #${pr[1]}${prTitle ? `: ${prTitle}` : ''}` : subject,
+    prTitle,
+  };
 }
 
-// Shown immediately, and kept if the GitHub API is rate-limited or unreachable (snapshot of 2026-06-09).
+// A PR's merge commit repeats the PR's own commit when the titles match; keep just the commit.
+function feedRows(perRepo) {
+  const all = perRepo.flat();
+  const subjects = new Set(all.filter(r => !r.prTitle).map(r => `${r.repo}\n${r.msg}`));
+  return all
+    .filter(r => !r.prTitle || !subjects.has(`${r.repo}\n${r.prTitle}`))
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .slice(0, FEED_ROWS)
+    .map(({ repo, url, date, msg }) => ({ repo, url, date, msg }));
+}
+
+const withAgo = rows => rows.map(r => ({ ...r, ago: timeAgo(new Date(r.date)) }));
+
+// Shown immediately, and kept if GitHub is rate-limited or unreachable (snapshot of 2026-10-26).
 let commits = [
-  { repo: 'Atharv-Sharma06.github.io', msg: 'Add DAR Youth Leadership Award to Achievements', date: '2026-06-09' },
-  { repo: 'Atharv-Sharma06.github.io', msg: 'Fix GitHub activity: correct username & null commits', date: '2026-06-09' },
-  { repo: 'ai-investment-assistant', msg: 'Add portfolio analysis features', date: '2026-05-24' },
-  { repo: 'investment-research-assist', msg: 'Initial commit', date: '2026-05-23' },
-  { repo: 'stock-analyser', msg: 'Update stock analysis logic', date: '2026-05-16' },
-  { repo: 'ECONOMIC-data-reader', msg: 'Add macroeconomic data reader', date: '2026-04-15' },
-].map(c => ({ ...c, ago: new Date(`${c.date}T12:00:00`).toLocaleString('en-US', { month: 'short', year: 'numeric' }) }));
+  { repo: 'robotics-websitr', msg: 'Initial commit', date: '2026-10-25T16:21:56Z', sha: '5c529cc597c903e0509bad6f886f81e6ef8f66ca' },
+  { repo: 'hacker', msg: 'Add edge-case spec-conformance eval for the micro1 Eval Hackathon', date: '2026-10-25T16:10:20Z', sha: 'd15d4a09ccda2fcaec0740d6e6fefe52a317fa60' },
+  { repo: 'ECONOMIC-data-reader', msg: 'US Summary: pick the 12-month trend windows by date', date: '2026-10-25T07:51:01Z', sha: 'bf2615b528e5c4305e6fd50d1b945a9527724a54' },
+  { repo: 'ECONOMIC-data-reader', msg: 'US mode: compare with a year ago by date; guard short and empty ranges', date: '2026-10-25T07:28:48Z', sha: '9c96cfe9fb81cc3783841f46ccbe374b173f16ec' },
+  { repo: 'ECONOMIC-data-reader', msg: 'Follow-ups from verifying the Country-mode fix', date: '2026-10-25T06:21:43Z', sha: 'd396ef8b3cfc364ae771bc1e78598b421ea9036d' },
+  { repo: 'Atharv-Sharma06.github.io', msg: 'Economic Data Dashboard: bring back the scorecard feature', date: '2026-10-25T04:11:32Z', sha: 'e1a9812cff2904b984416c78fcd1bb5827918807' },
+  { repo: 'ECONOMIC-data-reader', msg: 'Country mode: fix the Forecast crash and the tabs it was hiding', date: '2026-10-25T04:06:22Z', sha: '643d5d61d19cb280476f22c0423299220558d570' },
+].map(({ sha, ...c }) => ({
+  ...c,
+  url: `https://github.com/${GH_USER}/${c.repo}/commit/${sha}`,
+  ago: new Date(c.date).toLocaleString('en-US', { month: 'short', year: 'numeric' }),
+}));
 
 function renderCommits() {
-  $('#commit-list').replaceChildren(...commits.slice(0, 7).map(c => el('li', { class: 'entry' }, [
+  $('#commit-list').replaceChildren(...commits.slice(0, FEED_ROWS).map(c => el('li', { class: 'entry' }, [
     el('p', { class: 'e-when', text: c.ago }),
-    el('div', { class: 'e-body' }, [el('p', { class: 'e-desc', text: c.msg.slice(0, 80) })]),
+    el('div', { class: 'e-body' }, [el('p', { class: 'e-desc' }, [
+      el('a', { href: c.url, target: '_blank', rel: 'noopener', text: c.msg.slice(0, 80) }),
+    ])]),
     el('div', { class: 'e-meta', title: c.repo, text: c.repo }),
   ])));
 }
+function showRepoCount(n) {
+  if (!Number.isFinite(n)) return;
+  $('#gh-repos').textContent = n;
+  $('.repos').hidden = false;
+}
+
+// Per-visitor cache, so reloads don't spend the visitor's GitHub quota. Storage can be off; that's fine.
+function readFeedCache() {
+  try {
+    const c = JSON.parse(localStorage.getItem(FEED_CACHE));
+    return c && Array.isArray(c.rows) && c.rows.every(r => r && typeof r.msg === 'string' && typeof r.repo === 'string' && /^https:\/\/github\.com\//.test(r.url) && !isNaN(new Date(r.date))) ? c : null;
+  } catch (_) { return null; }
+}
+function writeFeedCache(rows, repos) {
+  try { localStorage.setItem(FEED_CACHE, JSON.stringify({ t: Date.now(), rows, repos })); } catch (_) { /* private mode */ }
+}
+
+const cachedFeed = readFeedCache();
+if (cachedFeed && cachedFeed.rows.length >= 3) { commits = withAgo(cachedFeed.rows); showRepoCount(cachedFeed.repos); }
 renderCommits();
 
 (async function loadGitHubActivity() {
+  if (cachedFeed && Date.now() - cachedFeed.t < FEED_TTL) return;
   try {
-    const [eventsRes, userRes] = await Promise.all([
-      fetch(`https://api.github.com/users/${GH_USER}/events/public?per_page=40`),
-      fetch(`https://api.github.com/users/${GH_USER}`),
-    ]);
-    const user = userRes.ok ? await userRes.json() : {};
-    if (Number.isFinite(user.public_repos)) { $('#gh-repos').textContent = user.public_repos; $('.repos').hidden = false; }
-    if (!eventsRes.ok) return;
-    const events = await eventsRes.json();
-    const rows = (Array.isArray(events) ? events : [])
-      .map(e => ({ e, msg: describeEvent(e) }))
-      .filter(r => r.msg)
-      .slice(0, 9)
-      .map(({ e, msg }) => ({
-        repo: e.repo.name.startsWith(`${GH_USER}/`) ? e.repo.name.split('/')[1] : e.repo.name,
-        msg,
-        ago: timeAgo(new Date(e.created_at)),
-      }));
-    if (rows.length >= 3) { commits = rows; renderCommits(); }
-  } catch (_) { /* static data already shown */ }
+    const listRes = await fetch(`https://api.github.com/users/${GH_USER}/repos?sort=pushed&per_page=100`);
+    if (!listRes.ok) return;
+    const repos = await listRes.json();
+    if (!Array.isArray(repos)) return;
+    const count = repos.length < 100 ? repos.length : NaN;
+    showRepoCount(count);
+    // forks are someone else's history; an empty repo answers 409 and simply adds nothing
+    const recent = repos.filter(r => !r.fork).slice(0, FEED_REPOS);
+    const perRepo = await Promise.all(recent.map(async r => {
+      try {
+        const res = await fetch(`https://api.github.com/repos/${GH_USER}/${r.name}/commits?per_page=8`);
+        const list = res.ok ? await res.json() : [];
+        return Array.isArray(list) ? list.filter(c => c && c.commit && c.html_url).map(c => commitRow(r.name, c)) : [];
+      } catch (_) { return []; }
+    }));
+    const rows = feedRows(perRepo);
+    if (rows.length >= 3) {
+      commits = withAgo(rows);
+      renderCommits();
+      writeFeedCache(rows, count);
+    }
+  } catch (_) { /* the snapshot or cached rows are already shown */ }
 })();
 
 /* ── Terminal ─────────────────────────────────────────────── */
