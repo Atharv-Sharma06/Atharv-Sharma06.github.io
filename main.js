@@ -579,12 +579,12 @@ function timeAgo(date) {
 // claude/* branches rather than one default branch, so the feed follows pushes: the newest repos' own
 // activity logs (complete) plus the events (for everything else), newest first, and looks up the
 // commits each push added. If that finds too little, it adds the newest repos' main and default branches.
-const FEED_PUSHES = 6;
-const FEED_LOGS = 2;
+const FEED_PUSHES = 9; // more than FEED_ROWS: a merge and the push it merged often overlap
+const FEED_LOGS = 4; // a session's single branch-creating push never reaches the events, so read every recent repo's log
 const FEED_REPOS = 4;
 const FEED_ROWS = 7;
 const FEED_CACHE = 'gh-feed-v2';
-const FEED_TTL = 15 * 60 * 1000; // ~10 requests a load: keeps a visitor near 40/hour, under GitHub's 60 without a token
+const FEED_TTL = 20 * 60 * 1000; // ~15 requests a load: keeps a visitor near 45/hour, under GitHub's 60 without a token
 const API = 'https://api.github.com';
 const shortRepo = full => (full.startsWith(`${GH_USER}/`) ? full.slice(GH_USER.length + 1) : full);
 
@@ -601,13 +601,17 @@ function commitRow(repo, c) {
   };
 }
 
-// One row per commit; a PR's merge commit repeats the PR's own commit when the titles match, so keep just the commit.
+// One row per commit, newest first. A PR's merge commit repeats the PR's own commit when the titles match:
+// drop the merge only when that commit is among the rows shown, so the change still appears once.
 function feedRows(groups) {
-  const all = [...new Map(groups.flat().map(r => [r.url, r])).values()];
-  const subjects = new Set(all.filter(r => !r.prTitle).map(r => `${r.repo}\n${r.msg}`));
+  let all = [...new Map(groups.flat().map(r => [r.url, r])).values()].sort((a, b) => new Date(b.date) - new Date(a.date));
+  for (let dup = true; dup;) {
+    const top = all.slice(0, FEED_ROWS);
+    const subjects = new Set(top.filter(r => !r.prTitle).map(r => `${r.repo}\n${r.msg}`));
+    dup = top.find(r => r.prTitle && subjects.has(`${r.repo}\n${r.prTitle}`));
+    if (dup) all = all.filter(r => r !== dup);
+  }
   return all
-    .filter(r => !r.prTitle || !subjects.has(`${r.repo}\n${r.prTitle}`))
-    .sort((a, b) => new Date(b.date) - new Date(a.date))
     .slice(0, FEED_ROWS)
     .map(({ repo, url, date, msg }) => ({ repo, url, date, msg }));
 }
