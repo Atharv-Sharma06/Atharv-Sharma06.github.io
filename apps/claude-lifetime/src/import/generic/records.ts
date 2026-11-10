@@ -86,6 +86,10 @@ function looksLikeModelId(text: string): boolean {
 /** More different unknown "models" than this means the column holds something else. */
 const MAX_UNKNOWN_MODELS = 200;
 
+const DAY_MS = 86_400_000;
+/** A row may add up ten years at most. A longer period is a mistake in the column, or says nothing about when the usage was. */
+const MAX_PERIOD_DAYS = 3660;
+
 /** Keys remembered to recognise rows that repeat inside one import. Beyond this the database still deduplicates. */
 const MAX_REMEMBERED_KEYS = 1_000_000;
 
@@ -339,6 +343,30 @@ export class GenericUsageBuilder {
       notes.push(['invalid_bucket_seconds', 'Bucket widths that are not a whole number of seconds were ignored.', sampleOf(raw.bucket_seconds)]);
     }
 
+    // ── a period of several days ──
+    // A row that adds up more than a day (a monthly total) covers whole UTC days, like a dated row.
+    const firstDay = Math.floor(time.ms / DAY_MS);
+    const periodEnd = bucketSeconds > 86400 ? Math.floor((time.ms + bucketSeconds * 1000 - 1) / DAY_MS) : firstDay;
+    // Usage of a period that is still running (this month's total so far) lies on its days up to today.
+    const today = Math.floor((this.options.maxTimeMs - DAY_MS) / DAY_MS);
+    const lastDay = Math.max(firstDay, Math.min(periodEnd, today));
+    const days = lastDay - firstDay + 1;
+    if (periodEnd - firstDay + 1 > MAX_PERIOD_DAYS) {
+      return skip(
+        'period_too_long',
+        `Rows that add up more than ten years were skipped: a period that long says nothing about when the usage was. Check the bucket width, which is in seconds (a day is 86400).`,
+        `${sampleOf(raw.bucket_seconds)} seconds from ${sampleOf(raw.timestamp)}`,
+      );
+    }
+    if (days > 1) {
+      notes.push([
+        'spread_over_days',
+        'Rows that add up more than one day are stored as one row for each day, with their counts divided evenly over the days: the file does not say how the usage was distributed. ' +
+          'Totals are unchanged. A figure for a single day or week inside such a period is an even share, not a measurement.',
+        `${days} days from ${new Date(firstDay * DAY_MS).toISOString().slice(0, 10)}`,
+      ]);
+    }
+
     // ── model ──
     let modelKey: string | null = null;
     const model = typeof raw.model === 'string' ? raw.model.trim() : raw.model;
@@ -414,14 +442,39 @@ export class GenericUsageBuilder {
       confidence: this.options.confidence,
       dedupKey,
     };
-    await this.sink.usage(usage);
+    if (days === 1) await this.sink.usage(usage);
+    else {
+      // One row per day. Each count is divided so that the days add up to exactly what the row states:
+      // what does not divide evenly goes to the first days, one unit each.
+      const share = (value: number, day: number) => Math.floor(value / days) + (day < value % days ? 1 : 0);
+      for (let day = 0; day < days; day++) {
+        const part: StagedUsage = {
+          ...usage,
+          occurredAt: new Date((firstDay + day) * DAY_MS).toISOString(),
+          bucketSeconds: 86400,
+          inputTokens: share(input, day),
+          outputTokens: share(output, day),
+          cacheReadTokens: share(cacheRead, day),
+          cacheWrite5mTokens: share(cacheWrite5m, day),
+          cacheWrite1hTokens: share(cacheWrite1h, day),
+          requestCount: share(requests, day),
+          dedupKey: `${dedupKey}#${day + 1}`,
+        };
+        // A count smaller than the number of days leaves days with nothing on them; those get no row.
+        if (part.inputTokens + part.outputTokens + part.cacheReadTokens + part.cacheWrite5mTokens + part.cacheWrite1hTokens + part.requestCount > 0) {
+          await this.sink.usage(part);
+        }
+      }
+    }
 
     this.emitted++;
     if (modelKey !== null) this.rowsWithModel++;
     if (totalOnly) this.totalOnlyRows++;
     this.tokens += input + output + cacheRead + cacheWrite5m + cacheWrite1h;
     if (time.ms < this.firstMs) this.firstMs = time.ms;
-    if (time.ms > this.lastMs) this.lastMs = time.ms;
+    // The last day a row of several days covers, not the day it starts on.
+    const endMs = days === 1 ? time.ms : lastDay * DAY_MS;
+    if (endMs > this.lastMs) this.lastMs = endMs;
 
     if (conversationKey !== null) {
       const title = typeof raw.conversation_title === 'string' && raw.conversation_title.trim() !== '' ? raw.conversation_title.trim().slice(0, 500) : null;

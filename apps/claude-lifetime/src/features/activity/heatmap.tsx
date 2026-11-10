@@ -9,6 +9,7 @@ import {
   bandLabel,
   buildCalendar,
   isInside,
+  metricRecorded,
   levelOf,
   METRIC_NOUN,
   METRIC_OPTIONS,
@@ -52,12 +53,20 @@ function useCellSize(box: RefObject<HTMLDivElement | null>, weeks: number): numb
   return cell;
 }
 
-type DayState = 'recorded' | 'empty' | 'before' | 'after';
+/** `unrecorded`: the day has usage, but its source does not record the metric that is shown. */
+type DayState = 'recorded' | 'unrecorded' | 'empty' | 'before' | 'after';
 
-function stateOf(history: History, day: string, point: SeriesPoint | undefined): DayState {
+function stateOf(history: History, day: string, point: SeriesPoint | undefined, metric: Metric): DayState {
   if (day < history.first) return 'before';
   if (!isInside(history, day)) return 'after';
-  return point ? 'recorded' : 'empty';
+  if (!point) return 'empty';
+  return metricRecorded(point, metric) ? 'recorded' : 'unrecorded';
+}
+
+/** "3 messages", or "messages not recorded" for a day that has usage and no count: its source holds tokens only. */
+function countWords(point: SeriesPoint, metric: 'messages' | 'conversations'): string {
+  const noun = METRIC_NOUN[metric];
+  return metricRecorded(point, metric) ? plural(point[metric], noun.one) : `${noun.many} not recorded`;
 }
 
 function tokenWords(point: SeriesPoint): string {
@@ -71,9 +80,9 @@ function tokenWords(point: SeriesPoint): string {
 function describeDay(day: string, state: DayState, point: SeriesPoint | undefined, history: History): string {
   const date = formatDay(day, 'weekday');
   if (state === 'before') return `${date}: before your first record on ${formatDay(history.first)}`;
-  if (state === 'after') return `${date}: after today, outside your recorded history`;
+  if (state === 'after') return `${date}: after your last record on ${formatDay(history.last)}`;
   if (!point) return `${date}: no recorded activity`;
-  return `${date}: ${tokenWords(point)}; ${plural(point.conversations, 'conversation')}; ${plural(point.messages, 'message')}`;
+  return `${date}: ${tokenWords(point)}; ${countWords(point, 'conversations')}; ${countWords(point, 'messages')}`;
 }
 
 function TipRow({ label, children }: { label: string; children: ReactNode }) {
@@ -92,7 +101,7 @@ function DayTip({ day, state, point, history }: { day: string; state: DayState; 
       {state === 'before' ? (
         <p className="mt-1 text-ink-2">Before your first record on {formatDay(history.first)}. Nothing is known about this day.</p>
       ) : state === 'after' ? (
-        <p className="mt-1 text-ink-2">After today, so outside your recorded history.</p>
+        <p className="mt-1 text-ink-2">After your last record on {formatDay(history.last)}. Nothing is imported for this day.</p>
       ) : !point ? (
         <p className="mt-1 text-ink-2">No recorded activity</p>
       ) : (
@@ -118,8 +127,10 @@ function DayTip({ day, state, point, history }: { day: string; state: DayState; 
               </div>
             </>
           ) : null}
-          <TipRow label="Conversations">{point.conversations > 0 ? formatInt(point.conversations) : <span className="text-ink-3">None recorded</span>}</TipRow>
-          <TipRow label="Messages">{point.messages > 0 ? formatInt(point.messages) : <span className="text-ink-3">None recorded</span>}</TipRow>
+          <TipRow label="Conversations">
+            {point.conversations > 0 ? formatInt(point.conversations) : <span className="text-ink-3">{point.tokens > 0 ? 'Not recorded' : 'None'}</span>}
+          </TipRow>
+          <TipRow label="Messages">{point.messages > 0 ? formatInt(point.messages) : <span className="text-ink-3">{point.tokens > 0 ? 'Not recorded' : 'None'}</span>}</TipRow>
         </dl>
       )}
     </>
@@ -137,7 +148,7 @@ interface Tip {
 /**
  * One calendar year, a square per day: weeks run left to right, weekdays top to bottom
  * from Monday. Days inside the recorded history are filled, brighter with more activity;
- * days before the first record or after today are only outlined, because nothing is
+ * days before the first record or after the last are only outlined, because nothing is
  * known about them.
  */
 export function Heatmap({ history, year, metric, scale }: { history: History; year: number; metric: Metric; scale: Scale | null }) {
@@ -224,7 +235,7 @@ export function Heatmap({ history, year, metric, scale }: { history: History; ye
         {row.map((d, week) => {
           if (!d) return <span key={week} aria-hidden="true" className="shrink-0" style={{ width: cell, height: cell }} />;
           const point = history.days.get(d.day);
-          const state = stateOf(history, d.day, point);
+          const state = stateOf(history, d.day, point, metric);
           const outside = state === 'before' || state === 'after';
           const step = rampStep(levelOf(valueOf(point, metric), scale), levels);
           return (
@@ -236,7 +247,8 @@ export function Heatmap({ history, year, metric, scale }: { history: History; ye
               aria-label={describeDay(d.day, state, point, history)}
               className={cn(
                 'shrink-0 rounded-[3px] outline-offset-1 hover:outline hover:outline-ink/70 focus:rounded-[3px] focus:outline-2 focus:outline-ink',
-                outside ? 'border border-line-strong/75' : RAMP[step],
+                // A dashed square: usage on that day, and no count of the metric to colour it by.
+                outside ? 'border border-line-strong/75' : state === 'unrecorded' ? 'border border-dashed border-ink-3' : RAMP[step],
               )}
               style={{ width: cell, height: cell }}
             />
@@ -250,6 +262,7 @@ export function Heatmap({ history, year, metric, scale }: { history: History; ye
   const tip = shownTip && shownTip.day.startsWith(`${year}-`) ? shownTip : null;
   const tipPoint = tip ? history.days.get(tip.day) : undefined;
   const hasOutside = calendar.days.some((d) => !isInside(history, d.day));
+  const hasUnrecorded = calendar.days.some((d) => stateOf(history, d.day, history.days.get(d.day), metric) === 'unrecorded');
   const noun = METRIC_NOUN[metric].many;
   const title = METRIC_OPTIONS.find((m) => m.value === metric)?.label ?? 'Activity';
 
@@ -296,6 +309,12 @@ export function Heatmap({ history, year, metric, scale }: { history: History; ye
             <span aria-hidden="true" className={cn('rounded-[3px]', RAMP[0])} style={{ width: cell, height: cell }} />
             No recorded activity
           </li>
+          {hasUnrecorded ? (
+            <li className="inline-flex items-center gap-1.5">
+              <span aria-hidden="true" className="rounded-[3px] border border-dashed border-ink-3" style={{ width: cell, height: cell }} />
+              Usage without recorded {noun}
+            </li>
+          ) : null}
           {hasOutside ? (
             <li className="inline-flex items-center gap-1.5">
               <span aria-hidden="true" className="rounded-[3px] border border-line-strong/75" style={{ width: cell, height: cell }} />
@@ -346,7 +365,7 @@ export function Heatmap({ history, year, metric, scale }: { history: History; ye
           className="pointer-events-none absolute z-10 rounded-[10px] border border-line-strong bg-raised px-3 py-2.5 text-xs shadow-[0_12px_32px_rgb(0_0_0/0.5)]"
           style={{ left: tip.x, top: tip.y, width: TIP_WIDTH, transform: `translate(-50%, ${tip.below ? '0' : '-100%'})` }}
         >
-          <DayTip day={tip.day} state={stateOf(history, tip.day, tipPoint)} point={tipPoint} history={history} />
+          <DayTip day={tip.day} state={stateOf(history, tip.day, tipPoint, metric)} point={tipPoint} history={history} />
         </div>
       ) : null}
     </div>

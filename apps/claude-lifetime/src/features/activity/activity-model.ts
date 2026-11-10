@@ -26,6 +26,17 @@ export function valueOf(point: SeriesPoint | undefined, metric: Metric): number 
   return point ? point[metric] : 0;
 }
 
+/**
+ * Whether a day's records say anything about the metric. Sources such as API usage
+ * reports hold tokens and no message or conversation counts: a day that has usage and no
+ * count is a day whose count is not recorded, which is not the same as zero. Such a day is
+ * neither drawn nor averaged as a day without messages.
+ */
+export function metricRecorded(point: SeriesPoint | undefined, metric: Metric): boolean {
+  if (!point || metric === 'tokens') return true;
+  return point[metric] > 0 || point.tokens === 0;
+}
+
 /** "64.1M tokens", "1 message". */
 export function quantity(value: number, metric: Metric): string {
   return `${formatTokens(value)} ${value === 1 ? METRIC_NOUN[metric].one : METRIC_NOUN[metric].many}`;
@@ -44,13 +55,16 @@ export interface History {
   days: Map<string, SeriesPoint>;
   /** First day with a record. Nothing is known about earlier days. */
   first: string;
-  /** Last day the record can speak for: today, or the last recorded day if that is later. */
+  /**
+   * Last day with a record. Nothing is known about later days: usage after it may simply
+   * not be imported yet, so those days are outside the history, as on Lifetime Usage.
+   */
   last: string;
   /** Every calendar year from the first to the last one with records. */
   years: number[];
 }
 
-export function buildHistory(points: SeriesPoint[], today: string): History | null {
+export function buildHistory(points: SeriesPoint[]): History | null {
   if (points.length === 0) return null;
   const days = new Map<string, SeriesPoint>();
   let first = points[0].bucket;
@@ -62,12 +76,12 @@ export function buildHistory(points: SeriesPoint[], today: string): History | nu
   }
   const years: number[] = [];
   for (let y = yearOf(first); y <= yearOf(lastRecorded); y++) years.push(y);
-  return { days, first, last: lastRecorded > today ? lastRecorded : today, years };
+  return { days, first, last: lastRecorded, years };
 }
 
 const yearOf = (day: string) => Number(day.slice(0, 4));
 
-/** Whether a day lies between the first record and today. Only those days can be called "no recorded activity". */
+/** Whether a day lies between the first and the last record. Only those days can be called "no recorded activity". */
 export function isInside(history: History, day: string): boolean {
   return day >= history.first && day <= history.last;
 }
@@ -197,6 +211,8 @@ export interface YearSummary {
   span: DaySpan | null;
   /** Days on which the chosen metric is above zero. */
   activeDays: number;
+  /** Days with usage whose source does not record the chosen metric: neither active nor quiet (see metricRecorded). */
+  unrecordedDays: number;
   /** Longest run of consecutive active days inside the year; the latest one when several are equally long. */
   streak: DaySpan | null;
   /** The day with the highest value of the chosen metric; the latest one when several are equal. */
@@ -210,7 +226,7 @@ export interface YearSummary {
 
 export function summariseYear(history: History, year: number, metric: Metric): YearSummary {
   const span = yearSpan(history, year);
-  const out: YearSummary = { span, activeDays: 0, streak: null, busiest: null, tokens: 0, exact: 0, estimated: 0, messages: 0 };
+  const out: YearSummary = { span, activeDays: 0, unrecordedDays: 0, streak: null, busiest: null, tokens: 0, exact: 0, estimated: 0, messages: 0 };
   if (!span) return out;
   let run = 0;
   for (let day = span.from; day <= span.to; day = addDays(day, 1)) {
@@ -223,6 +239,8 @@ export function summariseYear(history: History, year: number, metric: Metric): Y
       out.messages += point.messages;
     }
     if (value <= 0) {
+      // A day whose count is not recorded ends a run too: it cannot be said to continue one.
+      if (!metricRecorded(point, metric)) out.unrecordedDays++;
       run = 0;
       continue;
     }
@@ -238,7 +256,7 @@ export interface WeekdayAverage {
   /** 0 = Monday … 6 = Sunday. */
   weekday: number;
   label: string;
-  /** How many days of this weekday the year has inside the recorded history. */
+  /** How many days of this weekday the year has inside the recorded history, without those whose source does not record the metric. */
   days: number;
   total: number;
   /** Total divided by days; null when the history holds no such day in this year. */
@@ -250,9 +268,12 @@ export function weekdayAverages(history: History, year: number, metric: Metric):
   const span = yearSpan(history, year);
   if (!span) return rows;
   for (let day = span.from; day <= span.to; day = addDays(day, 1)) {
+    const point = history.days.get(day);
+    // Not recorded is not zero: such a day is left out instead of pulling the average down.
+    if (!metricRecorded(point, metric)) continue;
     const row = rows[weekdayOf(day)];
     row.days++;
-    row.total += valueOf(history.days.get(day), metric);
+    row.total += valueOf(point, metric);
   }
   for (const row of rows) row.average = row.days > 0 ? row.total / row.days : null;
   return rows;

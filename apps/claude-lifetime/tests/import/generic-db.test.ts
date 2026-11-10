@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { getOverview, getTimeSeries } from '@/analytics/overview';
 import type { ImportParser } from '@/core/types';
 import { commitImport, previewImport } from '@/import/commit';
 import { genericCsvParser, genericJsonParser } from '@/import/generic';
@@ -169,6 +170,55 @@ describe('generic CSV in the database', () => {
     ]);
     // no price exists for that tier, for any model: these tokens can never be priced
     expect(await count(`pricing_history WHERE price_tier = 'uncategorised'`)).toBe(0);
+  });
+});
+
+describe('monthly totals in a table', () => {
+  // What somebody keeps who notes one figure a month: six months of 2026, declared exact.
+  const months: Array<[start: string, days: number, input: number, output: number]> = [
+    ['2026-01-01', 31, 3_000_000, 300_000],
+    ['2026-02-01', 28, 3_100_000, 300_000],
+    ['2026-03-01', 31, 3_200_000, 300_000],
+    ['2026-04-01', 30, 3_300_000, 300_000],
+    ['2026-05-01', 31, 3_400_000, 300_000],
+    ['2026-06-01', 30, 3_500_000, 300_000],
+  ];
+  const table = ['date,model,input_tokens,output_tokens,bucket_seconds', ...months.map(([start, days, input, output]) => `${start},claude-sonnet-4-6,${input},${output},${days * 86400}`)].join('\n');
+  const total = months.reduce((sum, [, , input, output]) => sum + input + output, 0);
+  const filter = { userId: 0, timezone: 'America/New_York', basis: 'processed' as const };
+
+  it('count every day of each month, so that the history, the averages and the months are right', async () => {
+    const { preview, result } = await importWith(genericCsvParser, 'months.csv', table, { confidence: 'exact' });
+    expect(result.inserted.usageRows).toBe(181);
+    expect(preview.tokens).toEqual({ exact: total, estimated: 0 });
+    expect(preview.coveredDays).toEqual({ first: '2026-01-01', last: '2026-06-30' });
+    expect(preview.warnings.find((w) => w.code === 'spread_over_days')).toMatchObject({ count: 6 });
+
+    const overview = await getOverview(t.db, { ...filter, userId: t.userId });
+    expect(overview.tokens.total).toBe(total);
+    // The history runs to the last day of June, not to the 1st the last row begins on.
+    expect([overview.firstDay, overview.lastDay]).toEqual(['2026-01-01', '2026-06-30']);
+    // No single day carries a month: the busiest day is one thirtieth of June.
+    expect(overview.mostActiveDay?.tokens).toBeLessThan(130_000);
+
+    const byMonth = await getTimeSeries(t.db, { ...filter, userId: t.userId }, 'month');
+    expect(byMonth.map((p) => [p.bucket.slice(0, 7), p.tokens])).toEqual(months.map(([start, , input, output]) => [start.slice(0, 7), input + output]));
+    const byDay = await getTimeSeries(t.db, { ...filter, userId: t.userId }, 'day');
+    expect(byDay).toHaveLength(181);
+  });
+
+  it('give a date range and a subscription period their share of a month', async () => {
+    await importWith(genericCsvParser, 'months.csv', table, { confidence: 'exact' });
+    // The second half of April: 15 of its 30 days.
+    const half = await getOverview(t.db, { ...filter, userId: t.userId, from: '2026-04-16', to: '2026-04-30' });
+    expect(half.tokens.total).toBe((3_300_000 + 300_000) / 2);
+  });
+
+  it('add nothing when the same table is imported again', async () => {
+    await importWith(genericCsvParser, 'months.csv', table, { confidence: 'exact' });
+    const again = await importWith(genericCsvParser, 'months.csv', table, { confidence: 'exact' });
+    expect(again.preview.nothingNew).toBe(true);
+    expect(await tokens()).toBe(total);
   });
 });
 

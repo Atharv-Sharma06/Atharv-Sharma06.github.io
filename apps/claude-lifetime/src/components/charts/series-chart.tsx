@@ -5,7 +5,7 @@ import { Area, Bar, BarStack, Brush, CartesianGrid, ComposedChart, Line, Respons
 import type { Granularity } from '@/analytics/base';
 import { cn } from '@/lib/cn';
 import { formatAxis, formatTokens } from '@/lib/format';
-import { bucketLabel, bucketTick, type ChartRow } from '@/lib/series';
+import { bucketLabel, bucketTick, type ChartRow, type RangeCut } from '@/lib/series';
 
 /**
  * One series of a chart. Colour identifies the entity and is taken from the fixed
@@ -67,6 +67,7 @@ function ChartTooltip({
   label,
   series,
   granularity,
+  cut,
   formatValue,
   unit,
   showTotal,
@@ -76,6 +77,7 @@ function ChartTooltip({
   label?: string | number;
   series: ChartSeries[];
   granularity: Granularity;
+  cut?: RangeCut | null;
   formatValue: (n: number) => string;
   unit: string;
   showTotal: boolean;
@@ -87,7 +89,7 @@ function ChartTooltip({
   const total = shown.reduce((sum, s) => sum + (values.get(s.key) ?? 0), 0);
   return (
     <div className="min-w-[11rem] rounded-[10px] border border-line-strong bg-raised px-3 py-2.5 text-xs shadow-[0_12px_32px_rgb(0_0_0/0.5)]">
-      <p className="mb-1.5 font-medium text-ink">{bucketLabel(String(label), granularity)}</p>
+      <p className="mb-1.5 font-medium text-ink">{bucketLabel(String(label), granularity, cut)}</p>
       <ul className="space-y-1">
         {shown.map((s) => (
           <li key={s.key} className="flex items-center justify-between gap-4 text-ink-2">
@@ -125,6 +127,8 @@ export interface SeriesChartProps {
   zoomable?: boolean;
   /** Accessible description of what the chart shows. */
   ariaLabel: string;
+  /** Where the selected range cuts into recorded usage, so that a partial week, month or year is named as one. */
+  cut?: RangeCut | null;
 }
 
 export function SeriesChart({
@@ -137,6 +141,7 @@ export function SeriesChart({
   unit = 'tokens',
   zoomable = false,
   ariaLabel,
+  cut,
 }: SeriesChartProps) {
   const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
   const patternId = (i: number) => `hatch-${uid}-${i}`;
@@ -193,6 +198,7 @@ export function SeriesChart({
                 label={props.label}
                 series={series}
                 granularity={granularity}
+                cut={cut}
                 formatValue={formatValue}
                 unit={unit}
                 showTotal={kind !== 'line'}
@@ -273,10 +279,13 @@ export function SeriesTable({
   formatValue = formatTokens,
   showTotal = true,
   className,
+  cut,
 }: {
   rows: ChartRow[];
   series: ChartSeries[];
   granularity: Granularity;
+  /** Where the selected range cuts into recorded usage (see SeriesChartProps). */
+  cut?: RangeCut | null;
   formatValue?: (n: number) => string;
   showTotal?: boolean;
   className?: string;
@@ -308,7 +317,7 @@ export function SeriesTable({
             return (
               <tr key={row.bucket} className="border-t border-line">
                 <th scope="row" className="whitespace-nowrap px-3 py-1.5 text-left font-normal text-ink-2">
-                  {bucketLabel(row.bucket, granularity)}
+                  {bucketLabel(row.bucket, granularity, cut)}
                 </th>
                 {series.map((s) => (
                   <td key={s.key} className="tabular px-3 py-1.5 text-right text-ink">

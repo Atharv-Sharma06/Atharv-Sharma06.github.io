@@ -213,7 +213,8 @@ describe('generic CSV: timestamps', () => {
 
   it('lets bucket_seconds override the default width, also for dates', async () => {
     const { out } = await parse('timestamp,input_tokens,bucket_seconds\n2026-03-01,5,\n2026-03-01,6,604800\n2026-03-02T10:00:00Z,7,3600\n2026-03-02T11:00:00Z,8,0\n2026-03-02T12:00:00Z,9,an hour\n');
-    expect(out.usage.map((u) => [u.inputTokens, u.bucketSeconds])).toEqual([[5, 86400], [6, 604800], [7, 3600], [8, 0], [9, 0]]);
+    // The week of 6 tokens is stored day by day (see "rows that add up more than one day"): six days get one token each.
+    expect(out.usage.map((u) => [u.inputTokens, u.bucketSeconds])).toEqual([[5, 86400], ...Array.from({ length: 6 }, () => [1, 86400]), [7, 3600], [8, 0], [9, 0]]);
   });
 
   it('skips rows whose timestamp cannot be read and reports them with one sample', async () => {
@@ -526,5 +527,78 @@ describe('generic CSV: files with nothing to import', () => {
     const controller = new AbortController();
     controller.abort();
     expect(await codeOf(genericCsvParser.parse([file], collectingSink().sink, { options: { now: NOW }, signal: controller.signal }))).toBe('cancelled');
+  });
+});
+
+describe('generic CSV: rows that add up more than one day', () => {
+  const tokensOf = (rows: StagedUsage[]) => rows.reduce((sum, r) => sum + r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheWrite5mTokens + r.cacheWrite1hTokens, 0);
+  const monthly = (...rows: string[]) => `timestamp,model,input_tokens,output_tokens,requests,bucket_seconds,id\n${rows.join('\n')}\n`;
+
+  it('are stored as one row for each day, and the days add up to exactly what the row states', async () => {
+    // June has 30 days; neither count divides by 30.
+    const { parsed, out } = await parse(monthly(`2026-06-01,claude-sonnet-4-6,3500017,300011,45,${30 * 86400},june`));
+    expect(out.usage).toHaveLength(30);
+    expect(out.usage.map((r) => r.occurredAt.slice(0, 10))).toEqual(Array.from({ length: 30 }, (_, i) => `2026-06-${String(i + 1).padStart(2, '0')}`));
+    expect(new Set(out.usage.map((r) => r.bucketSeconds))).toEqual(new Set([86400]));
+    expect(out.usage.reduce((sum, r) => sum + r.inputTokens, 0)).toBe(3_500_017);
+    expect(out.usage.reduce((sum, r) => sum + r.outputTokens, 0)).toBe(300_011);
+    expect(out.usage.reduce((sum, r) => sum + r.requestCount, 0)).toBe(45);
+    // An even share: no day differs from another by more than the one unit that does not divide.
+    const inputs = out.usage.map((r) => r.inputTokens);
+    expect(Math.max(...inputs) - Math.min(...inputs)).toBe(1);
+    // Every day has a key of its own, derived from the row's, so the file adds nothing when it is imported again.
+    expect(out.usage.map((r) => r.dedupKey)).toEqual(Array.from({ length: 30 }, (_, i) => `generic:june#${i + 1}`));
+    expect(warning(parsed, 'spread_over_days')).toMatchObject({ count: 1, sample: expect.stringContaining('30 days from 2026-06-01') });
+    expect(warning(parsed, 'spread_over_days')?.message).toMatch(/^Rows that add up more than one day are stored as one row for each day, with their counts divided evenly over the days/);
+  });
+
+  it('leave rows of a day or less as they are', async () => {
+    const { parsed, out } = await parse(monthly(`2026-06-01,claude-sonnet-4-6,1000,100,1,86400,day`, `2026-06-02T10:00:00Z,claude-sonnet-4-6,1000,100,1,3600,hour`));
+    expect(out.usage.map((r) => [r.occurredAt, r.bucketSeconds, r.dedupKey])).toEqual([
+      ['2026-06-01T00:00:00.000Z', 86400, 'generic:day'],
+      ['2026-06-02T10:00:00.000Z', 3600, 'generic:hour'],
+    ]);
+    expect(warning(parsed, 'spread_over_days')).toBeUndefined();
+  });
+
+  it('divide a period that is still running over its days up to today', async () => {
+    // "Now" is 10 November: a total for all of November can only have been used on its first ten days.
+    const { out } = await parse(monthly(`2026-11-01,claude-sonnet-4-6,1000,0,0,${30 * 86400},november`));
+    expect(out.usage.map((r) => r.occurredAt.slice(0, 10))).toEqual(Array.from({ length: 10 }, (_, i) => `2026-11-${String(i + 1).padStart(2, '0')}`));
+    expect(tokensOf(out.usage)).toBe(1000);
+  });
+
+  it('give days nothing when there is less than one unit a day, instead of rows of zeros', async () => {
+    const { out } = await parse(monthly(`2026-06-01,claude-sonnet-4-6,3,0,0,${30 * 86400},tiny`));
+    expect(out.usage.map((r) => [r.occurredAt.slice(0, 10), r.inputTokens])).toEqual([
+      ['2026-06-01', 1],
+      ['2026-06-02', 1],
+      ['2026-06-03', 1],
+    ]);
+  });
+
+  it('cover the UTC days a row with a time of day reaches into', async () => {
+    // 36 hours from noon on 1 June: 1 June and 2 June.
+    const { out } = await parse(monthly(`2026-06-01T12:00:00Z,claude-sonnet-4-6,1000,0,0,${36 * 3600},span`));
+    expect(out.usage.map((r) => [r.occurredAt, r.inputTokens])).toEqual([
+      ['2026-06-01T00:00:00.000Z', 500],
+      ['2026-06-02T00:00:00.000Z', 500],
+    ]);
+  });
+
+  it('skip a row whose period is longer than ten years, and say why', async () => {
+    const { parsed, out } = await parse(monthly(`2021-01-01,claude-sonnet-4-6,1000,0,0,${4000 * 86400},long`, `2026-06-01,claude-sonnet-4-6,1000,100,1,86400,day`));
+    expect(out.usage.map((r) => r.dedupKey)).toEqual(['generic:day']);
+    expect(warning(parsed, 'period_too_long')?.message).toMatch(/^Rows that add up more than ten years were skipped/);
+  });
+
+  it('are identified by their content when they have no id, each day on its own', async () => {
+    const noId = `timestamp,model,input_tokens,bucket_seconds\n2026-06-01,claude-sonnet-4-6,3000,${3 * 86400}\n`;
+    const { out } = await parse(noId);
+    expect(out.usage).toHaveLength(3);
+    expect(new Set(out.usage.map((r) => r.dedupKey)).size).toBe(3);
+    expect(out.usage.every((r) => /^generic:[0-9a-f]{64}#[123]$/.test(r.dedupKey))).toBe(true);
+    const again = await parse(noId);
+    expect(again.out.usage.map((r) => r.dedupKey)).toEqual(out.usage.map((r) => r.dedupKey));
   });
 });

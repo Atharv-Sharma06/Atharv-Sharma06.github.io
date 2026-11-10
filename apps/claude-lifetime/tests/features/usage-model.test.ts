@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { NO_PLAN, UNKNOWN_MODEL_LABEL } from '@/analytics/base';
 import type { SeriesPoint } from '@/analytics/overview';
 import type { SubscriptionPeriod } from '@/analytics/subscriptions';
-import { SERIES_COLORS } from '@/components/charts/series-chart';
+import { NEUTRAL_SERIES_COLOR, SERIES_COLORS } from '@/components/charts/series-chart';
 import { familyColor, NEUTRAL, planColor } from '@/lib/palette';
 import type { ChartRow } from '@/lib/series';
 import {
@@ -38,6 +38,7 @@ const point = (bucket: string, group: string, over: Partial<SeriesPoint> = {}): 
   cacheRead: 0,
   cacheWrite: 0,
   replay: 0,
+  unsplit: 0,
   messages: 0,
   conversations: 0,
   requests: 0,
@@ -193,6 +194,38 @@ describe('chart views', () => {
     expect(chart.rows.map((r) => chart.series.reduce((sum, s) => sum + Number(r[s.key]), 0))).toEqual([600, 0, 30, 0]);
   });
 
+  it('gives totals that are not split into input and output a band of their own, never the input band', () => {
+    // A row that only states a total, next to a row that states both sides.
+    const totals = [point('2026-01-01', '', { tokens: 11_500, input: 1000, output: 500, unsplit: 10_000 })];
+    const chart = categoryChart(totals, frame, 'processed');
+    expect(chart.series.map((s) => [s.label, s.color])).toEqual([
+      ['Input', SERIES_COLORS[0]],
+      ['Output', SERIES_COLORS[1]],
+      ['Not split into input and output', NEUTRAL_SERIES_COLOR],
+    ]);
+    expect(chart.rows[0]).toMatchObject({ input: 1000, output: 500, unsplit: 10_000 });
+    // The band is there under the "new" basis as well, and is absent when nothing is unsplit.
+    expect(categoryChart(totals, frame, 'new').series.map((s) => s.key)).toEqual(['input', 'output', 'unsplit']);
+    expect(categoryChart(mixed, frame, 'new').series.map((s) => s.key)).not.toContain('unsplit');
+  });
+
+  it('ranks a model by all of its tokens, also those that are not split', () => {
+    const lifetime = [point('2026-01-01', 'Claude Opus 4.5', { input: 100 }), point('2026-01-01', 'Claude Sonnet 4.5', { unsplit: 5000 })];
+    // Opus alone would be the only model on a list of one; with the unsplit tokens counted, Sonnet is.
+    expect(rankModels(lifetime, 1)).toEqual(['Claude Sonnet 4.5']);
+  });
+
+  it('keeps a model in its colour when another model overtakes it', () => {
+    const before = [point('2026-01-01', 'Claude Opus 4.5', { tokens: 2000, input: 2000 }), point('2026-01-01', 'Claude Sonnet 4.5', { tokens: 1000, input: 1000 })];
+    // One more import, and Sonnet has the most usage.
+    const after = [...before, point('2026-02-01', 'Claude Sonnet 4.5', { tokens: 5000, input: 5000 })];
+    expect(rankModels(before)).toEqual(['Claude Opus 4.5', 'Claude Sonnet 4.5']);
+    expect(rankModels(after)).toEqual(rankModels(before));
+    const colours = (lifetime: SeriesPoint[]) => Object.fromEntries(modelChart(lifetime, frame, rankModels(lifetime)).series.map((s) => [s.label, s.color]));
+    expect(colours(after)).toEqual(colours(before));
+    expect(colours(before)).toEqual({ 'Claude Opus 4.5': SERIES_COLORS[0], 'Claude Sonnet 4.5': SERIES_COLORS[1] });
+  });
+
   it('orders model families as the palette does and never merges usage without a model into one', () => {
     const chart = familyChart(
       [
@@ -222,9 +255,11 @@ describe('chart views', () => {
       point('2025-01-01', UNKNOWN_MODEL_LABEL, { tokens: 99_999, input: 99_999 }),
       point('2025-01-01', 'Model D', { tokens: 0 }),
     ];
-    // B: 910 processed, A and C: 800 each (ordered by name), D has no usage at all
-    expect(rankModels(lifetime)).toEqual(['Model B', 'Model A', 'Model C']);
-    expect(rankModels(lifetime, 2)).toEqual(['Model B', 'Model A']);
+    // B: 910 processed, A and C: 800 each, D has no usage at all. Listed by name, whoever has the most.
+    expect(rankModels(lifetime)).toEqual(['Model A', 'Model B', 'Model C']);
+    // Usage decides who is on a shorter list (B, then A before C by name); the list itself is in name order again.
+    expect(rankModels(lifetime, 2)).toEqual(['Model A', 'Model B']);
+    expect(rankModels(lifetime, 1)).toEqual(['Model B']);
   });
 
   it('gives ranked models their colour by rank and folds the rest into "Other models"', () => {

@@ -27,7 +27,8 @@ import { createTestDb, type TestDb } from '../helpers/db';
  * statements go through neither.
  */
 const NOW = new Date('2026-11-10T12:00:00Z');
-const TODAY = '2026-11-10';
+/** The last day the demo dataset has a record for. */
+const LAST_RECORD = '2026-11-09';
 const FACTS = `usage_facts f JOIN data_sources s ON s.id = f.source_id`;
 const MINE = `f.user_id = $1 AND s.include_in_totals`;
 const NEW = `(f.input_tokens + f.output_tokens + f.cache_write_5m_tokens + f.cache_write_1h_tokens)`;
@@ -51,7 +52,7 @@ beforeAll(async () => {
   await loadDemoDataset(t.db, t.userId, 'UTC', NOW);
   lifetime = { userId: t.userId, timezone: 'UTC', basis: 'processed' };
   daily = await getTimeSeries(t.db, lifetime, 'day', 'none');
-  history = buildHistory(daily, TODAY)!;
+  history = buildHistory(daily)!;
   periods = await listPeriods(t.db, t.userId, 'UTC');
 });
 afterAll(() => t.close());
@@ -125,7 +126,8 @@ describe('Lifetime Usage', () => {
       `SELECT mc.display_name AS name FROM ${FACTS} JOIN model_catalog mc ON mc.id = f.model_id
         WHERE ${MINE} GROUP BY 1 ORDER BY sum(${PROCESSED}) DESC, 1 LIMIT 7`,
     );
-    expect(processed).toEqual(sql.map((r) => r.name));
+    // The seven models with the most usage, listed by name: the amount decides who is listed, not in which colour.
+    expect(processed).toEqual(sql.map((r) => r.name).sort((a, b) => a.localeCompare(b, 'en', { numeric: true })));
   });
 
   it('keeps usage without a model, and time without a plan, in bands of their own', async () => {
@@ -178,7 +180,8 @@ describe('Activity Heatmap', () => {
     const sql = await rows(`${perDay} ORDER BY 1`);
     expect(history.days.size).toBe(sql.length);
     expect(history.first).toBe(sql[0].day);
-    expect(history.last).toBe(TODAY);
+    // The history ends with the last record, the day before "today" in the demo.
+    expect(history.last).toBe(LAST_RECORD);
     for (const r of sql) {
       const point = history.days.get(String(r.day));
       expect([r.day, point?.tokens, point?.exact, point?.estimated, point?.messages, point?.conversations]).toEqual([
@@ -201,7 +204,7 @@ describe('Activity Heatmap', () => {
     expect(summary.tokens).toBe(toNumber(total.tokens));
     expect(summary.messages).toBe(toNumber(total.messages));
     expect(summary.exact + summary.estimated).toBe(summary.tokens);
-    expect(summary.span).toEqual({ from: '2026-01-01', to: TODAY, days: 314 });
+    expect(summary.span).toEqual({ from: '2026-01-01', to: LAST_RECORD, days: 313 });
 
     // the year's figures in the year switch and the first tile come from the yearly series
     const yearly = (await getTimeSeries(t.db, lifetime, 'year', 'none')).find((p) => p.bucket === '2026-01-01');
@@ -240,16 +243,16 @@ describe('Activity Heatmap', () => {
     expect([summary.busiest?.bucket, valueOf(summary.busiest ?? undefined, metric)]).toEqual([busiest.day, toNumber(busiest.value)]);
   });
 
-  it('averages each weekday over the days of the year up to today', async () => {
+  it('averages each weekday over the days of the year up to the last record', async () => {
     const sums = await rows<{ dow: number; total: unknown }>(
       `SELECT extract(isodow FROM ${DAY})::int AS dow, sum(${PROCESSED})::bigint AS total
          FROM ${FACTS} WHERE ${MINE} AND ${DAY} BETWEEN '2026-01-01' AND '2026-12-31' GROUP BY 1`,
     );
     const counts = await t.db.query<{ dow: number; days: number }>(
-      `SELECT extract(isodow FROM g)::int AS dow, count(*)::int AS days FROM generate_series('2026-01-01'::date, '${TODAY}'::date, interval '1 day') g GROUP BY 1`,
+      `SELECT extract(isodow FROM g)::int AS dow, count(*)::int AS days FROM generate_series('2026-01-01'::date, '${LAST_RECORD}'::date, interval '1 day') g GROUP BY 1`,
     );
     const averages = weekdayAverages(history, 2026, 'tokens');
-    expect(averages.reduce((sum, r) => sum + r.days, 0)).toBe(314);
+    expect(averages.reduce((sum, r) => sum + r.days, 0)).toBe(313);
     for (const row of averages) {
       const total = toNumber(sums.find((s) => s.dow === row.weekday + 1)?.total);
       const days = counts.rows.find((c) => c.dow === row.weekday + 1)?.days ?? 0;

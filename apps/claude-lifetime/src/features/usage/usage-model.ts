@@ -1,7 +1,7 @@
 import { NO_PLAN, UNKNOWN_MODEL_LABEL, type Granularity, type TokenBasis } from '@/analytics/base';
 import type { SeriesGroup, SeriesPoint } from '@/analytics/overview';
 import { PLANS, planLabel, type SubscriptionPeriod } from '@/analytics/subscriptions';
-import { SERIES_COLORS, type ChartSeries } from '@/components/charts/series-chart';
+import { NEUTRAL_SERIES_COLOR, SERIES_COLORS, type ChartSeries } from '@/components/charts/series-chart';
 import { addDays, daysBetween, formatDayRange } from '@/lib/format';
 import { FAMILY_ORDER, familyColor, familyLabel, NEUTRAL, planColor } from '@/lib/palette';
 import { autoGranularity, bucketStart, cumulative, nextBucket, pivot, type ChartRow } from '@/lib/series';
@@ -179,17 +179,20 @@ export function cumulativeChart(points: SeriesPoint[], frame: ChartFrame): Chart
   return { kind: 'area', rows: cumulative(bars.rows, ['exact', 'estimated']), series: bars.series };
 }
 
-type CategoryField = 'input' | 'output' | 'cacheWrite' | 'cacheRead' | 'replay';
+type CategoryField = 'input' | 'output' | 'unsplit' | 'cacheWrite' | 'cacheRead' | 'replay';
 
 /**
  * Token categories in a fixed order, so each keeps its colour. Cache reads and re-read
  * context are what separates processed tokens from new tokens; under the "new" basis
  * they are not part of the total and are left out. Re-read context only exists as a
- * model of chat exports, hence estimated.
+ * model of chat exports, hence estimated. A row that only states a total says nothing
+ * about how much of it was input and how much output, so it has a band of its own, in
+ * the neutral colour, and is never drawn as input.
  */
 const CATEGORIES: Array<ChartSeries & { field: CategoryField; processedOnly?: boolean }> = [
   { key: 'input', label: 'Input', color: SERIES_COLORS[0], field: 'input' },
   { key: 'output', label: 'Output', color: SERIES_COLORS[1], field: 'output' },
+  { key: 'unsplit', label: 'Not split into input and output', color: NEUTRAL_SERIES_COLOR, field: 'unsplit' },
   { key: 'cacheWrite', label: 'Cache writes', color: SERIES_COLORS[2], field: 'cacheWrite' },
   { key: 'cacheRead', label: 'Cache reads', color: SERIES_COLORS[3], field: 'cacheRead', processedOnly: true },
   { key: 'replay', label: 'Re-read context', color: SERIES_COLORS[4], field: 'replay', estimated: true, processedOnly: true },
@@ -228,22 +231,29 @@ export const OTHER_MODELS_LABEL = 'Other models';
 const OTHER_MODELS_COLOR = '#8f8f9b';
 
 /**
- * The models with the most usage over the whole history, largest first. Their position
- * in this list is their colour, so a model keeps its colour whatever range is selected.
- * Ranked by processed tokens under either basis, so switching the basis does not repaint them either.
+ * The models that get a colour of their own: those with the most usage over the whole
+ * history, listed by name. A model's position in this list is its colour, so it keeps
+ * that colour whatever range is selected, and also when another model overtakes it: the
+ * amount of usage decides who is on the list, never the order. A colour only moves when
+ * a model joins or leaves the list. Usage is processed tokens under either basis, so
+ * switching the basis does not repaint anything either.
  */
 export function rankModels(lifetime: SeriesPoint[], limit = MODEL_SLOTS): string[] {
   const totals = new Map<string, number>();
   for (const p of lifetime) {
     if (p.group === UNKNOWN_MODEL_LABEL) continue;
-    totals.set(p.group, (totals.get(p.group) ?? 0) + p.input + p.output + p.cacheWrite + p.cacheRead + p.replay);
+    totals.set(p.group, (totals.get(p.group) ?? 0) + p.input + p.unsplit + p.output + p.cacheWrite + p.cacheRead + p.replay);
   }
   return [...totals.entries()]
     .filter(([, total]) => total > 0)
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .sort((a, b) => b[1] - a[1] || byName(a[0], b[0]))
     .slice(0, limit)
-    .map(([name]) => name);
+    .map(([name]) => name)
+    .sort(byName);
 }
+
+/** Names in a fixed order that does not depend on the browser's language: "Claude Opus 4.5" before "Claude Opus 4.10". */
+const byName = (a: string, b: string) => a.localeCompare(b, 'en', { numeric: true });
 
 export function modelChart(points: SeriesPoint[], frame: ChartFrame, ranked: string[]): ChartModel & { folded: number } {
   // Row keys are positions, not display names: a name may contain characters the chart library reads as a path.

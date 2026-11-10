@@ -235,11 +235,14 @@ export interface SeriesPoint {
   tokens: number;
   exact: number;
   estimated: number;
+  /** New input. Leaves out `unsplit`, as in TokenTotals. */
   input: number;
   output: number;
   cacheRead: number;
   cacheWrite: number;
   replay: number;
+  /** Tokens of rows that only state a total, without the split into input and output. */
+  unsplit: number;
   messages: number;
   conversations: number;
   requests: number;
@@ -279,7 +282,9 @@ export async function getTimeSeries(
             sum(${tok})::bigint AS tokens,
             COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'exact'), 0)::bigint AS exact,
             COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'estimated'), 0)::bigint AS estimated,
-            sum(f.input_tokens)::bigint AS input, sum(f.output_tokens)::bigint AS output,
+            COALESCE(sum(f.input_tokens) FILTER (WHERE NOT ${TOTAL_ONLY}), 0)::bigint AS input,
+            COALESCE(sum(f.input_tokens) FILTER (WHERE ${TOTAL_ONLY}), 0)::bigint AS unsplit,
+            sum(f.output_tokens)::bigint AS output,
             sum(f.cache_read_tokens)::bigint AS cache_read,
             sum(f.cache_write_5m_tokens + f.cache_write_1h_tokens)::bigint AS cache_write,
             sum(f.replay_tokens)::bigint AS replay,
@@ -302,6 +307,7 @@ export async function getTimeSeries(
     cacheRead: toNumber(r.cache_read),
     cacheWrite: toNumber(r.cache_write),
     replay: toNumber(r.replay),
+    unsplit: toNumber(r.unsplit),
     messages: toNumber(r.messages),
     conversations: toNumber(r.conversations),
     requests: toNumber(r.requests),

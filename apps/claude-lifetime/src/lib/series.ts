@@ -1,6 +1,6 @@
 import type { Granularity } from '@/analytics/base';
 import type { SeriesPoint } from '@/analytics/overview';
-import { addDays, addMonths, daysBetween, formatDay } from './format';
+import { addDays, addMonths, daysBetween, formatDay, formatDayRange } from './format';
 
 /**
  * Shaping of time series for charts. The analytics queries only return buckets that
@@ -46,7 +46,38 @@ export function spanOf(first: string | null | undefined, last: string | null | u
   return daysBetween(first.slice(0, 10), last.slice(0, 10));
 }
 
-export function bucketLabel(bucket: string, granularity: Granularity): string {
+/**
+ * The edges at which a selected date range cuts into recorded usage, or null where it
+ * does not. A week, month or year that reaches across such an edge is shown with only
+ * the days inside the range, so it must not be named as if it were whole.
+ */
+export interface RangeCut {
+  from: string | null;
+  to: string | null;
+}
+
+/** The days of a bucket that lie inside the range, and whether that is less than the whole bucket. */
+export function bucketPart(bucket: string, granularity: Granularity, cut?: RangeCut | null): { from: string; to: string; partial: boolean } {
+  const end = addDays(nextBucket(bucket, granularity), -1);
+  const from = cut?.from && cut.from > bucket && cut.from <= end ? cut.from : bucket;
+  const to = cut?.to && cut.to < end && cut.to >= bucket ? cut.to : end;
+  return { from, to, partial: from !== bucket || to !== end };
+}
+
+/**
+ * The name of a bucket. With `cut`, a bucket of which only a part lies inside the
+ * selected range is named by the days it holds: "Feb 11 – Feb 15, 2026, part of the week
+ * of Feb 9, 2026", never "Week of Feb 9", which would promise the Monday it leaves out.
+ */
+export function bucketLabel(bucket: string, granularity: Granularity, cut?: RangeCut | null): string {
+  const whole = wholeBucketLabel(bucket, granularity);
+  if (granularity === 'day') return whole;
+  const part = bucketPart(bucket, granularity, cut);
+  if (!part.partial) return whole;
+  return `${formatDayRange(part.from, part.to)}, part of ${granularity === 'week' ? `the week of ${formatDay(bucket)}` : whole}`;
+}
+
+function wholeBucketLabel(bucket: string, granularity: Granularity): string {
   switch (granularity) {
     case 'day':
       return formatDay(bucket, 'weekday');

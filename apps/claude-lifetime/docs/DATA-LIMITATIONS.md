@@ -95,6 +95,12 @@ column. A JSON id written as a number too large to be read exactly is not used; 
 record is kept and identified by its content. JSON files that name different sources
 are not read in one import: each is imported on its own, under its own source.
 
+A row that adds up more than one day, such as a monthly total, says how much was used
+in that period and not on which days. It is stored as one row for each day with its
+counts divided evenly, so that averages, date ranges and subscription periods take the
+right share of it. The totals are exactly what the row states; the figure of a single
+day or week inside such a period is an even share, not a measurement.
+
 ## Equivalent API value
 
 A hypothetical figure: what the recorded usage would cost at Anthropic's published API

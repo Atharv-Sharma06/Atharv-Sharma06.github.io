@@ -11,6 +11,7 @@ import {
   quantity,
   rampStep,
   recordedCount,
+  metricRecorded,
   summariseYear,
   valueOf,
   weekdayAverages,
@@ -29,6 +30,7 @@ const day = (bucket: string, tokens: number, over: Partial<SeriesPoint> = {}): S
   cacheRead: 0,
   cacheWrite: 0,
   replay: 0,
+  unsplit: 0,
   messages: 0,
   conversations: 0,
   requests: 0,
@@ -38,34 +40,29 @@ const day = (bucket: string, tokens: number, over: Partial<SeriesPoint> = {}): S
 describe('the recorded history', () => {
   const points = [day('2024-11-30', 5), day('2025-01-02', 7), day('2026-03-04', 9)];
 
-  it('runs from the first record to today and lists every year in between', () => {
-    const history = buildHistory(points, '2026-11-10');
-    expect(history).toMatchObject({ first: '2024-11-30', last: '2026-11-10', years: [2024, 2025, 2026] });
+  it('runs from the first record to the last and lists every year in between', () => {
+    const history = buildHistory(points);
+    expect(history).toMatchObject({ first: '2024-11-30', last: '2026-03-04', years: [2024, 2025, 2026] });
     expect(history?.days.get('2025-01-02')?.tokens).toBe(7);
-    expect(buildHistory([], '2026-11-10')).toBeNull();
+    expect(buildHistory([])).toBeNull();
   });
 
-  it('ends at the last year with records even when today is in a later year', () => {
-    expect(buildHistory(points, '2027-02-01')).toMatchObject({ last: '2027-02-01', years: [2024, 2025, 2026] });
-  });
-
-  it('never treats a recorded day as outside the history', () => {
-    // A daily report is dated in UTC and can be a day ahead of the local "today".
-    const history = buildHistory(points, '2026-03-03');
-    expect(history?.last).toBe('2026-03-04');
-    expect(history && isInside(history, '2026-03-04')).toBe(true);
+  it('does not reach today: days after the last record are not imported, not empty', () => {
+    // Looked at in November, a history that ends in March still ends in March.
+    const history = buildHistory(points)!;
+    expect(isInside(history, '2026-03-04')).toBe(true);
+    expect(isInside(history, '2026-03-05')).toBe(false);
+    expect(isInside(history, '2026-11-10')).toBe(false);
   });
 
   it('knows which days it can speak for', () => {
-    const history = buildHistory(points, '2026-11-10')!;
+    const history = buildHistory(points)!;
     expect(isInside(history, '2024-11-29')).toBe(false);
     expect(isInside(history, '2024-11-30')).toBe(true);
     expect(isInside(history, '2025-06-01')).toBe(true);
-    expect(isInside(history, '2026-11-10')).toBe(true);
-    expect(isInside(history, '2026-11-11')).toBe(false);
     expect(yearSpan(history, 2024)).toEqual({ from: '2024-11-30', to: '2024-12-31', days: 32 });
     expect(yearSpan(history, 2025)).toEqual({ from: '2025-01-01', to: '2025-12-31', days: 365 });
-    expect(yearSpan(history, 2026)).toEqual({ from: '2026-01-01', to: '2026-11-10', days: 314 });
+    expect(yearSpan(history, 2026)).toEqual({ from: '2026-01-01', to: '2026-03-04', days: 63 });
     expect(yearSpan(history, 2023)).toBeNull();
     expect(yearSpan(history, 2027)).toBeNull();
   });
@@ -193,12 +190,12 @@ describe('figures for one year', () => {
       day('2026-01-06', 1, { messages: 0, conversations: 0 }),
       day('2026-01-12', 0, { messages: 2, conversations: 1 }),
     ],
-    '2026-01-14',
   )!;
 
   it('counts active days, the longest streak and the busiest day for the chosen metric', () => {
     const tokens = summariseYear(history, 2026, 'tokens');
-    expect(tokens.span).toEqual({ from: '2026-01-01', to: '2026-01-14', days: 14 });
+    // The year's history ends with its last record, 12 January.
+    expect(tokens.span).toEqual({ from: '2026-01-01', to: '2026-01-12', days: 12 });
     expect(tokens.activeDays).toBe(5);
     expect(tokens.streak).toEqual({ from: '2026-01-04', to: '2026-01-06', days: 3 });
     // two days with 50 tokens: the later one
@@ -228,8 +225,9 @@ describe('figures for one year', () => {
   it('averages each weekday over the days of the year inside the history only', () => {
     const rows = weekdayAverages(history, 2026, 'tokens');
     expect(rows.map((r) => r.label)).toEqual(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']);
-    // 1 to 14 January 2026: two of every weekday
-    expect(rows.map((r) => r.days)).toEqual([2, 2, 2, 2, 2, 2, 2]);
+    // 1 to 12 January 2026, a Thursday to a Monday: two of every weekday except Tuesday and Wednesday.
+    // 13 and 14 January come after the last record and are not averaged over as days without usage.
+    expect(rows.map((r) => r.days)).toEqual([2, 1, 1, 2, 2, 2, 2]);
     // Mondays 5 and 12 January: 50 and 0 tokens
     expect(rows[0]).toMatchObject({ total: 50, average: 25 });
     // Thursdays 1 and 8 January: 30 and nothing
@@ -239,6 +237,35 @@ describe('figures for one year', () => {
     expect(short.map((r) => r.days)).toEqual([0, 1, 1, 0, 0, 0, 0]);
     expect(short[0].average).toBeNull();
     expect(short[1].average).toBe(10);
+  });
+
+  it('does not take a day for quiet when its source records tokens and no messages', () => {
+    // An API usage report has tokens and no message counts: such a day says nothing about messages.
+    const api = day('2026-01-02', 5, { messages: 0, conversations: 1 });
+    expect(metricRecorded(api, 'tokens')).toBe(true);
+    expect(metricRecorded(api, 'messages')).toBe(false);
+    expect(metricRecorded(api, 'conversations')).toBe(true);
+    // A day with no usage at all, and a day without any record, are recorded as nothing.
+    expect(metricRecorded(day('2026-01-03', 0), 'messages')).toBe(true);
+    expect(metricRecorded(undefined, 'messages')).toBe(true);
+
+    // 2 and 6 January have tokens and no messages: they are neither active nor quiet days.
+    expect(summariseYear(history, 2026, 'messages').unrecordedDays).toBe(2);
+    expect(summariseYear(history, 2026, 'conversations').unrecordedDays).toBe(1);
+    expect(summariseYear(history, 2026, 'tokens').unrecordedDays).toBe(0);
+  });
+
+  it('leaves such days out of the weekday averages instead of counting them as zero', () => {
+    const messages = weekdayAverages(history, 2026, 'messages');
+    // Fridays: 2 January (not recorded) and 9 January (no record): one day, no messages.
+    expect(messages[4]).toMatchObject({ days: 1, total: 0, average: 0 });
+    // Tuesdays: 6 January is the only one inside the history, and its messages are not recorded.
+    expect(messages[1]).toMatchObject({ days: 0, total: 0, average: null });
+    // Mondays 5 and 12 January: 1 and 2 messages.
+    expect(messages[0]).toMatchObject({ days: 2, total: 3, average: 1.5 });
+    // Under tokens every day inside the history counts.
+    expect(weekdayAverages(history, 2026, 'tokens').reduce((sum, r) => sum + r.days, 0)).toBe(12);
+    expect(messages.reduce((sum, r) => sum + r.days, 0)).toBe(10);
   });
 
   it('builds the monthly table, with months outside the history marked as such', () => {

@@ -202,7 +202,7 @@ timestamp,model,input_tokens,output_tokens,cache_read_tokens,cache_write_5m_toke
 | `conversation_id`, `conversation_title` | Group rows into a conversation. |
 | `id` | Identifies the row. The same id is never imported twice into the same source. Without it, rows identical in every field count once. |
 | `price_tier` | `standard` (default), `batch`, `fast`, `long_context`, `priority`, `flex`. |
-| `bucket_seconds` | Width of the period a row adds up. Default: 86400 for a date, otherwise 0. |
+| `bucket_seconds` | Width of the period a row adds up, in seconds. Default: 86400 for a date, otherwise 0. A row that adds up more than one day (2592000 for a 30-day total) is stored as one row for each day, with its counts divided evenly, because the file does not say how the usage was distributed; a period that is still running is divided over its days up to today. Totals are unchanged, the preview says how many rows this applies to, and a figure for a single day or week inside such a period is an even share, not a measurement. Ten years at most. |
 
 Columns can have other names: the import shows a mapping step where you match your
 columns to these fields. You also say whether the counts are exact (metered by the API

@@ -1,7 +1,7 @@
 import { createElement, type ReactElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getOverview, type Overview } from '@/analytics/overview';
+import { getOverview, getTimeSeries, type Overview } from '@/analytics/overview';
 import { getApiValue, type ApiValue } from '@/analytics/value';
 import { ConfidenceBadge } from '@/components/data/confidence';
 import { TooltipProvider } from '@/components/ui/overlay';
@@ -105,6 +105,14 @@ describe('what the total is made of', () => {
     await importRecords(t.db, t.userId, { conversations: [conv('a')], messages: [msg('a', 0), msg('a', 1)] }, { contentHash: 'chat' });
     const html = composition(await overview(), 'new');
     expect(html).toContain('No record in this range counts any cache writes. Whether there was none or the source does not record it is not known, so no figure is shown.');
+  });
+
+  it('charts those totals as their own series over time, not as input', async () => {
+    await importCsv(['date,model,total_tokens,input_tokens,output_tokens', '2026-03-02,claude-sonnet-4-6,10000,,', '2026-03-02,claude-sonnet-4-6,,1000,500'].join('\n'));
+    const [point] = await getTimeSeries(t.db, lifetime(), 'day');
+    expect(point).toMatchObject({ bucket: '2026-03-02', tokens: 11_500, input: 1000, output: 500, unsplit: 10_000 });
+    // The same split as the totals of the overview.
+    expect((await overview()).tokens).toMatchObject({ input: 1000, output: 500, unsplit: 10_000 });
   });
 
   it('keeps metered zeros of a source that states every category, and dashes what only chat estimates have', async () => {

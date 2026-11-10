@@ -14,7 +14,7 @@ import { Segmented } from '@/components/ui/controls';
 import { EmptyState, ErrorNote, Skeleton } from '@/components/ui/feedback';
 import { ExactEstimated } from '@/features/usage/exact-estimated';
 import { cn } from '@/lib/cn';
-import { daysBetween, formatDay, formatDayRange, formatInt, formatTokens, plural, todayInZone } from '@/lib/format';
+import { daysBetween, formatDay, formatDayRange, formatInt, formatTokens, plural } from '@/lib/format';
 import { useApp, useData } from '@/state/app';
 import { useCoverage } from '@/state/queries';
 import {
@@ -89,6 +89,10 @@ function YearTiles({ summary, total, metric, year }: { summary: YearSummary; tot
             {span.days === yearDays
               ? `of ${formatInt(yearDays)} days in ${year} had recorded ${noun.many}.`
               : `of the ${plural(span.days, 'day')} of ${year} inside your recorded history, ${formatDayRange(span.from, span.to)}.`}
+            {/* Not recorded is not quiet: these days are neither active nor counted as days without the metric. */}
+            {summary.unrecordedDays > 0
+              ? ` ${plural(summary.unrecordedDays, 'more day')} ${summary.unrecordedDays === 1 ? 'has' : 'have'} usage from a source that records no ${noun.many}.`
+              : ''}
           </p>
         ) : null}
       </MetricCard>
@@ -186,7 +190,6 @@ function ActivityBody({ history, months, years }: { history: History; months: Se
 }
 
 export function ActivityPage() {
-  const { settings } = useApp();
   const coverage = useCoverage();
   // One read of the whole history. The date range in the top bar is deliberately not part of the key:
   // a calendar of whole years has no use for it.
@@ -197,8 +200,7 @@ export function ActivityPage() {
     const years = await getTimeSeries(a.db, a.lifetime, 'year', 'none');
     return { days, months, years };
   });
-  const today = todayInZone(settings.timezone);
-  const history = useMemo(() => (series.data ? buildHistory(series.data.days, today) : null), [series.data, today]);
+  const history = useMemo(() => (series.data ? buildHistory(series.data.days) : null), [series.data]);
   const failure = coverage.error ?? series.error;
 
   return (

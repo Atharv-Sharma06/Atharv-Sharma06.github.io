@@ -4,7 +4,7 @@ import type { Granularity } from '@/analytics/base';
 import type { SeriesPoint } from '@/analytics/overview';
 import { Table, TableFrame, Td, Th, THead, Tr } from '@/components/ui/table';
 import { formatInt } from '@/lib/format';
-import { bucketLabel } from '@/lib/series';
+import { bucketLabel, type RangeCut } from '@/lib/series';
 import { UNIT } from './usage-model';
 
 /**
@@ -21,7 +21,7 @@ function Recorded({ count }: { count: number }) {
 }
 
 /** The largest buckets of the selected range at the chart's granularity, with their full figures. */
-export function BusiestPeriods({ points, granularity }: { points: SeriesPoint[]; granularity: Granularity }) {
+export function BusiestPeriods({ points, granularity, cut }: { points: SeriesPoint[]; granularity: Granularity; cut?: RangeCut | null }) {
   const unit = UNIT[granularity];
   const unrecorded = points.some((p) => p.messages === 0 || p.conversations === 0);
   return (
@@ -56,7 +56,7 @@ export function BusiestPeriods({ points, granularity }: { points: SeriesPoint[];
                   {i + 1}
                 </Td>
                 <th scope="row" className="whitespace-nowrap px-3 py-2 text-left font-normal text-ink">
-                  {bucketLabel(p.bucket, granularity)}
+                  {bucketLabel(p.bucket, granularity, cut)}
                 </th>
                 <Td numeric className="font-medium">
                   {formatInt(p.tokens)}

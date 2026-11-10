@@ -41,7 +41,7 @@ export function WeekdayChart({
       description={
         `Average ${noun} per day on each weekday of ${year}` +
         (whole ? '.' : `, over the ${formatInt(span.days)} days of the year inside your recorded history.`) +
-        (metric === 'tokens' ? ' Exact and estimated tokens are added together.' : '')
+        (metric === 'tokens' ? ' Exact and estimated tokens are added together.' : ` Days with usage from a source that records no ${noun} are left out.`)
       }
     >
       {(view) =>

@@ -16,7 +16,7 @@ import { Segmented, Select } from '@/components/ui/controls';
 import { EmptyState, ErrorNote, Skeleton } from '@/components/ui/feedback';
 import { cn } from '@/lib/cn';
 import { formatDay, formatDayRange, formatInt, formatTokens, plural } from '@/lib/format';
-import { bucketLabel } from '@/lib/series';
+import { bucketLabel, bucketPart, type RangeCut } from '@/lib/series';
 import { rangeKey, useApp, useData } from '@/state/app';
 import { useCoverage, usePeriods } from '@/state/queries';
 import { BusiestPeriods } from './busiest-periods';
@@ -86,6 +86,8 @@ interface Stats {
   clipped: Clipped;
   /** Buckets with usage at this granularity, largest first, at most ten. */
   ranked: SeriesPoint[];
+  /** Where the selected range cuts into recorded usage: a bucket across such an edge holds only part of its week, month or year. */
+  cut: RangeCut;
 }
 
 /** Why the averaged span is shorter than the range that was selected, in words. */
@@ -101,6 +103,7 @@ function StatTiles({ stats }: { stats: Stats }) {
   const t = overview.tokens;
   const level = confidenceOf(t.exact, t.estimated);
   const busiest = stats.ranked[0] ?? null;
+  const busiestPart = busiest ? bucketPart(busiest.bucket, granularity, stats.cut) : { from: '', to: '', partial: false };
   const unit = UNIT[granularity].one;
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -140,7 +143,9 @@ function StatTiles({ stats }: { stats: Stats }) {
         <MetricCard
           label={`Busiest ${unit}`}
           value={
-            <span className="text-[22px] tracking-[-0.01em]">{granularity === 'day' ? formatDay(busiest.bucket) : bucketLabel(busiest.bucket, granularity)}</span>
+            <span className="text-[22px] tracking-[-0.01em]">
+              {granularity === 'day' ? formatDay(busiest.bucket) : busiestPart.partial ? formatDayRange(busiestPart.from, busiestPart.to) : bucketLabel(busiest.bucket, granularity)}
+            </span>
           }
           confidence={confidenceOf(busiest.exact, busiest.estimated)}
         >
@@ -148,7 +153,8 @@ function StatTiles({ stats }: { stats: Stats }) {
             <span className="tabular text-ink" title={`${formatInt(busiest.tokens)} tokens`}>
               {formatTokens(busiest.tokens)}
             </span>{' '}
-            tokens {granularity === 'day' ? 'that day' : `in that ${unit}`}.
+            {/* A week, month or year the range cuts into is named by its days, and is not called "that week". */}
+            tokens {granularity === 'day' ? 'that day' : busiestPart.partial ? `in the part of that ${unit} inside the selected range` : `in that ${unit}`}.
           </p>
           {busiest.conversations > 0 || busiest.messages > 0 ? (
             <p>
@@ -310,6 +316,11 @@ function UsageContent({
   const { settings, resolved, setRange } = app;
   const scoped = resolved.from !== null || resolved.to !== null;
   const range = rangeKey(app);
+  // An edge of the range that lies inside the recorded history leaves recorded days out of the bucket it falls in.
+  const cut = useMemo<RangeCut>(
+    () => ({ from: resolved.from !== null && !clipped.start ? resolved.from : null, to: resolved.to !== null && !clipped.end ? resolved.to : null }),
+    [resolved.from, resolved.to, clipped],
+  );
   const tall = useMediaQuery('(min-width: 640px)');
   // A zoom belongs to the range it was made in; another range starts unzoomed.
   const [zoom, setZoom] = useState<{ range: string; window: ZoomWindow } | null>(null);
@@ -330,8 +341,8 @@ function UsageContent({
   const stats = useSettled(
     useMemo<Stats | null>(() => {
       if (!overview.data || overview.isPlaceholderData || !base.data || base.isPlaceholderData) return null;
-      return { overview: overview.data, span, granularity, scoped, clipped, ranked: rankBuckets(base.data, 10) };
-    }, [overview.data, overview.isPlaceholderData, base.data, base.isPlaceholderData, span, granularity, scoped, clipped]),
+      return { overview: overview.data, span, granularity, scoped, clipped, ranked: rankBuckets(base.data, 10), cut };
+    }, [overview.data, overview.isPlaceholderData, base.data, base.isPlaceholderData, span, granularity, scoped, clipped, cut]),
   );
 
   const chart = useSettled(
@@ -363,6 +374,8 @@ function UsageContent({
   if (!stats.value || !shown) return <Loading />;
   // An empty range has nothing worth keeping on screen while the next one is read.
   if (stats.value.ranked.length === 0) return stats.stale ? <Loading /> : <NothingInRange scoped={scoped} onAllTime={showAllTime} />;
+  // The cut that belongs to the figures on screen, which may be those of the range selected before.
+  const shownCut = stats.value.cut;
 
   const zoomable = !shown.needsPeriods && shown.rows.length > ZOOM_FROM_BUCKETS;
   const zoomed = zoomable && (start > 0 || end < shown.rows.length);
@@ -423,6 +436,7 @@ function UsageContent({
                   kind={shown.kind}
                   height={tall ? 380 : 300}
                   ariaLabel={zoomed ? `${shown.ariaLabel}, zoomed to ${formatInt(end - start)} of ${formatInt(shown.rows.length)} ${UNIT[shown.granularity].many}` : shown.ariaLabel}
+                  cut={shownCut}
                 />
                 {zoomable ? (
                   <ZoomNavigator
@@ -440,14 +454,14 @@ function UsageContent({
                 ) : null}
               </>
             ) : (
-              <SeriesTable rows={shown.rows} series={shown.series} granularity={shown.granularity} formatValue={formatInt} />
+              <SeriesTable rows={shown.rows} series={shown.series} granularity={shown.granularity} formatValue={formatInt} cut={shownCut} />
             )}
           </div>
         )}
       </ChartCard>
 
       <div className={cn('transition-opacity', stats.stale && 'opacity-70')}>
-        <BusiestPeriods points={stats.value.ranked} granularity={stats.value.granularity} />
+        <BusiestPeriods points={stats.value.ranked} granularity={stats.value.granularity} cut={stats.value.cut} />
       </div>
     </div>
   );

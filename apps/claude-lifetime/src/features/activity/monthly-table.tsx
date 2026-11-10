@@ -67,7 +67,7 @@ export function MonthlyTable({
                     </>
                   ) : (
                     <td colSpan={4} className="px-3 py-1.5 text-ink-3">
-                      {r.state === 'before' ? 'Before your first record' : 'After today'}
+                      {r.state === 'before' ? 'Before your first record' : 'After your last record'}
                     </td>
                   )}
                 </Tr>
