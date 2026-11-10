@@ -12,7 +12,7 @@ import { deleteAllData } from '@/import/delete';
 import { cn } from '@/lib/cn';
 import { useApp, useAppState } from '@/state/app';
 import { useCoverage } from '@/state/queries';
-import { BootError, BootScreen } from './boot';
+import { BootError, BootScreen, Paused } from './boot';
 import { CoverageIndicator } from './coverage-indicator';
 import { DateRangePicker } from './date-range';
 import { isActive, NAV, NAV_SECONDARY, type NavItem } from './nav';
@@ -254,7 +254,15 @@ export function AppShell({ children }: { children: ReactNode }) {
         {ready ? <AutoSync /> : null}
 
         <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1280px] flex-1 px-4 pb-20 pt-7 outline-none sm:px-6 lg:px-8">
-          {state.status === 'ready' ? children : state.status === 'error' ? <BootError error={state.error} retry={state.retry} /> : <BootScreen phase={state.phase} />}
+          {state.status === 'ready' ? (
+            children
+          ) : state.status === 'error' ? (
+            <BootError error={state.error} retry={state.retry} />
+          ) : state.status === 'paused' ? (
+            <Paused />
+          ) : (
+            <BootScreen phase={state.phase} />
+          )}
         </main>
       </div>
     </TooltipProvider>

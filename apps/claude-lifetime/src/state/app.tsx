@@ -4,7 +4,7 @@ import { keepPreviousData, QueryClient, QueryClientProvider, useQuery, type UseQ
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AnalyticsFilter } from '@/analytics/base';
 import { getSettings, updateSettings, type AppSettings } from '@/analytics/settings';
-import { DATA_CHANNEL, openDatabase, type BootPhase } from '@/db/client';
+import { DATA_CHANNEL, openDatabase, releaseDatabase, TAB_ID, type BootPhase, type TabMessage } from '@/db/client';
 import type { SqlDriver } from '@/db/driver';
 import { addDays, addMonths, todayInZone } from '@/lib/format';
 
@@ -74,6 +74,8 @@ export interface AppReady {
 type AppState =
   | { status: 'booting'; phase: BootPhase }
   | { status: 'error'; error: Error; retry(): void }
+  /** Another tab is erasing the database; this one has let go of it and reloads when told to. */
+  | { status: 'paused' }
   | { status: 'ready'; app: AppReady };
 
 const AppContext = createContext<AppState>({ status: 'booting', phase: 'starting' });
@@ -110,6 +112,7 @@ function AppStateProvider({ children }: { children: ReactNode }) {
   const [range, setRangeState] = useState<DateRange>(() => (typeof window === 'undefined' ? ALL_TIME : loadRange()));
   const [dataVersion, setDataVersion] = useState(0);
   const [lastRefreshedAt, setLastRefreshedAt] = useState(() => Date.now());
+  const [paused, setPaused] = useState(false);
   const channel = useRef<BroadcastChannel | null>(null);
 
   useEffect(() => {
@@ -134,14 +137,21 @@ function AppStateProvider({ children }: { children: ReactNode }) {
     if (typeof BroadcastChannel === 'undefined') return;
     const bc = new BroadcastChannel(DATA_CHANNEL);
     channel.current = bc;
-    bc.onmessage = (event: MessageEvent<{ op?: string }>) => {
-      // Another tab replaced or erased the whole database: this tab's connection is gone.
-      if (event.data?.op === 'reload') {
+    bc.onmessage = (event: MessageEvent<Partial<TabMessage>>) => {
+      const message = event.data;
+      // A channel also hears other channel objects of its own page (the database client posts through one).
+      if (!message || message.from === TAB_ID) return;
+      if (message.op === 'release') {
+        // Another tab is erasing the database and needs every connection closed first.
+        setPaused(true);
+        void releaseDatabase();
+      } else if (message.op === 'reload') {
+        // The database was replaced or erased: whatever this tab shows is no longer what is stored.
         window.location.reload();
-        return;
+      } else {
+        setDataVersion((v) => v + 1);
+        setLastRefreshedAt(Date.now());
       }
-      setDataVersion((v) => v + 1);
-      setLastRefreshedAt(Date.now());
     };
     return () => {
       channel.current = null;
@@ -162,7 +172,7 @@ function AppStateProvider({ children }: { children: ReactNode }) {
   const notifyDataChanged = useCallback(() => {
     setDataVersion((v) => v + 1);
     setLastRefreshedAt(Date.now());
-    channel.current?.postMessage({ changed: Date.now() });
+    channel.current?.postMessage({ from: TAB_ID, op: 'changed' } satisfies TabMessage);
   }, []);
 
   const setRange = useCallback((next: DateRange) => {
@@ -185,6 +195,7 @@ function AppStateProvider({ children }: { children: ReactNode }) {
   );
 
   const state = useMemo<AppState>(() => {
+    if (paused) return { status: 'paused' };
     if (error) {
       return {
         status: 'error',
@@ -214,7 +225,7 @@ function AppStateProvider({ children }: { children: ReactNode }) {
         lastRefreshedAt,
       },
     };
-  }, [core, settings, range, dataVersion, error, phase, saveSettings, setRange, notifyDataChanged, lastRefreshedAt]);
+  }, [core, settings, range, dataVersion, error, phase, paused, saveSettings, setRange, notifyDataChanged, lastRefreshedAt]);
 
   return <AppContext.Provider value={state}>{children}</AppContext.Provider>;
 }

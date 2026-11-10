@@ -13,9 +13,14 @@ import { deleteBatch } from '@/import/delete';
 import { formatBytes, formatInstant, formatInt, plural } from '@/lib/format';
 import { useApp } from '@/state/app';
 import { useImports } from '@/state/queries';
+import { stopAutoSyncAfterDeletion } from './local-files';
 
-/** Every import that was saved, with what it added, and a way to take each one back. */
-export function ImportHistory() {
+/**
+ * Every import that was saved, with what it added, and a way to take each one back.
+ * `autoSync` says whether the remembered Claude Code folder is read automatically:
+ * deleting a Claude Code import switches that off, and the dialog says so beforehand.
+ */
+export function ImportHistory({ autoSync = false, onDeleted }: { autoSync?: boolean; onDeleted?: () => void }) {
   const app = useApp();
   const imports = useImports();
   const [open, setOpen] = useState<number | null>(null);
@@ -138,7 +143,10 @@ export function ImportHistory() {
         onConfirm={async () => {
           if (!deleting) return;
           await deleteBatch(app.db, app.userId, deleting.batchId);
+          // Otherwise the next visit would read the folder and put the deleted usage straight back.
+          if (deleting.sourceKind === 'claude_code' && !deleting.isSynthetic) await stopAutoSyncAfterDeletion();
           app.notifyDataChanged();
+          onDeleted?.();
         }}
       >
         <p>
@@ -148,6 +156,12 @@ export function ImportHistory() {
           The {deleting ? formatInt(deleting.recordsInserted) : ''} records it added are removed, along with conversations that have nothing left in them.
           Records from other imports stay. You can import the file again at any time.
         </p>
+        {deleting?.sourceKind === 'claude_code' && !deleting.isSynthetic && autoSync ? (
+          <p>
+            Reading the Claude Code folder automatically is switched off with this, because it would add the deleted usage again the next time the app
+            opens. You can switch it back on above.
+          </p>
+        ) : null}
       </ConfirmDialog>
     </Card>
   );

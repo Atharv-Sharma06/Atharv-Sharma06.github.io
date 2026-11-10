@@ -17,7 +17,16 @@ import { useApp } from '@/state/app';
 import { useCoverage } from '@/state/queries';
 import { lastSync, syncClaudeCodeFolder, type SyncOutcome } from './background-sync';
 import { ImportHistory } from './history';
-import { autoSyncEnabled, canPickFolders, forgetFolder, pickClaudeCodeFolder, rememberedFolder, setAutoSync, type RememberedFolder } from './local-files';
+import {
+  autoSyncEnabled,
+  autoSyncStoppedAt,
+  canPickFolders,
+  forgetFolder,
+  pickClaudeCodeFolder,
+  rememberedFolder,
+  setAutoSync,
+  type RememberedFolder,
+} from './local-files';
 import { ManualEntryDialog } from './manual-entry';
 import { Notice } from './preview';
 import { ImportWizard, type WizardHandle } from './wizard';
@@ -80,6 +89,7 @@ export function ImportPage() {
   const [computer, setComputer] = useState('');
   const [folder, setFolder] = useState<RememberedFolder | null>(null);
   const [auto, setAuto] = useState(false);
+  const [autoStoppedAt, setAutoStoppedAt] = useState<number | null>(null);
   const [sync, setSync] = useState<SyncOutcome | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [pickError, setPickError] = useState<string | null>(null);
@@ -90,11 +100,12 @@ export function ImportPage() {
   const refreshFolder = useCallback(() => setFolderVersion((v) => v + 1), []);
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([rememberedFolder(), autoSyncEnabled(), lastSync()]).then(([remembered, enabled, outcome]) => {
+    void Promise.all([rememberedFolder(), autoSyncEnabled(), lastSync(), autoSyncStoppedAt()]).then(([remembered, enabled, outcome, stoppedAt]) => {
       if (cancelled) return;
       setFolder(remembered);
       setAuto(enabled);
       setSync(outcome ?? null);
+      setAutoStoppedAt(stoppedAt);
     });
     return () => {
       cancelled = true;
@@ -356,6 +367,7 @@ export function ImportPage() {
                 checked={auto}
                 onChange={async (checked) => {
                   setAuto(checked);
+                  setAutoStoppedAt(null);
                   await setAutoSync(checked);
                 }}
               />
@@ -367,6 +379,14 @@ export function ImportPage() {
                 </span>
               </span>
             </label>
+            {autoStoppedAt !== null && !auto ? (
+              <div className="mt-3">
+                <Notice>
+                  Automatic reading was switched off {formatRelative(autoStoppedAt)}, when Claude Code usage was deleted. Left on, it would have added
+                  the deleted usage again the next time the app opened. Switch it back on whenever you want the folder read by itself again.
+                </Notice>
+              </div>
+            ) : null}
             {sync?.problem ? (
               <div className="mt-3">
                 <Notice tone="warning">{sync.problem}</Notice>
@@ -377,7 +397,7 @@ export function ImportPage() {
       ) : null}
 
       <div className="mt-9">
-        <ImportHistory />
+        <ImportHistory autoSync={folder !== null && auto} onDeleted={refreshFolder} />
       </div>
 
       <ManualEntryDialog open={manualOpen} onOpenChange={setManualOpen} />

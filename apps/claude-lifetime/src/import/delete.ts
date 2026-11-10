@@ -1,4 +1,5 @@
-import type { SqlDriver } from '@/db/driver';
+import type { SqlDriver, SqlExecutor } from '@/db/driver';
+import { refreshStatistics } from '@/db/maintenance';
 import { refreshConversationCounters } from './commit';
 
 /**
@@ -44,8 +45,10 @@ export async function deleteBatch(db: SqlDriver, userId: number, batchId: number
           AND NOT EXISTS (SELECT 1 FROM import_batches b WHERE b.source_id = s.id)`,
       [userId],
     );
+    await removeOrphanedDemoPeriods(tx, userId);
     return { deleted: true, conversationsRemoved: orphans.affectedRows ?? 0 };
   });
+  if (result.deleted) await refreshStatistics(db);
   await db.flush();
   return result;
 }
@@ -55,10 +58,26 @@ export async function deleteSource(db: SqlDriver, userId: number, sourceId: numb
   const result = await db.transaction(async (tx) => {
     const conv = await tx.query<{ n: number }>(`SELECT count(*)::int AS n FROM conversations WHERE source_id = $1 AND user_id = $2`, [sourceId, userId]);
     const del = await tx.query(`DELETE FROM data_sources WHERE id = $1 AND user_id = $2`, [sourceId, userId]);
+    await removeOrphanedDemoPeriods(tx, userId);
     return { deleted: (del.affectedRows ?? 0) > 0, conversationsRemoved: conv.rows[0].n };
   });
+  if (result.deleted) await refreshStatistics(db);
   await db.flush();
   return result;
+}
+
+/**
+ * The demo's subscription periods belong to the demo data. When the last synthetic
+ * source is gone they go too, so no invented plan history is left behind next to
+ * nothing, or next to real data imported later.
+ */
+async function removeOrphanedDemoPeriods(tx: SqlExecutor, userId: number): Promise<void> {
+  await tx.query(
+    `DELETE FROM subscription_periods p
+      WHERE p.user_id = $1 AND p.is_synthetic
+        AND NOT EXISTS (SELECT 1 FROM data_sources s WHERE s.user_id = $1 AND s.is_synthetic)`,
+    [userId],
+  );
 }
 
 /**
@@ -81,7 +100,7 @@ export async function deleteAllData(
           AND NOT EXISTS (SELECT 1 FROM pricing_history p WHERE p.model_id = m.id)`,
     );
   });
-  // Give the space back; VACUUM cannot run inside a transaction.
-  await db.exec('VACUUM FULL;');
+  // Give the space back and refresh the planner's statistics; VACUUM cannot run inside a transaction.
+  await db.exec('VACUUM (FULL, ANALYZE);');
   await db.flush();
 }

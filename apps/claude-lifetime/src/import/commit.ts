@@ -1,5 +1,6 @@
 import { ImportError, type ParsedImport } from '@/core/types';
 import { toIso, toNumber, type SqlDriver, type SqlExecutor } from '@/db/driver';
+import { refreshStatistics } from '@/db/maintenance';
 
 /**
  * Preview and commit of a staged import (see staging.ts).
@@ -446,6 +447,8 @@ export async function commitImport(
   });
 
   await db.exec('TRUNCATE stg_models, stg_conversations, stg_messages, stg_usage, stg_costs;');
+  // The browser database has no autovacuum; without fresh statistics the next queries can be far slower.
+  if (!result.nothingNew || result.replaced.usageRows + result.replaced.costRows > 0) await refreshStatistics(db);
   await db.flush();
   return result;
 }

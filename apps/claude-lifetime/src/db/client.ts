@@ -2,7 +2,10 @@
 
 import { PGliteWorker } from '@electric-sql/pglite/worker';
 import { decryptBackup, isEncryptedBackup } from '@/lib/backup-crypto';
+import { looksLikeDatabaseDump } from '@/lib/backup-format';
+import { KV_DATABASE_NAME } from '@/lib/kv';
 import type { SqlDriver } from './driver';
+import { ensureStatistics } from './maintenance';
 import { migrate, MigrationError } from './migrate';
 import { pgliteDriver } from './pglite-driver';
 import { ensureSeeded } from './seed';
@@ -19,8 +22,19 @@ import { ensureSeeded } from './seed';
 const PGLITE_VERSION = '0.5.16';
 const DEFAULT_NAME = 'claude-lifetime';
 const POINTER_KEY = 'claude-lifetime:database';
-/** Tabs listen here for data changes; `{ op: 'reload' }` tells them the database itself was replaced. */
+/**
+ * Tabs talk to each other here. Every message carries the sender's TAB_ID, because a
+ * BroadcastChannel also delivers to other channel objects in the sender's own page.
+ *
+ *  changed   stored data changed: re-read it
+ *  release   the database is about to be erased: close your connection and wait
+ *  reload    the database was replaced or erased: load the page again
+ */
 export const DATA_CHANNEL = 'claude-lifetime:data';
+export const TAB_ID = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+export type TabMessage = { from: string; op: 'changed' | 'release' | 'reload' };
+/** Everything the app keeps in localStorage starts with this. */
+export const LOCAL_STORAGE_PREFIX = 'claude-lifetime:';
 export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 
 export interface Database {
@@ -71,6 +85,10 @@ interface Handle {
   db: SqlDriver;
 }
 
+/** How long opening the database may take before it counts as failed. Restoring unpacks the whole backup first. */
+const OPEN_TIMEOUT_MS = 90_000;
+const RESTORE_TIMEOUT_MS = 240_000;
+
 async function connect(name: string, loadDataDir?: Blob): Promise<Handle> {
   const worker = new Worker(new URL('./worker/pglite.worker.ts', import.meta.url), { type: 'module' });
   const pg = new PGliteWorker(worker, {
@@ -78,7 +96,22 @@ async function connect(name: string, loadDataDir?: Blob): Promise<Handle> {
     ...(loadDataDir ? { loadDataDir } : {}),
     meta: { assetBase: `${BASE_PATH}/pglite/${PGLITE_VERSION}/`, controlChannel: controlChannel(name) },
   });
-  await pg.waitReady;
+  // The engine does not always reject `waitReady` when it cannot start (a data directory it cannot
+  // read keeps failing inside the worker instead). An error in the worker, or no answer in time,
+  // therefore ends the attempt here, and the worker is stopped so it cannot keep running.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const failure = new Promise<never>((_, reject) => {
+    worker.addEventListener('error', (event) => reject(new Error(event.message || 'The database worker failed to start.')), { once: true });
+    timer = setTimeout(() => reject(new Error('The database did not open in time.')), loadDataDir ? RESTORE_TIMEOUT_MS : OPEN_TIMEOUT_MS);
+  });
+  try {
+    await Promise.race([pg.waitReady, failure]);
+  } catch (error) {
+    worker.terminate();
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
   return { pg, db: pgliteDriver(pg as never, { flush: () => flushOverChannel(name) }) };
 }
 
@@ -105,14 +138,31 @@ async function removeOrphans(active: string): Promise<void> {
   }
 }
 
-function tellOtherTabsToReload(): void {
+function announce(op: TabMessage['op']): void {
   try {
     const channel = new BroadcastChannel(DATA_CHANNEL);
-    channel.postMessage({ op: 'reload' });
+    channel.postMessage({ from: TAB_ID, op } satisfies TabMessage);
     channel.close();
   } catch {
     // no BroadcastChannel: other tabs pick the change up on their next load
   }
+}
+
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Removes what the app keeps outside the database: the selected date range, the remembered folder and its switches. */
+async function clearDeviceState(): Promise<void> {
+  try {
+    for (const key of Object.keys(window.localStorage)) {
+      if (key.startsWith(LOCAL_STORAGE_PREFIX)) window.localStorage.removeItem(key);
+    }
+  } catch {
+    // no storage access: nothing was stored there either
+  }
+  await new Promise<void>((resolve) => {
+    const request = indexedDB.deleteDatabase(KV_DATABASE_NAME);
+    request.onsuccess = request.onerror = request.onblocked = () => resolve();
+  });
 }
 
 let pending: Promise<Database & { name: string; pg: PGliteWorker }> | null = null;
@@ -128,6 +178,7 @@ export function openDatabase(onPhase?: (phase: BootPhase) => void): Promise<Data
     await migrate(db);
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     const userId = await ensureSeeded(db, { timezone });
+    await ensureStatistics(db);
     await db.flush();
 
     // Ask the browser not to evict this origin's storage under pressure. Best effort.
@@ -161,16 +212,37 @@ async function closeCurrent(): Promise<string> {
   return name;
 }
 
-/** Deletes the local database completely. The page must be reloaded afterwards. */
+/**
+ * Closes this tab's connection because another tab is erasing the database. The tab
+ * then waits to be told to reload.
+ */
+export async function releaseDatabase(): Promise<void> {
+  await closeCurrent();
+}
+
+/**
+ * Erases everything the app stores on this device: the database, the selected date
+ * range, the remembered Claude Code folder and its switches. The page must be loaded
+ * again afterwards.
+ */
 export async function destroyDatabase(): Promise<void> {
-  tellOtherTabsToReload();
+  // Other tabs hold the database open (one of them may host it). Ask them to let go first.
+  announce('release');
+  await pause(400);
   const name = await closeCurrent();
-  await deleteIndexedDb(name);
+  // Every database of the app goes, including one an interrupted restore may have left behind.
+  const names = new Set([name, DEFAULT_NAME]);
   try {
-    window.localStorage.removeItem(POINTER_KEY);
+    for (const entry of (await indexedDB.databases?.()) ?? []) {
+      const match = entry.name?.match(/^\/pglite\/(claude-lifetime(?:-[a-z0-9]{1,24})?)$/);
+      if (match) names.add(match[1]);
+    }
   } catch {
-    // nothing to clean up
+    // listing is not supported everywhere; the active and the default database are deleted either way
   }
+  for (const each of names) await deleteIndexedDb(each);
+  await clearDeviceState();
+  announce('reload');
 }
 
 /**
@@ -183,8 +255,8 @@ export async function restoreDatabase(file: Blob, passphrase?: string): Promise<
   if (file.size === 0) throw new Error('The file is empty.');
   // A passphrase-protected backup is decrypted first; a wrong passphrase stops here, before anything changes.
   const backup = (await isEncryptedBackup(file)) ? await decryptBackup(file, passphrase) : file;
-  const head = new Uint8Array(await backup.slice(0, 2).arrayBuffer());
-  if (head[0] !== 0x1f || head[1] !== 0x8b) {
+  // The engine does not fail cleanly on an archive that is not a database, so that is ruled out before it sees the file.
+  if (!(await looksLikeDatabaseDump(backup))) {
     throw new Error('This is not a Claude Lifetime backup. Choose the file that "Download backup" saved.');
   }
 
@@ -195,6 +267,7 @@ export async function restoreDatabase(file: Blob, passphrase?: string): Promise<
     await migrate(restored.db);
     const users = await restored.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM users`);
     if (users.rows[0].n === 0) throw new Error('The backup contains no Claude Lifetime data.');
+    await ensureStatistics(restored.db);
     await restored.db.flush();
     await restored.db.close();
   } catch (error) {
@@ -217,7 +290,9 @@ export async function restoreDatabase(file: Blob, passphrase?: string): Promise<
     await deleteIndexedDb(name).catch(() => undefined);
     throw new Error('This browser does not allow the site to save settings, so the backup cannot be activated. Nothing was changed.');
   }
-  tellOtherTabsToReload();
+  // From here on the restored database is the current one. Other tabs load it when they reload;
+  // the previous database is deleted once nothing has it open any more.
+  announce('reload');
   const previous = await closeCurrent();
   if (previous !== name) await deleteIndexedDb(previous).catch(() => undefined);
 }

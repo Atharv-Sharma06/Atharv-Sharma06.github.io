@@ -423,7 +423,8 @@ function RestoreRow() {
         {checking ? 'Checking the file…' : 'Choose a backup file'}
       </Button>
       <p className="mt-2.5 max-w-[68ch] text-[13px] text-ink-2">
-        A .tar.gz file, or a passphrase-protected .clbackup file, made by “Download backup”. You are asked to confirm before anything is replaced.
+        A .tar.gz file, or a passphrase-protected .clbackup file, made by “Download backup”. You are asked to confirm first, and a file that cannot be
+        read changes nothing.
       </p>
       {error ? (
         <p role="alert" className="mt-2 max-w-[68ch] text-[13px] text-critical">

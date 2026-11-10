@@ -135,7 +135,7 @@ export function FamilyDonutCard({ rows, basis, rangeLabel, scoped }: { rows: Mod
                     tabIndex={0}
                     role="img"
                     aria-label={`${s.label}: ${formatInt(s.tokens)} tokens, ${formatShare(s.share)}${s.estimated > 0 ? (s.exact === 0 ? ', estimated' : `, ${formatInt(s.estimated)} of it estimated`) : ''}`}
-                    className={cn('cursor-default outline-none transition-opacity duration-100', active !== null && active !== s.family && 'opacity-35')}
+                    className={cn('cursor-default transition-opacity duration-100', active !== null && active !== s.family && 'opacity-35')}
                     onPointerMove={followPointer(s.family)}
                     onPointerLeave={() => setTip(null)}
                     onFocus={atSlice(s.family, arc)}

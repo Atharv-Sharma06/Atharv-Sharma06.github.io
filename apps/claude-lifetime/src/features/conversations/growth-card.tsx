@@ -64,7 +64,7 @@ export function TurnGrowthCard({
       description={
         basis === 'processed'
           ? 'Estimated tokens per turn. A turn is a message from you and Claude’s reply to it. Every reply re-reads everything said before it, so re-read context grows with the length of the conversation.'
-          : 'Estimated new tokens per turn: what you sent and what Claude wrote. Re-read context is not part of new tokens; switch the token basis to Processed in the top bar to see how it grows.'
+          : 'Estimated new tokens per turn: what you sent and what Claude wrote. Re-read context is not part of new tokens; switch the token basis to Processed to see how it grows.'
       }
       legend={<ChartLegend series={series} />}
       footer={

@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useId, useState, type ReactNode } from 'react';
 import type { SourceCoverage } from '@/analytics/coverage';
 import { setSourceIncluded } from '@/analytics/settings';
-import { deletePeriod, listPeriods } from '@/analytics/subscriptions';
 import { LoadDemoButton } from '@/components/data/no-data';
 import { SOURCE_KIND_LABEL } from '@/components/shell/coverage-indicator';
 import { Button, buttonClass } from '@/components/ui/button';
@@ -14,6 +13,7 @@ import { ConfirmDialog } from '@/components/ui/confirm';
 import { Field, Input, Switch } from '@/components/ui/controls';
 import { EmptyState, ErrorNote, Skeleton } from '@/components/ui/feedback';
 import { Dialog } from '@/components/ui/overlay';
+import { stopAutoSyncAfterDeletion, useAutoSyncEnabled } from '@/features/import/local-files';
 import { deleteSource } from '@/import/delete';
 import { cn } from '@/lib/cn';
 import { formatInstant, formatInt, formatTokens, formatUsd, plural } from '@/lib/format';
@@ -105,6 +105,9 @@ function SourceItem({ source, lastSynthetic }: { source: SourceCoverage; lastSyn
   const [pending, setPending] = useState<{ include: boolean; reason: string | null } | null>(null);
   const [excluding, setExcluding] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // A real Claude Code source may be kept up to date from a remembered folder; deleting it has to stop that.
+  const readsFolder = source.kind === 'claude_code' && !source.isSynthetic;
+  const autoSync = useAutoSyncEnabled(deleting);
   // What was just saved is shown until the re-read list confirms it, so the row never falls back to the old state in between.
   if (pending !== null && pending.include === source.includeInTotals && pending.reason === source.exclusionReason) setPending(null);
   const included = pending ? pending.include : source.includeInTotals;
@@ -205,12 +208,10 @@ function SourceItem({ source, lastSynthetic }: { source: SourceCoverage; lastSyn
         title={`Delete “${source.label}”?`}
         confirmLabel="Delete source"
         onConfirm={async () => {
+          // Deleting the last demo source takes the demo's subscription periods along, in the same transaction.
           await deleteSource(app.db, app.userId, source.id);
-          if (lastSynthetic) {
-            // The demo's invented subscription periods must not outlive the demo data they describe.
-            const periods = await listPeriods(app.db, app.userId, tz);
-            for (const period of periods) if (period.isSynthetic) await deletePeriod(app.db, app.userId, period.id);
-          }
+          // Otherwise the next visit would read the folder and put the deleted usage straight back.
+          if (readsFolder) await stopAutoSyncAfterDeletion();
           app.notifyDataChanged();
         }}
       >
@@ -232,6 +233,12 @@ function SourceItem({ source, lastSynthetic }: { source: SourceCoverage; lastSyn
           Other sources, {lastSynthetic ? 'subscription periods you entered' : 'your subscription history'}, prices and settings are kept. Deleting cannot
           be undone; to get this data back you would import the files again.
         </p>
+        {readsFolder && autoSync ? (
+          <p>
+            Reading the Claude Code folder automatically is switched off with this, because it would add the deleted usage again the next time the app
+            opens. You can switch it back on under Import data.
+          </p>
+        ) : null}
       </ConfirmDialog>
     </li>
   );

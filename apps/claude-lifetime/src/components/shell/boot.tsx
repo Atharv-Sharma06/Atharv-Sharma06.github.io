@@ -51,3 +51,18 @@ export function BootError({ error, retry }: { error: Error; retry(): void }) {
     </div>
   );
 }
+
+/** Shown in a tab while another tab erases the database. The tab reloads by itself when that is done. */
+export function Paused() {
+  return (
+    <div className="max-w-[68ch]" role="status">
+      <h1 className="text-xl font-medium">Your data is being erased in another tab</h1>
+      <p className="mt-2 text-ink-2">
+        This tab has closed its connection to the database so that the other one can finish. It reloads by itself when that is done.
+      </p>
+      <Button className="mt-5" onClick={() => window.location.reload()}>
+        Reload now
+      </Button>
+    </div>
+  );
+}

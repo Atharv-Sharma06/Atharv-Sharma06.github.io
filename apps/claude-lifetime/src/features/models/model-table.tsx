@@ -85,7 +85,14 @@ function ValueCell({ row, scenario, assumedModelName }: { row: ModelUsage; scena
   return (
     <Td numeric className={cn(CELL, LAST)}>
       {formatUsd(value)}
-      {row.value.assumedTokens > 0 && assumedModelName !== null ? <span className="block whitespace-nowrap text-xs font-normal text-ink-3">priced as {assumedModelName}</span> : null}
+      {row.value.assumedTokens > 0 && assumedModelName !== null ? (
+        <span
+          className="block whitespace-nowrap text-xs font-normal text-ink-3"
+          title={`Priced as ${assumedModelName}, the model you chose in Settings for usage with no recorded model. That is an assumption.`}
+        >
+          assumed model
+        </span>
+      ) : null}
       {row.value.unpricedTokens > 0 ? (
         <span className="block whitespace-nowrap text-xs font-normal text-ink-3" title="Processed tokens on a price tier that has no price on file">
           {formatTokens(row.value.unpricedTokens)} not priced

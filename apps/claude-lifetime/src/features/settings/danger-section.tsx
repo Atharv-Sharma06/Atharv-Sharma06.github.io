@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm';
 import { BASE_PATH, destroyDatabase } from '@/db/client';
+import { stopAutoSyncAfterDeletion, useAutoSyncEnabled } from '@/features/import/local-files';
 import { deleteAllData } from '@/import/delete';
 import { formatInt, plural } from '@/lib/format';
 import { useApp } from '@/state/app';
@@ -21,31 +22,6 @@ function Ledger({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-/**
- * What the app keeps outside the SQL database: the selected date range in localStorage
- * and the import page's small IndexedDB store (src/lib/kv.ts) with the folder it
- * remembers. Erasing must take these along, or the "first visit" would still know them.
- * The one entry left alone is the pointer to the database itself, which
- * destroyDatabase needs to find the database and removes on its own.
- */
-async function clearDeviceState(): Promise<void> {
-  try {
-    for (const key of Object.keys(window.localStorage)) {
-      if (key.startsWith('claude-lifetime:') && key !== 'claude-lifetime:database') window.localStorage.removeItem(key);
-    }
-  } catch {
-    // storage is blocked, so nothing was kept there either
-  }
-  await new Promise<void>((resolve) => {
-    try {
-      const request = indexedDB.deleteDatabase('claude-lifetime-local');
-      request.onsuccess = request.onerror = request.onblocked = () => resolve();
-    } catch {
-      resolve();
-    }
-  });
-}
-
 function DeleteImportedRow() {
   const app = useApp();
   const coverage = useCoverage();
@@ -54,6 +30,7 @@ function DeleteImportedRow() {
   const [open, setOpen] = useState(false);
   const [subscriptions, setSubscriptions] = useState(false);
   const [customPrices, setCustomPrices] = useState(false);
+  const autoSync = useAutoSyncEnabled(open);
   const done = useSaveState();
 
   const sources = coverage.data?.sources ?? [];
@@ -104,6 +81,8 @@ function DeleteImportedRow() {
         typeToConfirm="DELETE"
         onConfirm={async () => {
           await deleteAllData(app.db, app.userId, { subscriptions, customPrices });
+          // Otherwise the next visit would read the remembered Claude Code folder and put its usage straight back.
+          await stopAutoSyncAfterDeletion();
           app.notifyDataChanged();
           done.markSaved();
         }}
@@ -142,6 +121,12 @@ function DeleteImportedRow() {
           {subscriptions && customPrices ? '.' : subscriptions ? ', and so are the prices you entered.' : customPrices ? ', and so is your subscription history.' : ', and so are your subscription history and the prices you entered.'}{' '}
           This cannot be undone; a backup downloaded beforehand is the only way back.
         </p>
+        {autoSync ? (
+          <p>
+            Reading the Claude Code folder automatically is switched off with this, because it would add the deleted usage again the next time the app
+            opens. You can switch it back on under Import data.
+          </p>
+        ) : null}
       </ConfirmDialog>
     </SettingRow>
   );
@@ -170,22 +155,11 @@ function EraseRow() {
         confirmLabel="Erase everything"
         typeToConfirm="ERASE"
         onConfirm={async () => {
-          const start = `${BASE_PATH}/`;
-          const here = window.location.href;
-          // destroyDatabase tells every open tab of the app to reload, and that message reaches this tab too:
-          // the reload can overtake the rest of this handler. So the other clean-up comes first, and the
-          // address already is the start page when a reload arrives, whichever one it is.
-          await clearDeviceState();
-          window.history.replaceState(null, '', start);
-          try {
-            await destroyDatabase();
-          } catch (error) {
-            window.history.replaceState(null, '', here);
-            throw error;
-          }
+          // Takes the database and everything else the app keeps in this browser, and tells other open tabs to reload.
+          await destroyDatabase();
           // A full page load on purpose: this page's database connection no longer exists, so a client-side navigation would keep a dead app running.
           // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-          window.location.assign(start);
+          window.location.assign(`${BASE_PATH}/`);
           // The page is on its way out; the dialog stays busy until it is.
           await new Promise<never>(() => undefined);
         }}

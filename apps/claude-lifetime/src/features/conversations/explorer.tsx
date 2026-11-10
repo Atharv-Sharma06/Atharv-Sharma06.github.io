@@ -22,7 +22,6 @@ import { rangeKey, useApp, useData } from '@/state/app';
 import { useCoverage, usePeriods } from '@/state/queries';
 import { ConfidenceMark } from './confidence-mark';
 import { isPlainClick, onOpenClick, openConversation, takePendingFocus } from './navigation';
-import { ensurePlannerStatistics } from './planner-statistics';
 import { KindIcon, shortProject, UNTITLED } from './shared';
 import { clearFilters, detailHref, hasFilters, pageWindow, toggleSort, toQuery, UNKNOWN_MODEL, withChange, type ExplorerState } from './url-state';
 import { useExplorerState } from './use-explorer-state';
@@ -80,7 +79,17 @@ function SearchBox({ committed, onCommit }: { committed: string; onCommit: (valu
   );
 }
 
-function ConversationTableRow({ row, state, timezone, onOpen }: { row: ConversationRow; state: ExplorerState; timezone: string; onOpen: (event: MouseEvent<HTMLTableRowElement>, id: number) => void }) {
+function ConversationTableRow({
+  row,
+  state,
+  timezone,
+  onOpen,
+}: {
+  row: ConversationRow;
+  state: ExplorerState;
+  timezone: string;
+  onOpen: (event: MouseEvent<HTMLTableRowElement>, id: number) => void;
+}) {
   const level = confidenceOf(row.exact, row.estimated);
   const title = row.title?.trim() ?? '';
   return (
@@ -175,7 +184,7 @@ export function Explorer({ urlState }: { urlState: ExplorerState }) {
   // figures; the date range selects conversations by the day they were created.
   const page = useData(
     ['conversations', rangeKey(app), state.search, state.model, state.source, state.plan, state.sort, state.direction, state.page],
-    (a) => ensurePlannerStatistics(a.db, a.dataVersion).then(() => listConversations(a.db, a.lifetime, toQuery(state, a.resolved))),
+    (a) => listConversations(a.db, a.lifetime, toQuery(state, a.resolved)),
   );
 
   const commitSearch = useCallback((search: string) => change((s) => withChange(s, { search })), [change]);
@@ -327,12 +336,7 @@ export function Explorer({ urlState }: { urlState: ExplorerState }) {
               )
             ) : total === 0 ? (
               filtered ? (
-                <EmptyState
-                  title="No conversations match these filters"
-                  action={
-                    <Button onClick={() => change(clearFilters)}>Clear filters</Button>
-                  }
-                >
+                <EmptyState title="No conversations match these filters" action={<Button onClick={() => change(clearFilters)}>Clear filters</Button>}>
                   <p>Nothing matches {new Intl.ListFormat('en', { type: 'conjunction' }).format(activeFilters)}.</p>
                   <p className="mt-1">Clear the filters, or change one of them, to see more.</p>
                 </EmptyState>
@@ -358,48 +362,48 @@ export function Explorer({ urlState }: { urlState: ExplorerState }) {
             ) : (
               <div className={cn('transition-opacity', page.isPlaceholderData && 'opacity-70')} aria-busy={page.isPlaceholderData || undefined}>
                 <div ref={frame} className="scroll-mt-20">
-                <TableFrame className="rounded-[var(--radius-card)] bg-surface">
-                  <Table>
-                    <THead>
-                      <tr>
-                        <Th {...sortProps('title')} className="sticky left-0 z-[2] bg-raised">
-                          Title
-                        </Th>
-                        <Th {...sortProps('created')}>Created</Th>
-                        <Th {...sortProps('updated')}>Last activity</Th>
-                        <Th>Model</Th>
-                        <Th align="right" {...sortProps('messages')}>
-                          Messages
-                        </Th>
-                        <Th align="right" {...sortProps('tokens')}>
-                          Tokens
-                        </Th>
-                        <Th>
-                          <span className="inline-flex items-center gap-1">
-                            Confidence
-                            <InfoTip label="What exact and estimated mean">
-                              <p>
-                                <strong className="font-medium text-ink">Exact</strong> token counts were metered by the source, as Claude Code logs and API usage reports
-                                do.
-                              </p>
-                              <p>
-                                <strong className="font-medium text-ink">Estimated</strong> counts are reconstructed from the conversation’s text, because a claude.ai
-                                export contains no token counts. The real figure can differ.
-                              </p>
-                            </InfoTip>
-                          </span>
-                        </Th>
-                        <Th>Source</Th>
-                        <Th>Plan at start</Th>
-                      </tr>
-                    </THead>
-                    <tbody>
-                      {page.data.rows.map((row) => (
-                        <ConversationTableRow key={row.id} row={row} state={state} timezone={settings.timezone} onOpen={openRow} />
-                      ))}
-                    </tbody>
-                  </Table>
-                </TableFrame>
+                  <TableFrame className="rounded-[var(--radius-card)] bg-surface">
+                    <Table>
+                      <THead>
+                        <tr>
+                          <Th {...sortProps('title')} className="sticky left-0 z-[2] bg-raised">
+                            Title
+                          </Th>
+                          <Th {...sortProps('created')}>Created</Th>
+                          <Th {...sortProps('updated')}>Last activity</Th>
+                          <Th>Model</Th>
+                          <Th align="right" {...sortProps('messages')}>
+                            Messages
+                          </Th>
+                          <Th align="right" {...sortProps('tokens')}>
+                            Tokens
+                          </Th>
+                          <Th>
+                            <span className="inline-flex items-center gap-1">
+                              Confidence
+                              <InfoTip label="What exact and estimated mean">
+                                <p>
+                                  <strong className="font-medium text-ink">Exact</strong> token counts were metered by the source, as Claude Code logs and API usage reports
+                                  do.
+                                </p>
+                                <p>
+                                  <strong className="font-medium text-ink">Estimated</strong> counts are reconstructed from the conversation’s text, because a claude.ai
+                                  export contains no token counts. The real figure can differ.
+                                </p>
+                              </InfoTip>
+                            </span>
+                          </Th>
+                          <Th>Source</Th>
+                          <Th>Plan at start</Th>
+                        </tr>
+                      </THead>
+                      <tbody>
+                        {page.data.rows.map((row) => (
+                          <ConversationTableRow key={row.id} row={row} state={state} timezone={settings.timezone} onOpen={openRow} />
+                        ))}
+                      </tbody>
+                    </Table>
+                  </TableFrame>
                 </div>
 
                 <nav aria-label="Pages of conversations" className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-[13px] text-ink-2">

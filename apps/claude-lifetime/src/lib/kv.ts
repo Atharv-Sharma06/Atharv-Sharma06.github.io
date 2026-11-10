@@ -5,7 +5,8 @@
  * database: handles to folders and files the user picked (the browser can only store
  * those in IndexedDB) and a few device-local switches. Never synced, never uploaded.
  */
-const DB_NAME = 'claude-lifetime-local';
+export const KV_DATABASE_NAME = 'claude-lifetime-local';
+const DB_NAME = KV_DATABASE_NAME;
 const STORE = 'kv';
 
 function open(): Promise<IDBDatabase> {

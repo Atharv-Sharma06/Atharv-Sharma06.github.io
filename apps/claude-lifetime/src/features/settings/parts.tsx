@@ -7,7 +7,7 @@ import { Spinner } from '@/components/ui/feedback';
 import { cn } from '@/lib/cn';
 
 /** Space the sticky top bar and the section list take, so an anchor target is not hidden under them. */
-export const ANCHOR_OFFSET = 'scroll-mt-28';
+const ANCHOR_OFFSET = 'scroll-mt-28';
 
 export function SettingsSection({
   id,

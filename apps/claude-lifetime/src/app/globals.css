@@ -83,10 +83,13 @@ body {
   background: rgb(144 133 233 / 0.35);
 }
 
-:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-  border-radius: 4px;
+/* In the base layer, so a component can replace the ring with its own focus style (inputs
+   change their border instead). No radius here: the outline follows the element's own shape. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
 }
 
 /* Columns of figures align; large standalone figures keep proportional digits. */

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import type { ImportFile } from '@/core/types';
 import { kvDelete, kvGet, kvSet } from '@/lib/kv';
 
@@ -33,6 +34,8 @@ export const canPickFolders = () => typeof window !== 'undefined' && typeof (win
 
 const FOLDER_KEY = 'claude-code-folder';
 const AUTO_SYNC_KEY = 'claude-code-auto-sync';
+/** When automatic reading was switched off by a deletion, so the import page can say why the switch is off. */
+const AUTO_SYNC_STOPPED_KEY = 'claude-code-auto-sync-stopped';
 
 /** Folders inside a Claude Code directory that never hold transcripts and can be large. */
 const SKIP_DIRECTORIES = new Set(['tool-results', 'mcp-tasks', 'node_modules', '.git', 'shell-snapshots', 'statsig', 'todos', 'ide', 'plugins', 'debug']);
@@ -109,13 +112,53 @@ export async function readRememberedFolder(ask: boolean): Promise<PickedFolder |
 export async function forgetFolder(): Promise<void> {
   await kvDelete(FOLDER_KEY);
   await kvDelete(AUTO_SYNC_KEY);
+  await kvDelete(AUTO_SYNC_STOPPED_KEY);
 }
 
 export async function autoSyncEnabled(): Promise<boolean> {
   return (await kvGet<boolean>(AUTO_SYNC_KEY)) === true;
 }
 
+/** The user's own choice, which also settles any earlier automatic switch-off. */
 export async function setAutoSync(enabled: boolean): Promise<void> {
   if (enabled) await kvSet(AUTO_SYNC_KEY, true);
   else await kvDelete(AUTO_SYNC_KEY);
+  await kvDelete(AUTO_SYNC_STOPPED_KEY);
+}
+
+/**
+ * Call after Claude Code data was deleted. Automatic reading of the remembered folder
+ * would bring the deleted usage straight back on the next visit, so it is switched off;
+ * the folder stays remembered and can still be read on request. Returns whether the
+ * switch was on.
+ */
+export async function stopAutoSyncAfterDeletion(): Promise<boolean> {
+  if (!(await autoSyncEnabled())) return false;
+  await kvDelete(AUTO_SYNC_KEY);
+  await kvSet(AUTO_SYNC_STOPPED_KEY, Date.now()).catch(() => undefined);
+  return true;
+}
+
+/** When a deletion last switched automatic reading off, until the user sets the switch again. */
+export async function autoSyncStoppedAt(): Promise<number | null> {
+  const at = await kvGet<number>(AUTO_SYNC_STOPPED_KEY);
+  return typeof at === 'number' ? at : null;
+}
+
+/**
+ * Whether automatic reading is switched on, for a dialog that has to say what a
+ * deletion does to it. Read again whenever `refreshKey` changes; false until known.
+ */
+export function useAutoSyncEnabled(refreshKey: unknown = null): boolean {
+  const [enabled, setEnabled] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void autoSyncEnabled().then((value) => {
+      if (!cancelled) setEnabled(value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
+  return enabled;
 }

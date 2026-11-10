@@ -378,3 +378,18 @@ describe('first and last day of the records', () => {
     expect([api.firstDay, api.lastDay]).toEqual([o.firstDay, o.lastDay]);
   });
 });
+
+describe('timezone setting', () => {
+  it('accepts IANA names and refuses abbreviations, offsets and unknown zones', async () => {
+    const { updateSettings, getSettings } = await import('@/analytics/settings');
+    const before = (await getSettings(t.db, t.userId)).timezone;
+    for (const zone of ['Asia/Kolkata', 'UTC', 'Europe/Berlin', before]) {
+      expect((await updateSettings(t.db, t.userId, { timezone: zone })).timezone).toBe(zone);
+    }
+    // PostgreSQL would take every one of these, and read "UTC+5" as five hours WEST of Greenwich
+    for (const zone of ['PST', 'UTC+5', '+02:00', 'Mars/Olympus_Mons', '']) {
+      await expect(updateSettings(t.db, t.userId, { timezone: zone })).rejects.toThrow(/not a timezone this app knows/);
+    }
+    expect((await getSettings(t.db, t.userId)).timezone).toBe(before);
+  });
+});

@@ -47,13 +47,21 @@ export async function getSettings(db: SqlExecutor, userId: number): Promise<AppS
 
 export async function updateSettings(db: SqlDriver, userId: number, patch: Partial<AppSettings>): Promise<AppSettings> {
   if (patch.timezone !== undefined) {
+    // Only names of the IANA database that PostgreSQL and the browser both know. Abbreviations ("PST")
+    // and offsets ("UTC+5") are refused: the two read them differently, some with the opposite sign,
+    // and day boundaries computed in SQL would then disagree with the dates shown on screen.
+    const zone = patch.timezone.trim();
+    const known = await db.query(`SELECT 1 FROM pg_timezone_names WHERE name = $1`, [zone]);
+    let browserKnows = true;
     try {
-      // PostgreSQL knows the IANA database; an unknown zone is rejected here.
-      await db.query(`SELECT now() AT TIME ZONE $1::text`, [patch.timezone]);
+      new Intl.DateTimeFormat('en-US', { timeZone: zone });
     } catch {
-      throw new SettingsError(`"${patch.timezone}" is not a timezone this app knows. Use an IANA name such as America/New_York.`);
+      browserKnows = false;
     }
-    await db.query(`UPDATE users SET timezone = $2, updated_at = now() WHERE id = $1`, [userId, patch.timezone]);
+    if (known.rows.length === 0 || !browserKnows) {
+      throw new SettingsError(`"${patch.timezone}" is not a timezone this app knows. Use an IANA name such as America/New_York or Asia/Kolkata.`);
+    }
+    await db.query(`UPDATE users SET timezone = $2, updated_at = now() WHERE id = $1`, [userId, zone]);
   }
   if (patch.assumedModelKey) {
     const { rows } = await db.query(`SELECT 1 FROM model_catalog WHERE model_key = $1`, [patch.assumedModelKey]);

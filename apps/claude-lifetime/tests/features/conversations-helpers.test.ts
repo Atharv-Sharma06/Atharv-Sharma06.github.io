@@ -6,7 +6,6 @@ import { getOverview } from '@/analytics/overview';
 import { getApiValue } from '@/analytics/value';
 import { Decimal } from '@/core/decimal';
 import { formatBand, turnsOf } from '@/features/conversations/growth';
-import { ensurePlannerStatistics } from '@/features/conversations/planner-statistics';
 import {
   clearFilters,
   DEFAULT_STATE,
@@ -196,26 +195,6 @@ describe('figures on the conversations pages, against the demo dataset', () => {
     await loadDemoDataset(t.db, t.userId, 'UTC', NOW);
   });
   afterAll(() => t.close());
-
-  it('gives the planner statistics before the list is queried, once per version of the data', async () => {
-    const rowEstimate = async () => (await one<{ n: number }>(`SELECT reltuples::float8 AS n FROM pg_class WHERE oid = 'conversations'::regclass`)).n;
-    const actual = (await one<{ n: number }>(`SELECT count(*)::int AS n FROM conversations`)).n;
-    // nothing analyses the tables after an import: the planner believes they are empty or unknown
-    expect(await rowEstimate()).toBeLessThan(0);
-    const first = ensurePlannerStatistics(t.db, 0);
-    expect(ensurePlannerStatistics(t.db, 0)).toBe(first);
-    await first;
-    expect(await rowEstimate()).toBe(actual);
-
-    // statistics that still match the table are left alone; a new version of the data is checked again
-    await t.db.query(`UPDATE pg_class SET reltuples = $1 WHERE oid = 'conversations'::regclass`, [actual - 3]);
-    await ensurePlannerStatistics(t.db, 0);
-    await ensurePlannerStatistics(t.db, 1);
-    expect(await rowEstimate()).toBe(actual - 3);
-    await t.db.query(`UPDATE pg_class SET reltuples = 10 WHERE oid = 'conversations'::regclass`);
-    await ensurePlannerStatistics(t.db, 2);
-    expect(await rowEstimate()).toBe(actual);
-  });
 
   it('lists every conversation once across its pages, largest first', async () => {
     const counted = await one<{ n: number }>(`SELECT count(*)::int AS n FROM conversations WHERE kind IN ('chat', 'code_session')`);
