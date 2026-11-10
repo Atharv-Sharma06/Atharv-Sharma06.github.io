@@ -29,6 +29,7 @@ const model = (displayName: string, over: Partial<ModelUsage> = {}): ModelUsage 
     conversations: 0,
     requests: 0,
     value: ZERO_FIGURES,
+    recorded: { cacheRead: true, cacheWrite: true, replay: false },
     ...over,
   };
 };

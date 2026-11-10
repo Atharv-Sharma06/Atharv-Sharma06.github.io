@@ -65,9 +65,10 @@ const TOTAL_ONLY = `(f.price_tier = '${UNCATEGORISED_TIER}' AND f.output_tokens 
 /**
  * Sources that state cache tokens on every record, so that a zero there is a real zero.
  * Other sources (CSV and JSON files, manual entries) may simply have no such column: for
- * them a category counts as stated only where a record has a value in it.
+ * them a category counts as stated only where a record has a value in it. Shared with the
+ * model breakdown, which applies the same rule row by row.
  */
-const STATES_CACHE = `s.kind::text IN ('claude_code', 'api_usage_report')`;
+export const STATES_CACHE = `s.kind::text IN ('claude_code', 'api_usage_report')`;
 
 /**
  * Records whose input and output are both known, so that a zero in either is a real zero:

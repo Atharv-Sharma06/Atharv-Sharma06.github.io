@@ -1,4 +1,3 @@
-import { ArrowUpRight } from 'lucide-react';
 import Link from 'next/link';
 import type { ApiValue } from '@/analytics/value';
 import { ConfidenceBadge, type ConfidenceLevel } from '@/components/data/confidence';
@@ -25,6 +24,36 @@ function isWebAddress(url: string): boolean {
   return /^https?:\/\//i.test(url);
 }
 
+/**
+ * Why nothing in the range has a price, from the reasons the valuation gives for the
+ * usage it could not price. Said instead of listing parts that would all be zero.
+ */
+export function nothingPricedReason(value: Pick<ApiValue, 'unpriced' | 'assumedModel'>): string {
+  return notPricedReason('Nothing in this range can be priced', value);
+}
+
+/**
+ * The same for a range in which web searches have a price and no token usage has one:
+ * the searches keep their line, and this stands where the token parts would be.
+ */
+export function tokensNotPricedReason(value: Pick<ApiValue, 'unpriced' | 'assumedModel'>): string {
+  return notPricedReason('No token usage in this range can be priced', value);
+}
+
+function notPricedReason(lead: string, value: Pick<ApiValue, 'unpriced' | 'assumedModel'>): string {
+  const noModel = value.unpriced.some((u) => u.reason === 'unknown_model');
+  const noPrice = value.unpriced.some((u) => u.reason === 'no_price');
+  const withoutModel = value.assumedModel
+    ? `its source records no model, and ${value.assumedModel.displayName}, the model you chose to price it as, has no price on file for it`
+    : 'its source records no model, and no model is guessed';
+  if (noModel && noPrice) {
+    return `${lead}. For part of the usage ${withoutModel}. The rest is on a model or price tier that has no published price on file.`;
+  }
+  if (noModel) return `${lead}: ${withoutModel}.`;
+  if (noPrice) return `${lead}: its models or price tiers have no published price on file.`;
+  return `${lead}: none of its usage has token counts.`;
+}
+
 function Part({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
     <div className="flex items-baseline justify-between gap-4 py-2">
@@ -46,7 +75,9 @@ export function ValueCard({ value, scenario, rangeLabel, scoped }: { value: ApiV
   const other: CostScenario = scenario === 'cached' ? 'standard' : 'cached';
   const total = (s: CostScenario) => (s === 'cached' ? value.totalCachedUsd : value.totalStandardUsd);
   const estimated = (s: CostScenario) => (s === 'cached' ? value.estimatedCachedUsd : value.estimatedStandardUsd);
-  const nothingPriced = value.pricedTokens === 0;
+  // No token usage has a price. Web searches are billed per search and can still have one.
+  const noTokensPriced = value.pricedTokens === 0;
+  const nothingPriced = noTokensPriced && Number(value.webSearchUsd) === 0;
   const hasEstimate = Number(value.estimatedStandardUsd) > 0 || Number(value.estimatedCachedUsd) > 0 || value.assumedTokens > 0;
   const level: ConfidenceLevel = nothingPriced ? 'unavailable' : hasEstimate ? 'estimated' : 'exact';
   const scenariosDiffer = total(scenario) !== total(other);
@@ -95,7 +126,10 @@ export function ValueCard({ value, scenario, rangeLabel, scoped }: { value: ApiV
                 <p className="mt-1">
                   {scenariosDiffer
                     ? 'The two scenarios differ only in how estimated chat usage is priced. Exact usage costs the same in both, because its cache reads and writes are metered rather than assumed.'
-                    : 'Both scenarios give the same total here: no estimated usage in this range is priced, and exact usage costs the same in both because its cache reads and writes are metered.'}
+                    : Number(estimated(scenario)) > 0
+                      ? // Counts a file states have no re-read context, which is all the scenarios price differently.
+                        'Both scenarios give the same total here: the estimated usage in this range is counts that a file or an entry states, with no re-read context to price one way or the other, and exact usage costs the same in both because its cache reads and writes are metered.'
+                      : 'Both scenarios give the same total here: no estimated usage in this range is priced, and exact usage costs the same in both because its cache reads and writes are metered.'}
                 </p>
               </div>
             )}
@@ -103,23 +137,35 @@ export function ValueCard({ value, scenario, rangeLabel, scoped }: { value: ApiV
 
           <section className="min-w-0">
             <h3 className="text-[13px] text-ink-2">What the total is made of</h3>
-            <dl className="mt-1 divide-y divide-line text-[13px]">
-              <Part label="Exact usage" note="Every token category at its own published price" value={cents(value.exactUsd)} />
-              <Part
-                label="Estimated usage"
-                note={
-                  Number(estimated(scenario)) === 0 && Number(estimated(other)) === 0
-                    ? 'None of it is priced in this range'
-                    : `${cents(estimated(other))} under the other scenario`
-                }
-                value={cents(estimated(scenario))}
-              />
-              <Part label="Web search" note={`Billed per search: $${WEB_SEARCH_USD_PER_1000} per 1,000 searches`} value={cents(value.webSearchUsd)} />
-              <div className="flex items-baseline justify-between gap-4 py-2 font-medium">
-                <dt className="text-ink">Total</dt>
-                <dd className="tabular text-ink">{nothingPriced ? '–' : cents(total(scenario))}</dd>
-              </div>
-            </dl>
+            {nothingPriced ? (
+              // Each part would be a sum of nothing: a zero next to usage that has no price would read as a price of zero.
+              <p className="mt-2 text-[13px] text-ink-2">{nothingPricedReason(value)}</p>
+            ) : (
+              <dl className="mt-1 divide-y divide-line text-[13px]">
+                {noTokensPriced ? (
+                  // Only the web searches have a price. A zero for the tokens would read as a price of zero, so the reason stands in its place.
+                  <div className="py-2 text-ink-2">{tokensNotPricedReason(value)}</div>
+                ) : (
+                  <>
+                    <Part label="Exact usage" note="Every token category at its own published price" value={cents(value.exactUsd)} />
+                    <Part
+                      label="Estimated usage"
+                      note={
+                        Number(estimated(scenario)) === 0 && Number(estimated(other)) === 0
+                          ? 'None of it is priced in this range'
+                          : `${cents(estimated(other))} under the other scenario`
+                      }
+                      value={cents(estimated(scenario))}
+                    />
+                  </>
+                )}
+                <Part label="Web search" note={`Billed per search: $${WEB_SEARCH_USD_PER_1000} per 1,000 searches`} value={cents(value.webSearchUsd)} />
+                <div className="flex items-baseline justify-between gap-4 py-2 font-medium">
+                  <dt className="text-ink">Total</dt>
+                  <dd className="tabular text-ink">{cents(total(scenario))}</dd>
+                </div>
+              </dl>
+            )}
           </section>
         </div>
 
@@ -222,7 +268,6 @@ export function ValueCard({ value, scenario, rangeLabel, scoped }: { value: ApiV
                     {isWebAddress(s.url) ? (
                       <a href={s.url} target="_blank" rel="noreferrer" className="min-w-0 text-accent-soft underline-offset-4 [overflow-wrap:anywhere] hover:underline">
                         {s.url.replace(/^https?:\/\//i, '')}
-                        <ArrowUpRight className="ml-1 inline size-3.5 align-[-2px]" aria-hidden="true" />
                         <span className="sr-only"> (opens in a new tab)</span>
                       </a>
                     ) : (

@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowUpRight, Plus, Search, Trash, X } from 'lucide-react';
+import { Plus, Search, Trash, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { deleteUserPrice, listPrices, saveUserPrice, type CatalogModelRow, type PriceRow, type UserPriceInput } from '@/analytics/settings';
 import { Button } from '@/components/ui/button';
@@ -433,7 +433,7 @@ export function PricesSection() {
             prices, read on {formatDay(RETRIEVED_ON)} from{' '}
             <a href={SOURCES.pricing} target="_blank" rel="noreferrer" className={EXTERNAL_LINK}>
               the pricing page
-              <ArrowUpRight className="size-3.5" aria-hidden="true" />
+              <span className="sr-only"> (opens in a new tab)</span>
             </a>
             ; prices of retired models come from their launch announcements.
           </p>

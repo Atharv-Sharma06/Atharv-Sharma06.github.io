@@ -51,8 +51,14 @@ export async function updateSettings(db: SqlDriver, userId: number, patch: Parti
     // Only names of the IANA database that PostgreSQL and the browser both know. Abbreviations ("PST")
     // and offsets ("UTC+5") are refused: the two read them differently, some with the opposite sign,
     // and day boundaries computed in SQL would then disagree with the dates shown on screen.
-    const zone = patch.timezone.trim();
-    const known = await db.query(`SELECT 1 FROM pg_timezone_names WHERE name = $1`, [zone]);
+    // A name typed in another letter case ("asia/kolkata") is stored under its proper spelling, the one
+    // PostgreSQL lists; the exact spelling wins where two names differ only in case.
+    const typed = patch.timezone.trim();
+    const known = await db.query<{ name: string }>(
+      `SELECT name FROM pg_timezone_names WHERE lower(name) = lower($1) ORDER BY (name = $1) DESC, name LIMIT 1`,
+      [typed],
+    );
+    const zone = known.rows[0]?.name ?? typed;
     let browserKnows = true;
     try {
       new Intl.DateTimeFormat('en-US', { timeZone: zone });

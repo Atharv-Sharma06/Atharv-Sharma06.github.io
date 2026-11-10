@@ -136,7 +136,7 @@ describe('explorer state in the URL', () => {
 
 type Message = ConversationDetail['messages'][number];
 const message = (role: string, over: Partial<Message> = {}): Message => ({
-  ordinal: 0, role, at: null, textChars: 0, thinkingChars: 0, toolChars: 0, attachmentChars: 0, fileCount: 0, input: 0, output: 0, replay: 0, requests: 0, ...over,
+  ordinal: 0, role, at: null, timeInferred: false, textChars: 0, thinkingChars: 0, toolChars: 0, attachmentChars: 0, fileCount: 0, input: 0, output: 0, replay: 0, requests: 0, ...over,
 });
 
 describe('turns of a conversation', () => {
@@ -148,8 +148,8 @@ describe('turns of a conversation', () => {
       message('assistant', { at: '2026-01-01T10:05:10.000Z', output: 200, replay: 400, requests: 2 }),
     ]);
     expect(turns).toEqual([
-      { turn: 1, at: '2026-01-01T10:00:00.000Z', messages: 2, input: 100, output: 300, replay: 0, requests: 1 },
-      { turn: 2, at: '2026-01-01T10:05:00.000Z', messages: 2, input: 50, output: 200, replay: 400, requests: 2 },
+      { turn: 1, at: '2026-01-01T10:00:00.000Z', atInferred: false, messages: 2, input: 100, output: 300, replay: 0, requests: 1 },
+      { turn: 2, at: '2026-01-01T10:05:00.000Z', atInferred: false, messages: 2, input: 50, output: 200, replay: 400, requests: 2 },
     ]);
   });
 

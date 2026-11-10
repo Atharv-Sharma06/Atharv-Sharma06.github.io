@@ -4,7 +4,7 @@ import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { NO_PLAN, type TokenBasis } from '@/analytics/base';
-import { getConversationDetail, type ConversationDetail } from '@/analytics/conversations';
+import { getConversationDetail, type CategoryTokens, type ConversationDetail } from '@/analytics/conversations';
 import { getModelBreakdown, type ModelUsage } from '@/analytics/models';
 import { getOverview, getTimeSeries, type Overview, type TokenTotals } from '@/analytics/overview';
 import { planLabel } from '@/analytics/subscriptions';
@@ -50,6 +50,8 @@ type Present = Loaded & { detail: ConversationDetail; overview: Overview; value:
 async function loadConversation(a: AppReady, id: number): Promise<Loaded> {
   const detail = await getConversationDetail(a.db, a.lifetime, id);
   if (!detail) return { id, detail: null, overview: null, value: null, usage: null, models: null };
+  // Its usage is not counted anywhere, so there are no figures to read for it.
+  if (detail.leftOutOfTotals) return { id, detail, overview: null, value: null, usage: null, models: null };
   const filter = { ...a.lifetime, conversationId: id };
   const valueOptions = { assumedModelKey: a.settings.assumedModelKey };
   const overview = await getOverview(a.db, filter);
@@ -90,25 +92,44 @@ function Fact({ label, children, note }: { label: string; children: ReactNode; n
   );
 }
 
-function Composition({ tokens, basis, note, className }: { tokens: TokenTotals; basis: TokenBasis; note?: string; className?: string }) {
+function Composition({
+  tokens,
+  estimatedParts,
+  basis,
+  note,
+  className,
+}: {
+  tokens: TokenTotals;
+  estimatedParts: CategoryTokens;
+  basis: TokenBasis;
+  note?: string;
+  className?: string;
+}) {
   // Only categories this conversation has. A chat export knows nothing about the prompt
   // cache, so a row "Cache reads 0" would state as fact what is really unknown. Input and
   // output are always listed; a side for which no record has a count shows a dash, because
   // a table without that column stores nothing for it. A total that is not split into the
-  // two has a line of its own.
-  const rows: Array<{ label: string; value: number | null; hint: string; always: boolean }> = [
-    { label: 'Input', value: tokens.recorded.input ? tokens.input : null, hint: 'New content given to the model', always: true },
-    { label: 'Output', value: tokens.recorded.output ? tokens.output : null, hint: 'What the model wrote', always: true },
-    { label: 'Not split into input and output', value: tokens.unsplit, hint: 'Rows that only state a total', always: false },
-    { label: 'Cache writes', value: tokens.cacheWrite, hint: 'Input stored in the prompt cache', always: false },
+  // two has a line of its own. Each bar draws its exact part solid and its estimated part
+  // lighter and hatched, as the overview does.
+  const rows: Array<{ label: string; value: number | null; estimated: number; hint: string; always: boolean }> = [
+    { label: 'Input', value: tokens.recorded.input ? tokens.input : null, estimated: estimatedParts.input, hint: 'New content given to the model', always: true },
+    { label: 'Output', value: tokens.recorded.output ? tokens.output : null, estimated: estimatedParts.output, hint: 'What the model wrote', always: true },
+    { label: 'Not split into input and output', value: tokens.unsplit, estimated: estimatedParts.unsplit, hint: 'Rows that only state a total', always: false },
+    { label: 'Cache writes', value: tokens.cacheWrite, estimated: estimatedParts.cacheWrite, hint: 'Input stored in the prompt cache', always: false },
     ...(basis === 'processed'
       ? [
-          { label: 'Cache reads', value: tokens.cacheRead, hint: 'Context re-read from the prompt cache (metered)', always: false },
-          { label: 'Re-read context', value: tokens.replay, hint: 'Context re-sent on later turns (modelled for chat exports)', always: false },
+          { label: 'Cache reads', value: tokens.cacheRead, estimated: estimatedParts.cacheRead, hint: 'Context re-read from the prompt cache (metered)', always: false },
+          { label: 'Re-read context', value: tokens.replay, estimated: estimatedParts.replay, hint: 'Context re-sent on later turns (modelled for chat exports)', always: false },
         ]
       : []),
   ].filter((r) => r.always || (r.value ?? 0) > 0);
   const max = Math.max(1, ...rows.map((r) => r.value ?? 0));
+  const describe = (r: (typeof rows)[number]) => {
+    if (r.value === null) return `${r.hint}: no record of this conversation has a count for it`;
+    const estimated = Math.min(r.estimated, r.value);
+    const kind = estimated === 0 ? 'exact' : estimated === r.value ? 'estimated' : `${formatInt(r.value - estimated)} exact, ${formatInt(estimated)} estimated`;
+    return `${r.hint}: ${formatInt(r.value)} tokens, ${kind}`;
+  };
   return (
     <Card className={className}>
       <CardHeader
@@ -117,19 +138,25 @@ function Composition({ tokens, basis, note, className }: { tokens: TokenTotals; 
       />
       <CardBody>
         <dl className="space-y-3">
-          {rows.map((r) => (
-            <div
-              key={r.label}
-              className="grid grid-cols-[7.5rem_minmax(0,1fr)_4rem] items-center gap-3 text-[13px]"
-              title={r.value === null ? `${r.hint}: no record of this conversation has a count for it` : `${r.hint}: ${formatInt(r.value)} tokens`}
-            >
-              <dt className="text-ink-2">{r.label}</dt>
-              <div className="h-1.5 overflow-hidden rounded-full bg-raised" aria-hidden="true">
-                <div className="h-full rounded-full bg-accent/80" style={{ width: `${r.value ? Math.max(1.5, (r.value / max) * 100) : 0}%` }} />
+          {rows.map((r) => {
+            const value = r.value ?? 0;
+            const estimated = Math.min(r.estimated, value);
+            const exact = value - estimated;
+            return (
+              <div key={r.label} className="grid grid-cols-[7.5rem_minmax(0,1fr)_4rem] items-center gap-3 text-[13px]" title={describe(r)}>
+                <dt className="text-ink-2">{r.label}</dt>
+                <div className="h-1.5 overflow-hidden rounded-full bg-raised" aria-hidden="true">
+                  <div className="flex h-full gap-0.5" style={{ width: `${value ? Math.max(1.5, (value / max) * 100) : 0}%` }}>
+                    {exact > 0 ? <div data-part="exact" className="h-full rounded-full bg-accent/80" style={{ flexGrow: exact, flexBasis: 0 }} /> : null}
+                    {estimated > 0 ? (
+                      <div data-part="estimated" className="hatch-estimated h-full rounded-full bg-accent/45" style={{ flexGrow: estimated, flexBasis: 0 }} />
+                    ) : null}
+                  </div>
+                </div>
+                <dd className={cn('tabular text-right', r.value === null ? 'text-ink-3' : 'text-ink')}>{r.value === null ? '–' : formatTokens(r.value)}</dd>
               </div>
-              <dd className={cn('tabular text-right', r.value === null ? 'text-ink-3' : 'text-ink')}>{r.value === null ? '–' : formatTokens(r.value)}</dd>
-            </div>
-          ))}
+            );
+          })}
         </dl>
         {basis === 'new' && tokens.cacheRead + tokens.replay > 0 ? (
           <p className="mt-4 text-xs text-ink-3">
@@ -263,6 +290,66 @@ function NotFound({ listState }: { listState: ExplorerState }) {
   );
 }
 
+/** A shared heading for the views of one conversation: focus moves to it when the view was opened from the list, and the tab is named after it. */
+function ConversationHeading({ title }: { title: string }) {
+  const heading = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (takePendingFocus('detail')) heading.current?.focus({ preventScroll: true });
+  }, []);
+  useEffect(() => {
+    const previous = document.title;
+    document.title = `${title || UNTITLED} · ${previous}`;
+    return () => {
+      document.title = previous;
+    };
+  }, [title]);
+  return (
+    <PageHeader
+      title={
+        // A title can be one very long word, which has no place to break: let it wrap anywhere rather than widen the page.
+        <span ref={heading} tabIndex={-1} className={cn('rounded-sm [overflow-wrap:anywhere]', !title && 'text-ink-3')}>
+          {title || UNTITLED}
+        </span>
+      }
+      className="mb-4"
+    />
+  );
+}
+
+const QUOTED = new Intl.ListFormat('en', { type: 'conjunction' });
+
+/**
+ * A conversation whose every source is left out of totals. Its usage is not counted in
+ * any figure of the app, so the page shows no figures for it, only that it exists and
+ * how to count it again.
+ */
+export function LeftOutConversation({ detail, listState }: { detail: ConversationDetail; listState: ExplorerState }) {
+  const c = detail.conversation;
+  const title = c.title?.trim() ?? '';
+  const labels = detail.leftOutSources.length > 0 ? detail.leftOutSources : [c.sourceLabel];
+  const one = labels.length === 1;
+  return (
+    <div>
+      <BackLink listState={listState} from={null} />
+      <ConversationHeading title={title} />
+      <EmptyState
+        title="This conversation is left out of totals"
+        action={
+          <Link href="/settings/#sources" className={buttonClass('secondary')}>
+            Open data sources in Settings
+          </Link>
+        }
+      >
+        <p>
+          The conversation is stored, but {one ? 'its source' : 'its sources'}, {QUOTED.format(labels.map((l) => `“${l}”`))}, {one ? 'is' : 'are'} left out of totals
+          in Settings. None of its usage is counted, so no figures are shown for it and it is not listed with the other conversations.
+        </p>
+        <p className="mt-1">Count {one ? 'the source' : 'the sources'} again in Settings to see its figures here.</p>
+      </EmptyState>
+    </div>
+  );
+}
+
 function DetailSkeleton() {
   return (
     <div aria-busy="true">
@@ -296,32 +383,10 @@ function DetailContent({ loaded, listState, stale }: { loaded: Present; listStat
   const listsMessages = detail.messages.length > 0;
   const singleTurn = listsMessages && turns.length < 2;
 
-  // Opened from the list: focus moves to the heading, which is how a screen reader learns the view changed.
-  const heading = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    if (takePendingFocus('detail')) heading.current?.focus({ preventScroll: true });
-  }, []);
-
-  // The tab and the history entry are named after the conversation while it is open.
-  useEffect(() => {
-    const previous = document.title;
-    document.title = `${title || UNTITLED} · ${previous}`;
-    return () => {
-      document.title = previous;
-    };
-  }, [title]);
-
   return (
     <div className={cn('transition-opacity', stale && 'opacity-70')}>
       <BackLink listState={listState} from={c.id} />
-      <PageHeader
-        title={
-          <span ref={heading} tabIndex={-1} className={cn('rounded-sm', !title && 'text-ink-3')}>
-            {title || UNTITLED}
-          </span>
-        }
-        className="mb-4"
-      />
+      <ConversationHeading title={title} />
 
       <dl className="mb-6 grid grid-cols-2 gap-x-6 gap-y-3 border-y border-line py-3.5 sm:grid-cols-3 lg:flex lg:flex-wrap lg:gap-x-10">
         <Fact label="Kind">
@@ -412,6 +477,7 @@ function DetailContent({ loaded, listState, stale }: { loaded: Present; listStat
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <Composition
               tokens={tokens}
+              estimatedParts={detail.estimatedParts}
               basis={settings.basis}
               note="This conversation is a single turn: one message from you and one reply. Nothing was said before it, so there is no earlier context to re-read and no growth to chart."
             />
@@ -420,7 +486,7 @@ function DetailContent({ loaded, listState, stale }: { loaded: Present; listStat
         ) : (
           // Two columns on wide screens: what the total is and where it came from on the left, how it built up on the right.
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:grid-rows-[auto_1fr]">
-            <Composition tokens={tokens} basis={settings.basis} className="lg:col-start-1 lg:row-start-1" />
+            <Composition tokens={tokens} estimatedParts={detail.estimatedParts} basis={settings.basis} className="lg:col-start-1 lg:row-start-1" />
             <div className="flex min-w-0 flex-col gap-4 lg:col-span-2 lg:col-start-2 lg:row-span-2 lg:row-start-1">
               {listsMessages ? (
                 <TurnGrowthCard
@@ -477,6 +543,7 @@ export function ConversationDetailView({ id, listState }: { id: number | null; l
       </div>
     );
   }
+  if (loaded.detail?.leftOutOfTotals) return <LeftOutConversation detail={loaded.detail} listState={listState} />;
   if (!loaded.detail || !loaded.overview || !loaded.value) return <NotFound listState={listState} />;
   return <DetailContent loaded={{ ...loaded, detail: loaded.detail, overview: loaded.overview, value: loaded.value }} listState={listState} stale={query.isPlaceholderData} />;
 }

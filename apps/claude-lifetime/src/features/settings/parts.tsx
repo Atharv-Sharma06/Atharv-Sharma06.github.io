@@ -53,6 +53,31 @@ export function SettingRow({ id, title, description, children }: { id: string; t
   );
 }
 
+// ── Focus ───────────────────────────────────────────────────────────────────────
+
+/**
+ * Gives keyboard focus back to the control that opened a dialog which is only rendered
+ * while it is open. Such a dialog is removed rather than closed, so it cannot hand focus
+ * back itself, and the focus trap it leaves behind puts focus on the page body. Call the
+ * returned function just before opening; focus returns once `open` is false again. The
+ * timer runs after the one the focus trap sets when it is removed, so it has the last word.
+ */
+export function useFocusReturn(open: boolean): () => void {
+  const opener = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (open || opener.current === null) return;
+    const element = opener.current;
+    opener.current = null;
+    const timer = window.setTimeout(() => {
+      if (element.isConnected) element.focus();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [open]);
+  return useCallback(() => {
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }, []);
+}
+
 // ── Saving ──────────────────────────────────────────────────────────────────────
 
 export type SaveState = { status: 'idle' } | { status: 'saving' } | { status: 'saved' } | { status: 'error'; message: string };

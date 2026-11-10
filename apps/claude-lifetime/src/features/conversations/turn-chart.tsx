@@ -4,7 +4,12 @@ import { useId } from 'react';
 import { Bar, BarStack, CartesianGrid, ComposedChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Swatch, type ChartSeries } from '@/components/charts/series-chart';
 import { formatAxis, formatInstant, formatInt } from '@/lib/format';
+import { MessageTime } from './confidence-mark';
 import type { Turn } from './growth';
+
+/** The tooltip of a turn whose start the source does not record. */
+const INFERRED_TURN_HINT =
+  'Inferred: the source records no time for the first message of this turn. The time shown is borrowed from the nearest message that has one, or from the conversation itself.';
 
 /**
  * Tokens per turn of a chat. It follows SeriesChart mark for mark (thin stacked bars,
@@ -43,7 +48,12 @@ function TurnTooltip({
   return (
     <div className="min-w-[12rem] rounded-[10px] border border-line-strong bg-raised px-3 py-2.5 text-xs shadow-[0_12px_32px_rgb(0_0_0/0.5)]">
       <p className="font-medium text-ink">Turn {label}</p>
-      {turn?.at ? <p className="text-ink-3">{formatInstant(turn.at, timezone, 'datetime')}</p> : null}
+      {turn?.at ? (
+        <p className="text-ink-3">
+          {formatInstant(turn.at, timezone, 'datetime')}
+          {turn.atInferred ? ', inferred' : ''}
+        </p>
+      ) : null}
       <ul className="mt-1.5 space-y-1">
         {shown.map((s) => (
           <li key={s.key} className="flex items-center justify-between gap-4 text-ink-2">
@@ -154,7 +164,9 @@ export function TurnTable({ turns, series, timezone }: { turns: Turn[]; series: 
               <th scope="row" className="tabular px-3 py-1.5 text-left font-normal text-ink-2">
                 {turn.turn}
               </th>
-              <td className="whitespace-nowrap px-3 py-1.5 text-ink-2">{formatInstant(turn.at, timezone, 'datetime')}</td>
+              <td className="whitespace-nowrap px-3 py-1.5 text-ink-2">
+                <MessageTime at={turn.at} inferred={turn.atInferred} timezone={timezone} hint={INFERRED_TURN_HINT} />
+              </td>
               {series.map((s) => (
                 <td key={s.key} className="tabular px-3 py-1.5 text-right text-ink">
                   {formatInt(turn[s.key])}

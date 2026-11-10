@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { explorerParams, parseExplorerState, type ExplorerState } from './url-state';
+import { explorerParams, followRange, parseExplorerState, type ExplorerState } from './url-state';
 
 /**
  * The explorer's filters, sort and page, kept in step with the query string.
@@ -17,6 +17,9 @@ import { explorerParams, parseExplorerState, type ExplorerState } from './url-st
  * forward buttons, or the "Conversations" link in the sidebar. The state follows it at
  * once, unless the URL shows something this list held a moment ago. That is most
  * likely an echo of our own writes, so it is only adopted if it stays.
+ *
+ * `range` identifies the date range of the top bar. It is not part of the query string,
+ * but it filters the list, so a change of it returns to the first page.
  */
 const SETTLE_MS = 1000;
 /** How long a state we moved away from is still treated as a possible echo. */
@@ -31,7 +34,7 @@ function writeUrl(state: ExplorerState) {
 
 export type ChangeExplorerState = (next: (current: ExplorerState) => ExplorerState) => void;
 
-export function useExplorerState(fromUrl: ExplorerState): [ExplorerState, ChangeExplorerState] {
+export function useExplorerState(fromUrl: ExplorerState, range: string): [ExplorerState, ChangeExplorerState] {
   const [state, setState] = useState(fromUrl);
   // The same value for event handlers, which must build on the latest change even when it has not rendered yet.
   const latest = useRef(fromUrl);
@@ -46,6 +49,15 @@ export function useExplorerState(fromUrl: ExplorerState): [ExplorerState, Change
     setState(value);
     writeUrl(value);
   }, []);
+
+  // The range the current page was chosen under.
+  const pageRange = useRef(range);
+  useEffect(() => {
+    if (pageRange.current === range) return;
+    const previous = pageRange.current;
+    pageRange.current = range;
+    change((s) => followRange(s, previous, range));
+  }, [range, change]);
 
   const urlKey = keyOf(fromUrl);
   const stateKey = keyOf(state);

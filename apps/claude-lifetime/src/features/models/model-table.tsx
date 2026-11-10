@@ -44,8 +44,11 @@ function Tokens({ value, title, children }: { value: number; title?: string; chi
 }
 
 /**
- * A figure the row's sources do not record at all. A dash, not a zero: a chat export
- * says nothing about the prompt cache, and metered usage has no modelled re-reading.
+ * A figure none of the row's records has a count for. A dash, not a zero: a chat export
+ * says nothing about the prompt cache, a table may have no cache columns, and usage a
+ * source states has no modelled re-reading. Whether a category is recorded comes from the
+ * records themselves (ModelUsage.recorded), never from whether the row is exact, so a
+ * count that is part of the row's total is always shown.
  */
 function NotRecorded({ why, className }: { why: string; className?: string }) {
   return (
@@ -69,7 +72,10 @@ function ShareBar({ share }: { share: number }) {
 function confidenceTitle(level: ConfidenceLevel, exact: number, estimated: number): string {
   if (level === 'unavailable') return 'No tokens are recorded, only requests';
   if (level === 'exact') return 'Exact: metered by the source';
-  return exact > 0 ? `Estimated: ${formatTokens(exact)} metered, ${formatTokens(estimated)} reconstructed from text` : 'Estimated: reconstructed from conversation text';
+  // Estimates are of two kinds (counted from conversation text, or stated by a file without being marked exact); a row can hold either.
+  return exact > 0
+    ? `Estimated: ${formatTokens(exact)} metered, ${formatTokens(estimated)} estimated`
+    : 'Estimated: counted from conversation text, or stated without being marked exact';
 }
 
 function ValueCell({ row, scenario, assumedModelName }: { row: ModelUsage; scenario: CostScenario; assumedModelName: string | null }) {
@@ -122,6 +128,12 @@ export function ModelTableCard({
   const direction = hidden ? 'desc' : sort.direction;
   const sorted = useMemo(() => sortModels(rows, key, direction, scenario), [rows, key, direction, scenario]);
   const totals = useMemo(() => modelTotals(rows), [rows]);
+  // The totals row has a figure for a category as soon as one row records it, and a dash when none does.
+  const recorded = {
+    cacheRead: rows.some((r) => r.recorded.cacheRead),
+    cacheWrite: rows.some((r) => r.recorded.cacheWrite),
+    replay: rows.some((r) => r.recorded.replay),
+  };
 
   const sortProps = (column: ModelSortKey) => ({
     sort: key === column ? direction : null,
@@ -185,7 +197,6 @@ export function ModelTableCard({
           <tbody>
             {sorted.map((row) => {
               const unknown = row.modelKey === null;
-              const metered = row.exact > 0;
               const level = confidenceOf(row.exact, row.estimated);
               return (
                 <Tr key={row.modelKey ?? 'unknown'} className="group hover:bg-raised">
@@ -224,17 +235,23 @@ export function ModelTableCard({
                   </Td>
                   <Tokens value={row.input} />
                   <Tokens value={row.output} />
-                  {processed ? metered ? <Tokens value={row.cacheRead} /> : <NotRecorded why="The source of this usage does not record cache reads." /> : null}
-                  {metered ? (
+                  {processed ? (
+                    row.recorded.cacheRead ? (
+                      <Tokens value={row.cacheRead} />
+                    ) : (
+                      <NotRecorded why="No record of this model has a count for cache reads: there were none, or the source does not record them." />
+                    )
+                  ) : null}
+                  {row.recorded.cacheWrite ? (
                     <Tokens value={row.cacheWrite5m + row.cacheWrite1h} title={cacheWriteTitle(row.cacheWrite5m, row.cacheWrite1h)} />
                   ) : (
-                    <NotRecorded why="The source of this usage does not record cache writes." />
+                    <NotRecorded why="No record of this model has a count for cache writes: there were none, or the source does not record them." />
                   )}
                   {processed ? (
-                    row.estimated > 0 ? (
+                    row.recorded.replay ? (
                       <Tokens value={row.replay} />
                     ) : (
-                      <NotRecorded why="Re-read context is only modelled for usage reconstructed from text. Metered usage reports cache reads instead." />
+                      <NotRecorded why="Re-read context is only modelled for usage reconstructed from conversation text. Counts that a source states show cache reads instead, where the source records them." />
                     )
                   ) : null}
                   <Tokens value={row.total}>
@@ -268,9 +285,25 @@ export function ModelTableCard({
               <Td className={CELL} />
               <Tokens value={totals.input} />
               <Tokens value={totals.output} />
-              {processed ? <Tokens value={totals.cacheRead} /> : null}
-              <Tokens value={totals.cacheWrite5m + totals.cacheWrite1h} title={cacheWriteTitle(totals.cacheWrite5m, totals.cacheWrite1h)} />
-              {processed ? <Tokens value={totals.replay} /> : null}
+              {processed ? (
+                recorded.cacheRead ? (
+                  <Tokens value={totals.cacheRead} />
+                ) : (
+                  <NotRecorded why="None of the sources of this usage records cache reads." />
+                )
+              ) : null}
+              {recorded.cacheWrite ? (
+                <Tokens value={totals.cacheWrite5m + totals.cacheWrite1h} title={cacheWriteTitle(totals.cacheWrite5m, totals.cacheWrite1h)} />
+              ) : (
+                <NotRecorded why="None of the sources of this usage records cache writes." />
+              )}
+              {processed ? (
+                recorded.replay ? (
+                  <Tokens value={totals.replay} />
+                ) : (
+                  <NotRecorded why="Re-read context is only modelled for usage reconstructed from conversation text, and none of this usage is." />
+                )
+              ) : null}
               <Tokens value={totals.total}>
                 <ConfidenceMark compact level={totalLevel} title={confidenceTitle(totalLevel, totals.exact, totals.estimated)} className="ml-1.5" />
               </Tokens>
@@ -303,12 +336,13 @@ export function ModelTableCard({
             <ConfidenceMark level="exact" /> metered by the source
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <ConfidenceMark level="estimated" /> includes tokens reconstructed from text
+            <ConfidenceMark level="estimated" /> includes estimated tokens
           </span>
         </p>
         <p>Share is of the usage recorded in your imports for this range. It is not a share of everything you ever used.</p>
         <p>
-          A dash means the source does not record that figure. A conversation that used two models is counted under each of them, so the Conversations column has no total.
+          A dash means no record has a count for that figure: there was none, or the source does not record it. A conversation that used two models is counted under each of
+          them, so the Conversations column has no total.
         </p>
         {processed ? null : <p>Cache reads and re-read context are left out: under the New basis each piece of content is counted once.</p>}
         <p>

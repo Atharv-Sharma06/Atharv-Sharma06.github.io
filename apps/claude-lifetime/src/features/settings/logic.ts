@@ -11,7 +11,38 @@ import { addDays, formatDay } from '@/lib/format';
 
 // ── Timezone ────────────────────────────────────────────────────────────────────
 
-/** IANA zones this browser can format, for the suggestion list. Empty where the browser cannot enumerate them. */
+/**
+ * Zones the IANA database has renamed, by their old name. Browsers list zones by the names
+ * of the Unicode locale data, which keep many old names (Chromium lists Asia/Calcutta, not
+ * Asia/Kolkata), so the current name would be missing from the suggestions and a lower-case
+ * spelling of it could not be matched to its proper spelling. Both names stay valid zones.
+ */
+const RENAMED_ZONES: Readonly<Record<string, string>> = {
+  'Africa/Asmera': 'Africa/Asmara',
+  'America/Buenos_Aires': 'America/Argentina/Buenos_Aires',
+  'America/Catamarca': 'America/Argentina/Catamarca',
+  'America/Coral_Harbour': 'America/Atikokan',
+  'America/Cordoba': 'America/Argentina/Cordoba',
+  'America/Godthab': 'America/Nuuk',
+  'America/Indianapolis': 'America/Indiana/Indianapolis',
+  'America/Jujuy': 'America/Argentina/Jujuy',
+  'America/Louisville': 'America/Kentucky/Louisville',
+  'America/Mendoza': 'America/Argentina/Mendoza',
+  'Asia/Calcutta': 'Asia/Kolkata',
+  'Asia/Katmandu': 'Asia/Kathmandu',
+  'Asia/Rangoon': 'Asia/Yangon',
+  'Asia/Saigon': 'Asia/Ho_Chi_Minh',
+  'Atlantic/Faeroe': 'Atlantic/Faroe',
+  'Europe/Kiev': 'Europe/Kyiv',
+  'Pacific/Enderbury': 'Pacific/Kanton',
+  'Pacific/Ponape': 'Pacific/Pohnpei',
+  'Pacific/Truk': 'Pacific/Chuuk',
+};
+
+/**
+ * IANA zones this browser can format, for the suggestion list, with the current name of
+ * each renamed zone next to its old one. Only UTC where the browser cannot enumerate them.
+ */
 export function listTimezones(): string[] {
   let zones: string[] = [];
   try {
@@ -19,8 +50,13 @@ export function listTimezones(): string[] {
   } catch {
     // older engines cannot list zones; a typed name is still accepted
   }
+  const listed = new Set(zones);
+  const current = Object.entries(RENAMED_ZONES)
+    .filter(([old, renamed]) => listed.has(old) && !listed.has(renamed))
+    .map(([, renamed]) => renamed);
+  const all = [...zones, ...current].sort();
   // Engines differ on whether the list carries UTC itself.
-  return zones.includes('UTC') ? zones : ['UTC', ...zones];
+  return all.includes('UTC') ? all : ['UTC', ...all];
 }
 
 export function deviceTimezone(): string | null {

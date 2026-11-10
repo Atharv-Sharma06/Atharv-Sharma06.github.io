@@ -1,9 +1,11 @@
+import { CircleDashed } from 'lucide-react';
 import type { TokenBasis } from '@/analytics/base';
 import type { ConversationDetail } from '@/analytics/conversations';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { Table, TableFrame, Td, Th, THead, Tr } from '@/components/ui/table';
 import { cn } from '@/lib/cn';
-import { formatInstant, formatInt } from '@/lib/format';
+import { formatInt, plural } from '@/lib/format';
+import { INFERRED_TIME_HINT, MessageTime } from './confidence-mark';
 
 type MessageMeta = ConversationDetail['messages'][number];
 
@@ -35,6 +37,7 @@ export function MessageTable({ detail, basis, timezone }: { detail: Conversation
   const { messages } = detail;
   const processed = basis === 'processed';
   const sum = (pick: (m: MessageMeta) => number) => messages.reduce((total, m) => total + pick(m), 0);
+  const inferred = messages.filter((m) => m.timeInferred).length;
 
   return (
     <Card>
@@ -84,7 +87,7 @@ export function MessageTable({ detail, basis, timezone }: { detail: Conversation
                   </Td>
                   <Td className="whitespace-nowrap">{WHO[m.role] ?? 'Other'}</Td>
                   <Td className="whitespace-nowrap text-ink-2" title={m.at ? undefined : 'The source gives no time for this message.'}>
-                    {formatInstant(m.at, timezone, 'datetime')}
+                    <MessageTime at={m.at} inferred={m.timeInferred} timezone={timezone} />
                   </Td>
                   <Count value={m.textChars} />
                   <Count value={m.thinkingChars} />
@@ -120,6 +123,15 @@ export function MessageTable({ detail, basis, timezone }: { detail: Conversation
           Characters are counted from the export. Files are images and other uploads whose content, and therefore token cost, the export does not include.
           {processed ? '' : ' Re-read context is left out: under the New basis each piece of content is counted once.'}
         </p>
+        {inferred > 0 ? (
+          <p className="mt-1.5 flex items-start gap-1 text-xs text-ink-3">
+            <CircleDashed className="mt-px size-3.5 shrink-0 text-warning" strokeWidth={2.25} aria-hidden="true" />
+            <span>
+              {inferred === messages.length ? 'Every time in this list is inferred' : `${plural(inferred, 'time')} in this list ${inferred === 1 ? 'is' : 'are'} inferred`}.{' '}
+              {INFERRED_TIME_HINT.replace(/^Inferred: the source records no time for this message\. /, 'The source records no time for these messages. ')}
+            </span>
+          </p>
+        ) : null}
       </CardBody>
     </Card>
   );

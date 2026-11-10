@@ -3,6 +3,7 @@
 import { CircleDashed } from 'lucide-react';
 import { useCallback, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { TokenBasis } from '@/analytics/base';
+import { getCoverage } from '@/analytics/coverage';
 import type { AppSettings } from '@/analytics/settings';
 import { getOverview } from '@/analytics/overview';
 import { getApiValue, type ApiValue } from '@/analytics/value';
@@ -62,6 +63,15 @@ function currentValue(value: { data: ApiValue | undefined; isPlaceholderData: bo
 /** Lifetime totals under one token basis, whichever basis is selected. */
 function useLifetimeTokens(basis: TokenBasis) {
   return useData(['settings', 'lifetime-tokens', basis], (a) => getOverview(a.db, { ...a.lifetime, basis }));
+}
+
+/**
+ * Lifetime coverage counted in processed tokens, whichever basis is selected. A price applies
+ * to every token the model read or wrote, so a figure about what stays unpriced is counted
+ * that way. Under the Processed basis the key is the one useCoverage uses, so the query is shared.
+ */
+function useProcessedCoverage() {
+  return useData(['coverage', 'processed'], (a) => getCoverage(a.db, a.userId, a.settings.timezone, 'processed'));
 }
 
 /** What a preference does to the user's own figures, said in one line under the control. */
@@ -366,7 +376,8 @@ function AssumedModelSetting() {
   const persist = useCallback((key: string) => saveSettings({ assumedModelKey: key === NO_MODEL ? null : key }), [saveSettings]);
   const choice = useSetting(settings.assumedModelKey ?? NO_MODEL, persist);
   const models = useCatalogModels();
-  const coverage = useCoverage();
+  // The line below says "processed tokens", so its figure is counted on that basis.
+  const coverage = useProcessedCoverage();
   const query = useLifetimeValue(settings.assumedModelKey);
   const value = currentValue(query, settings.assumedModelKey);
   // The same history priced with nothing assumed: the difference is what the assumption adds.

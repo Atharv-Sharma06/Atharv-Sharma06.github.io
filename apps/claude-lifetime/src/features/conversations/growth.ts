@@ -10,8 +10,10 @@ type MessageMeta = ConversationDetail['messages'][number];
 export interface Turn {
   /** 1-based position in the conversation. */
   turn: number;
-  /** When the turn began. */
+  /** When the turn began: the time of its first message. */
   at: string | null;
+  /** The source records no time for the turn's first message; `at` was borrowed from a neighbour. */
+  atInferred: boolean;
   messages: number;
   /** New content given to the model. */
   input: number;
@@ -33,7 +35,7 @@ export function turnsOf(messages: readonly MessageMeta[]): Turn[] {
   for (const m of messages) {
     let current = turns[turns.length - 1];
     if (!current || (m.role === 'user' && previousRole !== 'user')) {
-      current = { turn: turns.length + 1, at: m.at, messages: 0, input: 0, output: 0, replay: 0, requests: 0 };
+      current = { turn: turns.length + 1, at: m.at, atInferred: m.timeInferred, messages: 0, input: 0, output: 0, replay: 0, requests: 0 };
       turns.push(current);
     }
     current.messages += 1;

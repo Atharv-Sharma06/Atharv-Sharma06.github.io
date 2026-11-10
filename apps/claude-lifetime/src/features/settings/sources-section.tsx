@@ -16,10 +16,10 @@ import { Dialog } from '@/components/ui/overlay';
 import { stopAutoSyncAfterDeletion, useAutoSyncEnabled } from '@/features/import/local-files';
 import { deleteSource } from '@/import/delete';
 import { cn } from '@/lib/cn';
-import { formatInstant, formatInt, formatTokens, formatUsd, plural } from '@/lib/format';
+import { formatDay, formatInstant, formatInt, formatTokens, formatUsd, plural } from '@/lib/format';
 import { useApp } from '@/state/app';
 import { useCoverage } from '@/state/queries';
-import { SaveError, SaveNote, SettingsSection, Tag, useSaveState } from './parts';
+import { SaveError, SaveNote, SettingsSection, Tag, useFocusReturn, useSaveState } from './parts';
 
 function Fact({ label, children, title, className }: { label: string; children: ReactNode; title?: string; className?: string }) {
   return (
@@ -33,6 +33,28 @@ function Fact({ label, children, title, className }: { label: string; children: 
 }
 
 const NONE = <span className="text-ink-3">–</span>;
+
+/**
+ * The calendar days a source's records fall on, by the rule every chart uses (see
+ * SourceCoverage.firstDay): a daily report row keeps its UTC date, a record with a time of
+ * day falls on its day in the user's timezone. The instants themselves would move a daily
+ * row to the day before west of UTC.
+ */
+export function recordsDated(source: Pick<SourceCoverage, 'firstDay' | 'lastDay'>): string | null {
+  if (source.firstDay === null || source.lastDay === null) return null;
+  return `${formatDay(source.firstDay)} – ${formatDay(source.lastDay)}`;
+}
+
+/** The usage line of the "Delete source" dialog. Its token figure is on the selected basis and says so. */
+export function usageRecordsLine(source: Pick<SourceCoverage, 'exactTokens' | 'estimatedTokens'>, basis: Coverage['basis']): string {
+  const tokens = source.exactTokens + source.estimatedTokens;
+  return tokens > 0 ? `its usage records, ${formatTokens(tokens)} ${basisTokens(basis)} in all` : 'its usage records';
+}
+
+/** The note under the list of sources: which tokens its figures count, and the timezone of its dates. */
+export function sourcesFootnote(basis: Coverage['basis'], timezone: string): string {
+  return `Token figures in this list are ${basisTokens(basis)}, the token basis selected above. Dates are calendar days: a record with a time of day falls on the day it has in the timezone set above (${timezone}), and a record that only knows its day, such as a daily report row, keeps that day.`;
+}
 
 /** Asks why a source is left out. The reason is optional; it is only there to jog the user's memory later. */
 function ExcludeDialog({
@@ -112,7 +134,13 @@ function SourceItem({ source, basis, lastSynthetic }: { source: SourceCoverage; 
   if (pending !== null && pending.include === source.includeInTotals && pending.reason === source.exclusionReason) setPending(null);
   const included = pending ? pending.include : source.includeInTotals;
   const reason = pending ? pending.reason : source.exclusionReason;
-  const tokens = source.exactTokens + source.estimatedTokens;
+  const dated = recordsDated(source);
+  // The dialog is rendered only while it is open, so focus is handed back to the switch or link that opened it.
+  const rememberOpener = useFocusReturn(excluding);
+  const openExclude = () => {
+    rememberOpener();
+    setExcluding(true);
+  };
 
   const setIncluded = async (include: boolean, why?: string) => {
     // Stored the way setSourceIncluded stores it: trimmed, empty as none, and dropped when the source counts again.
@@ -150,7 +178,7 @@ function SourceItem({ source, basis, lastSynthetic }: { source: SourceCoverage; 
               checked={included}
               onChange={(next) => {
                 if (next) void save.run(() => setIncluded(true));
-                else setExcluding(true);
+                else openExclude();
               }}
             />
           </label>
@@ -163,7 +191,7 @@ function SourceItem({ source, basis, lastSynthetic }: { source: SourceCoverage; 
 
       <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 text-[13px] sm:grid-cols-3 lg:grid-cols-[minmax(0,1.7fr)_repeat(4,minmax(0,1fr))]">
         <Fact label="Records dated" className="col-span-2 sm:col-span-1">
-          {source.firstRecordAt ? `${formatInstant(source.firstRecordAt, tz)} – ${formatInstant(source.lastRecordAt, tz)}` : NONE}
+          {dated ?? NONE}
         </Fact>
         <Fact label="Conversations">{source.conversations > 0 ? formatInt(source.conversations) : NONE}</Fact>
         {/* The figures follow the Processed/New switch, so each says which of the two it is. */}
@@ -188,7 +216,7 @@ function SourceItem({ source, basis, lastSynthetic }: { source: SourceCoverage; 
           ) : (
             'No reason was noted for leaving it out.'
           )}{' '}
-          <button type="button" onClick={() => setExcluding(true)} className="ml-1.5 rounded text-accent-soft underline-offset-4 hover:underline">
+          <button type="button" onClick={openExclude} className="ml-1.5 rounded text-accent-soft underline-offset-4 hover:underline">
             {reason ? 'Edit reason' : 'Add a reason'}
           </button>
         </p>
@@ -229,7 +257,7 @@ function SourceItem({ source, basis, lastSynthetic }: { source: SourceCoverage; 
                 : `${plural(source.conversations, 'conversation')} and their message records`}
             </li>
           ) : null}
-          <li>{tokens > 0 ? `its usage records, ${formatTokens(tokens)} processed tokens in all` : 'its usage records'}</li>
+          <li>{usageRecordsLine(source, basis)}</li>
           {source.reportedCostUsd !== null ? <li>the {formatUsd(source.reportedCostUsd)} of billed cost it reported</li> : null}
           {lastSynthetic ? <li>the demo’s subscription periods, since this is the last demo source</li> : null}
         </ul>
@@ -327,7 +355,7 @@ export function SourcesSection() {
             ))}
           </ul>
           <p className="border-t border-line px-5 py-3 text-xs text-ink-3">
-            Token figures in this list are processed tokens, whichever token basis is selected. Dates follow the timezone set above ({timezone}).
+            {sourcesFootnote(coverage.data.basis, timezone)}
           </p>
         </Card>
       )}

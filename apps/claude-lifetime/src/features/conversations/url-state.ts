@@ -1,4 +1,4 @@
-import type { ConversationQuery, ConversationSort } from '@/analytics/conversations';
+import { MAX_ID, type ConversationQuery, type ConversationSort } from '@/analytics/conversations';
 import type { SourceKind } from '@/core/types';
 
 /**
@@ -57,10 +57,10 @@ function text(value: string | null): string | null {
   return trimmed === '' ? null : trimmed.slice(0, MAX_TEXT);
 }
 
-function positiveInt(value: string | null): number | null {
+function positiveInt(value: string | null, max = Number.MAX_SAFE_INTEGER): number | null {
   if (value === null || !/^\d{1,15}$/.test(value)) return null;
   const n = Number(value);
-  return n >= 1 ? n : null;
+  return n >= 1 && n <= max ? n : null;
 }
 
 export function parseExplorerState(params: ParamReader): ExplorerState {
@@ -108,11 +108,14 @@ export function detailHref(id: number, state: ExplorerState): string {
 
 export type Target = { view: 'list' } | { view: 'detail'; id: number | null };
 
-/** Which view the URL asks for. An `id` that is not a number still means "a conversation", one that cannot be found. */
+/**
+ * Which view the URL asks for. An `id` that is not a number still means "a conversation",
+ * one that cannot be found; so does a number beyond the largest id the database can hold.
+ */
 export function parseTarget(params: ParamReader): Target {
   const raw = params.get('id');
   if (raw === null) return { view: 'list' };
-  return { view: 'detail', id: positiveInt(raw.trim()) };
+  return { view: 'detail', id: positiveInt(raw.trim(), MAX_ID) };
 }
 
 export function hasFilters(state: ExplorerState): boolean {
@@ -122,6 +125,15 @@ export function hasFilters(state: ExplorerState): boolean {
 /** A change to the filters or the sort order always returns to the first page. */
 export function withChange(state: ExplorerState, patch: Partial<Omit<ExplorerState, 'page'>>): ExplorerState {
   return { ...state, ...patch, page: 1 };
+}
+
+/**
+ * The date range in the top bar filters the list as well, so a new range returns to the
+ * first page like any other filter. `pageRange` is the range the current page was chosen
+ * under; a page from the address is kept as long as the range does not change.
+ */
+export function followRange(state: ExplorerState, pageRange: string, range: string): ExplorerState {
+  return pageRange === range || state.page === 1 ? state : { ...state, page: 1 };
 }
 
 /** Clicking the active column flips its direction; a new column starts in its natural direction. */

@@ -161,7 +161,7 @@ Deduplication, by kind of record:
 | Message | id within its conversation |
 | Claude Code response | 64-bit hash of its message id (or, for an id that Anthropic did not issue, of the uuid of the response's first row), stored on the batch that counted it |
 | API report row | period and dimensions. A newer report replaces the same source's rows in the time it speaks for where it states them differently or no longer lists them; rows it repeats exactly are left alone. Each file of an import speaks for its own stretch of time (`ParsedImport.replaceRanges`), so the time between two files is not touched. A report that starts or ends inside a stored total (an hourly report cutting into a daily row) is refused, as is one period under two groupings in one import and a ranked report without its last page |
-| CSV/JSON row | its `id`, or a hash of its fields, within the source it is imported under. The same file imported into the same source again replaces the rows of its earlier import that read differently now |
+| CSV/JSON row | its `id`, or a hash of its fields, within the source it is imported under. The same file imported into the same source again replaces the rows of its earlier import that read differently now. A row that adds up more than one day is stored as one row for each day, with its counts divided evenly and keys derived from the row's, so that every day-based figure takes the right share of it |
 | Whole file | SHA-256, reported in the preview ("this exact file was imported before"), with a warning when that was under another source |
 
 Synthetic demo data and real data never coexist: the demo can only be loaded into an

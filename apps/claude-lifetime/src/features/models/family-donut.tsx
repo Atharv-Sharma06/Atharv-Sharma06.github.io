@@ -157,7 +157,11 @@ export function FamilyDonutCard({ rows, basis, rangeLabel, scoped }: { rows: Mod
               <ConfidenceBadge
                 level={level}
                 className="pointer-events-auto mt-2.5"
-                hint={level === 'estimated' ? 'This total includes tokens reconstructed from conversation text. Hatched parts of the ring are estimated.' : undefined}
+                hint={
+                  level === 'estimated'
+                    ? 'This total includes estimated tokens: counted from conversation text, or stated by a file without being marked exact. Hatched parts of the ring are estimated.'
+                    : undefined
+                }
               />
             </div>
             {tip && tipSlice ? <SliceTooltip slice={tipSlice} tip={tip} /> : null}

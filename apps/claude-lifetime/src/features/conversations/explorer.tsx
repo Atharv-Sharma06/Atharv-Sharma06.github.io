@@ -17,7 +17,7 @@ import { InfoTip } from '@/components/ui/overlay';
 import { Table, TableFrame, Td, Th, THead, Tr } from '@/components/ui/table';
 import type { SourceKind } from '@/core/types';
 import { cn } from '@/lib/cn';
-import { formatDayRange, formatInstant, formatInt, formatTokens } from '@/lib/format';
+import { formatDayRange, formatInstant, formatInt, formatTokens, plural } from '@/lib/format';
 import { rangeKey, useApp, useData } from '@/state/app';
 import { useCoverage, usePeriods } from '@/state/queries';
 import { ConfidenceMark } from './confidence-mark';
@@ -171,7 +171,7 @@ function TableSkeleton() {
 
 export function Explorer({ urlState }: { urlState: ExplorerState }) {
   const app = useApp();
-  const [state, change] = useExplorerState(urlState);
+  const [state, change] = useExplorerState(urlState, rangeKey(app));
   const { resolved, settings } = app;
   const scoped = resolved.from !== null || resolved.to !== null;
   const rangeLabel = formatDayRange(resolved.from, resolved.to);
@@ -223,6 +223,11 @@ export function Explorer({ urlState }: { urlState: ExplorerState }) {
     if (state.plan && state.plan !== NO_PLAN && !keys.includes(state.plan)) keys.push(state.plan);
     return [{ value: ALL, label: 'All plans' }, ...keys.map((k) => ({ value: k, label: planLabel(k) })), { value: NO_PLAN, label: planLabel(NO_PLAN) }];
   }, [periods.data, state.plan]);
+
+  // Sources the user left out of totals keep their conversations stored but unlisted. When
+  // they are the only sources with conversations, an empty list is their doing, not the imports'.
+  const leftOut = (coverage.data?.sources ?? []).filter((s) => !s.includeInTotals && s.conversations > 0);
+  const onlyLeftOut = leftOut.length > 0 && !(coverage.data?.sources ?? []).some((s) => s.includeInTotals && s.conversations > 0);
 
   const filtered = hasFilters(state);
   const labelOf = (options: Array<{ value: string; label: string }>, value: string | null) => options.find((o) => o.value === value)?.label ?? value ?? '';
@@ -339,6 +344,24 @@ export function Explorer({ urlState }: { urlState: ExplorerState }) {
                 <EmptyState title="No conversations match these filters" action={<Button onClick={() => change(clearFilters)}>Clear filters</Button>}>
                   <p>Nothing matches {new Intl.ListFormat('en', { type: 'conjunction' }).format(activeFilters)}.</p>
                   <p className="mt-1">Clear the filters, or change one of them, to see more.</p>
+                </EmptyState>
+              ) : onlyLeftOut ? (
+                <EmptyState
+                  title={leftOut.length === 1 ? 'The source of your conversations is left out of totals' : 'The sources of your conversations are left out of totals'}
+                  action={
+                    <Link href="/settings/#sources" className={buttonClass('secondary')}>
+                      Open data sources in Settings
+                    </Link>
+                  }
+                >
+                  <p>
+                    {new Intl.ListFormat('en', { type: 'conjunction' }).format(
+                      leftOut.map((s) => `“${s.label}” holds ${plural(s.conversations, 'conversation')}`),
+                    )}
+                    . {leftOut.length === 1 ? 'It is' : 'They are'} left out of totals in Settings, so {leftOut.length === 1 ? 'its' : 'their'} conversations
+                    are stored but not listed.
+                  </p>
+                  <p className="mt-1">Count {leftOut.length === 1 ? 'it' : 'them'} again in Settings to see the conversations here. Nothing has to be imported again.</p>
                 </EmptyState>
               ) : scoped ? (
                 <EmptyState
