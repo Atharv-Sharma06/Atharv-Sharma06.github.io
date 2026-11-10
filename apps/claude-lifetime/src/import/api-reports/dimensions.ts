@@ -178,8 +178,9 @@ const DAY_MS = 86_400_000;
  * Notices when one import states the same day at two granularities — a daily and
  * an hourly report of one period, or a whole-range total next to its daily rows.
  * Such rows have different keys (the bucket width is part of the key), so nothing
- * would stop them from being added up. Imported one after the other they are fine:
- * the later import replaces the earlier one inside its range.
+ * would stop them from being added up. Imported one after the other they are handled
+ * by the commit: the later import replaces the earlier rows that lie wholly inside its
+ * range, and is refused when its range cuts through a stored row (see commit.ts).
  */
 export class GranularityGuard {
   /**

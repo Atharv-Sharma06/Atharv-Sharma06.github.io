@@ -68,9 +68,14 @@ would be counted twice; leave one of the two sources out of the totals in Settin
 | Individual requests and conversations | Not in a report. Reports are aggregates. |
 | Who can get them | The Admin API needs an organization admin key and is **not available to individual accounts**. The Claude Console's Usage and Cost pages can be exported as CSV. |
 
-A later report for the same period replaces the earlier rows; it is not added. Reports
-filtered differently (one workspace, one API key) for the same period therefore replace
-each other. Import unfiltered reports, or select the files together in one import.
+A later report for the same period replaces the earlier rows where it states them
+differently or no longer lists them; it is not added. Reports filtered differently (one
+workspace, one API key) for the same period therefore replace each other. Import
+unfiltered reports, or select the files together in one import. A report cannot replace
+part of a stored total: an hourly report that begins in the middle of a day stored as
+one daily row is refused rather than counted on top of it. Rows that were replaced do
+not return when the replacing import is deleted; the import history notes this on both
+imports.
 
 ## CSV, JSON and manual entries
 
@@ -93,12 +98,23 @@ prices. It is not money you paid.
 ## Subscription periods
 
 No file contains your plan history. You enter it. Time not covered by a period is shown
-as "No subscription recorded", not as Free.
+as "No subscription recorded", not as Free. A period is the calendar days you entered:
+usage belongs to the plan that was active on the day it is charted on, and the dates do
+not change when you change the timezone setting.
 
 The before/after comparison splits at your first paid period. The two sides usually
 differ in length and in how they were measured (estimated chat text before, metered
 Claude Code after), so the app compares rates and does not print growth percentages for
 totals.
+
+Per-day averages, for each plan and for either side of the comparison, count only the
+days between your first and your last imported record. If you subscribed two years ago
+but your Claude Code logs go back thirty days, the plan is averaged over those thirty
+days: nothing is known about the others, which is not the same as no usage.
+
+The amount shown as paid is worked out from the monthly prices and dates you entered,
+one payment for every monthly cycle that has started. It is not read from invoices, so
+taxes, discounts and yearly billing are not reflected.
 
 ## What can never be shown
 

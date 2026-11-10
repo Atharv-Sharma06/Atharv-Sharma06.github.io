@@ -36,7 +36,10 @@ leaves the device because there is nowhere for it to go.
 
 All tabs of the app share one database: one tab's worker is elected leader and the
 others proxy their queries to it. A Web Lock makes sure only one import is prepared at a
-time, and a BroadcastChannel tells the other tabs to re-read after a write.
+time (file imports, folder syncs, manual entries and the demo data all take it), and a
+BroadcastChannel tells the other tabs to re-read after a write, to let go of the
+database before it is erased, and to reload after it was erased or replaced by a backup.
+Tabs that start at the same moment set the database up one after the other.
 
 ## Source layout
 
@@ -56,7 +59,10 @@ time, and a BroadcastChannel tells the other tabs to re-read after a write.
 ## Data model
 
 Timestamps are stored in UTC (`timestamptz`) and shown in the user's timezone. Day
-boundaries for charts are computed in SQL with the IANA zone from Settings.
+boundaries for charts are computed in SQL with the IANA zone from Settings. Subscription
+periods are the exception: a plan runs from one calendar day to another, so its first
+and last day are stored as dates, exactly as entered, and do not move when the timezone
+setting changes.
 
 | Table | Purpose |
 |---|---|
@@ -70,7 +76,7 @@ boundaries for charts are computed in SQL with the IANA zone from Settings.
 | `estimate_buckets` | Derived from `token_estimates` for speed: the estimates of an import summed into 15-minute buckets per conversation and method |
 | `estimation_methods` | The factor and uncertainty band of each tokenizer generation |
 | `reported_costs` | Actual billed amounts from cost reports |
-| `subscription_periods` | Plan history entered by the user; an exclusion constraint forbids overlaps |
+| `subscription_periods` | Plan history entered by the user, as first and last calendar day; an exclusion constraint forbids two plans on one day |
 | `model_catalog` | Known models with family, tokenizer generation, release and retirement dates |
 | `pricing_history` | Prices per model, tier and effective date, each with its source link and retrieval date |
 | `synced_files` | Which transcript files of a folder were already read, for incremental sync |
@@ -92,11 +98,20 @@ Decisions worth knowing:
   multiple of 15 minutes. The table is rebuilt by one SQL function after an import and
   when a factor changes, and it is removed with its import by cascading foreign keys.
   `tests/db/estimate-buckets.test.ts` checks that buckets and messages always agree.
-- **Usage rows never store a subscription plan.** The plan of a record is derived from
-  its timestamp and `subscription_periods` at query time, so editing a period
-  re-classifies everything.
+- **Usage rows never store a subscription plan.** The plan of a record is derived at
+  query time from the calendar day it is charted on and `subscription_periods`, so
+  editing a period re-classifies everything, and a record that only knows its date (a
+  daily report bucket, a manual entry) lands in the plan that was active on that date.
+- **Averages count only days the imported records cover.** A per-day figure for a plan,
+  or for either side of the first paid plan, divides by the days between the first and
+  the last imported record that fall into it (and into the selected range). Days before
+  the first import or after the last are unknown, not empty.
 - **Everything imported hangs off a source and a batch** through `ON DELETE CASCADE`
-  foreign keys. Deleting an import removes exactly the rows it added.
+  foreign keys. Deleting an import removes exactly the rows it added. A conversation
+  that two sources added to is handed to the remaining source before its first source
+  is removed, so the other source's records are not swept away with it. One thing a
+  deletion cannot undo: rows that a later report replaced (see below) do not come back
+  when that report is deleted; the import history says so on both imports.
 - **Money is `numeric`**, never floating point, and decimal strings in TypeScript
   (`src/core/decimal.ts`).
 
@@ -118,6 +133,13 @@ files ─▶ detect ─▶ parser (worker) ─▶ staging tables ─▶ preview 
 5. **Commit** merges the staged rows in one transaction. A crash or a cancelled import
    leaves the stored data untouched.
 
+The staging tables belong to the one database session all tabs share. Besides the lock,
+every reset of the tables hands out a token, and a commit presents the token it was
+given: if the tables were reset in between (another import, or the tab that hosted the
+database was closed) the commit is refused and nothing is saved. A Claude Code import
+is also refused when any import was saved or deleted after its preview, because its
+requests were compared with what was stored at that moment.
+
 Deduplication, by kind of record:
 
 | Record | Recognised by |
@@ -125,9 +147,9 @@ Deduplication, by kind of record:
 | Conversation | source-aware key, e.g. `claude_ai:<uuid>` |
 | Message | id within its conversation |
 | Claude Code response | 64-bit hash of message id and request id, stored on the batch that counted it |
-| API report row | period and dimensions; a newer report replaces the same source's rows in its range |
-| CSV/JSON row | its `id`, or a hash of its fields |
-| Whole file | SHA-256, reported in the preview ("this exact file was imported before") |
+| API report row | period and dimensions. A newer report replaces the same source's rows in its range where it states them differently or no longer lists them; rows it repeats exactly are left alone. A report that starts or ends inside a stored total (an hourly report cutting into a daily row) is refused |
+| CSV/JSON row | its `id`, or a hash of its fields, within the source it is imported under |
+| Whole file | SHA-256, reported in the preview ("this exact file was imported before"), with a warning when that was under another source |
 
 Synthetic demo data and real data never coexist: the demo can only be loaded into an
 empty workspace and is removed by the first real import.

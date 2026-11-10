@@ -52,8 +52,12 @@ model.
 - Claude Code deletes transcripts after `cleanupPeriodDays` (default 30). Set it to a
   large value such as 3650 in `~/.claude/settings.json` to keep them.
 - In Chrome and Edge the folder can be remembered. "Read the folder again" then reads
-  only files that changed.
+  only files that changed, and files its usage under the same source as the first time.
 - To keep several computers apart, give each a name in the field on the import page.
+  The name is remembered on this device. It decides which source the usage is filed
+  under, so keep it the same for the same computer.
+- Deleting Claude Code usage switches automatic reading of the folder off, because it
+  would add the deleted usage again on the next visit. It can be switched back on.
 
 ## Claude Code ledger (collector script)
 
@@ -119,7 +123,14 @@ stored as actual spend.
 **Good to know**
 
 - A report restates its period: rows already stored for the same source and period are
-  replaced, not added to.
+  replaced where the new report states them differently or no longer lists them, not
+  added to. Importing the same report twice changes nothing.
+- A report must cover whole stored periods. An hourly report that starts or ends in the
+  middle of a day that is already stored as one daily total is refused, with the day
+  named: adding it would count that time twice. Export it from midnight to midnight
+  (UTC), or delete the earlier import first.
+- Rows that a later report replaced do not come back when that report is deleted.
+  Import the earlier file again if you need them.
 - Group the report by model. Rows of an ungrouped report have no model and cannot be
   priced.
 - Usage in the `priority`, `flex` or long-context tiers of models with no published price
@@ -150,13 +161,20 @@ timestamp,model,input_tokens,output_tokens,cache_read_tokens,cache_write_5m_toke
 | `total_tokens` | Used only for rows without an input/output split. Such rows are counted but never priced. |
 | `requests` | Number of API requests in the row. |
 | `conversation_id`, `conversation_title` | Group rows into a conversation. |
-| `id` | Identifies the row. The same id is never imported twice. Without it, rows identical in every field count once. |
+| `id` | Identifies the row. The same id is never imported twice into the same source. Without it, rows identical in every field count once. |
 | `price_tier` | `standard` (default), `batch`, `fast`, `long_context`, `priority`, `flex`. |
 | `bucket_seconds` | Width of the period a row adds up. Default: 86400 for a date, otherwise 0. |
 
 Columns can have other names: the import shows a mapping step where you match your
 columns to these fields. You also say whether the counts are exact (metered by the API
-or a tool that reads them from it) or estimates.
+or a tool that reads them from it) or estimates, and can name the source.
+
+Rows are recognised as already stored within one source, and only when the same columns
+are read as the same fields. The choices you make for a table (source name, column
+meanings, exact or estimated) are therefore remembered on this device by the names of
+its columns and filled in the next time: importing a newer version of the same table
+adds only its new rows. If you import the very same file under a different source name,
+the preview warns that saving would count it twice.
 
 ## JSON usage file
 
