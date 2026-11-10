@@ -1,7 +1,8 @@
+import { tierForGeography } from '@/core/catalog';
 import type { ImportFile, ImportParser, ImportSink, ParseContext, ParsedImport, StagedUsage } from '@/core/types';
 import { clip, INT32_MAX, isObject, parseCount, type Json } from '../generic/values';
 import { hasLongContextPremium, priceTierFor } from './dimensions';
-import { looksLikeClaudeCode, noteClaudeCodeOverlap, noteHaikuLongContext, noteUsOnlyInference } from './notes';
+import { looksLikeClaudeCode, noteClaudeCodeOverlap, noteHaikuLongContext, TOO_LARGE } from './notes';
 import { ReportReader, type ReportKind } from './report';
 
 /**
@@ -24,8 +25,12 @@ import { ReportReader, type ReportKind } from './report';
  *
  * Reports are restated: Anthropic revises recent figures, and the same period can
  * be requested again with another grouping. Every import therefore replaces what
- * was imported from usage reports before, inside the time range it covers
- * (ParsedImport.replaceRange) — two reports of the same period are never added up.
+ * was imported from usage reports before, inside the time it covers
+ * (ParsedImport.replaceRanges) — two reports of the same period are never added up.
+ *
+ * A row that says its inference was kept in the US (`inference_geo: "us"`, present
+ * when the report is grouped by it) is filed under the US-only variant of its price
+ * tier, which is priced at the published 1.1 times.
  */
 const USAGE_REPORT: ReportKind = {
   kind: 'usage',
@@ -38,6 +43,20 @@ const USAGE_REPORT: ReportKind = {
   keyPrefix: 'api',
   measurementFields: new Set(),
   phase: 'Reading usage report',
+  figures(metrics) {
+    const cacheCreation = isObject(metrics.cache_creation) ? metrics.cache_creation : {};
+    return [
+      metrics.uncached_input_tokens,
+      metrics.cache_read_input_tokens,
+      cacheCreation.ephemeral_5m_input_tokens,
+      cacheCreation.ephemeral_1h_input_tokens,
+      metrics.output_tokens,
+    ].map((value) => {
+      const count = parseCount(value, Number.MAX_SAFE_INTEGER);
+      return count.ok ? (count.value ?? 0) : 0;
+    });
+  },
+  figureTolerance: 0,
 };
 
 interface Counts {
@@ -52,8 +71,8 @@ interface Counts {
   total: number | null;
 }
 
-/** Reads a row's measurements; returns the name and value of the first field that is not a count. */
-function readCounts(metrics: Json): Counts | { invalid: string } {
+/** Reads a row's measurements; returns the name and value of the first field that is not a count, or is one too large to store. */
+function readCounts(metrics: Json): Counts | { invalid: string; tooLarge: boolean } {
   const cacheCreation = isObject(metrics.cache_creation) ? metrics.cache_creation : {};
   const serverTools = isObject(metrics.server_tool_use) ? metrics.server_tool_use : {};
   const fields: Array<[name: string, value: unknown, max: number]> = [
@@ -70,7 +89,7 @@ function readCounts(metrics: Json): Counts | { invalid: string } {
   const values: Array<number | null> = [];
   for (const [name, value, max] of fields) {
     const count = parseCount(value, max);
-    if (!count.ok) return { invalid: `${name}: ${clip(value, 40)}` };
+    if (!count.ok) return { invalid: `${name}: ${clip(value, 40)}`, tooLarge: count.reason === 'too_large' };
     values.push(count.value);
   }
   const [input, cacheRead, cacheWrite5m, cacheWrite1h, output, webSearches, requests, total] = values;
@@ -86,8 +105,6 @@ function readCounts(metrics: Json): Counts | { invalid: string } {
   };
 }
 
-const text = (v: unknown): string => (typeof v === 'string' ? v.trim().toLowerCase() : '');
-
 export const apiUsageReportParser: ImportParser = {
   async parse(files: ImportFile[], sink: ImportSink, ctx: ParseContext): Promise<ParsedImport> {
     const reader = new ReportReader(files, sink, ctx, USAGE_REPORT);
@@ -95,7 +112,6 @@ export const apiUsageReportParser: ImportParser = {
     let rowsWithModel = 0;
     let premiumModelRows = 0;
     let claudeCodeRows = 0;
-    let usOnlyRows = 0;
     let haikuRows = 0;
     let totalMismatches = 0;
     let totalMismatchSample: string | undefined;
@@ -104,7 +120,8 @@ export const apiUsageReportParser: ImportParser = {
     for await (const row of reader.rows()) {
       const counts = readCounts(row.metrics);
       if ('invalid' in counts) {
-        reader.skip('invalid_number', 'Rows with a token count that is negative or not a whole number were skipped.', `${counts.invalid} (${row.startIso})`);
+        if (counts.tooLarge) reader.skip(TOO_LARGE.code, TOO_LARGE.message, `${counts.invalid} (${row.startIso})`);
+        else reader.skip('invalid_number', 'Rows with a token count that is negative or not a whole number were skipped.', `${counts.invalid} (${row.startIso})`);
         continue;
       }
       const dims = row.dims;
@@ -116,7 +133,10 @@ export const apiUsageReportParser: ImportParser = {
         modelKey,
         occurredAt: row.startIso,
         bucketSeconds: row.bucketSeconds,
-        priceTier: priceTierFor({ modelKey, serviceTier: dims.service_tier, speed: dims.speed, contextWindow: dims.context_window }),
+        priceTier: tierForGeography(
+          priceTierFor({ modelKey, serviceTier: dims.service_tier, speed: dims.speed, contextWindow: dims.context_window }),
+          typeof dims.inference_geo === 'string' ? dims.inference_geo : null,
+        ),
         inputTokens: counts.input,
         outputTokens: counts.output,
         cacheReadTokens: counts.cacheRead,
@@ -136,7 +156,6 @@ export const apiUsageReportParser: ImportParser = {
       if (hasLongContextPremium(modelKey)) premiumModelRows++;
       if (modelKey === 'claude-haiku-5-5') haikuRows++;
       if (looksLikeClaudeCode(dims.product)) claudeCodeRows++;
-      if (text(dims.inference_geo) === 'us') usOnlyRows++;
       const tokens = counts.input + counts.output + counts.cacheRead + counts.cacheWrite5m + counts.cacheWrite1h;
       if (counts.total !== null && counts.total !== tokens) {
         totalMismatches++;
@@ -193,7 +212,6 @@ export const apiUsageReportParser: ImportParser = {
 
     noteClaudeCodeOverlap(warnings, claudeCodeRows);
     noteHaikuLongContext(warnings, haikuRows);
-    noteUsOnlyInference(warnings, usOnlyRows);
     if (totalMismatches > 0) {
       warnings.add(
         'total_mismatch',

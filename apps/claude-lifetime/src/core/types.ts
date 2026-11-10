@@ -166,12 +166,20 @@ export interface ParsedImport {
   /** Requests skipped because an earlier import already counted them (Claude Code). */
   duplicateRequests?: number;
   /**
-   * For restated aggregates (API reports): rows of the same source inside this
-   * half-open UTC range are replaced by this import instead of being added to.
+   * For restated aggregates (API reports): rows of the same source inside these
+   * half-open UTC ranges are replaced by this import instead of being added to.
+   * The ranges are in time order and neither overlap nor touch; the time between
+   * two of them is not something the import speaks for.
    */
-  replaceRange?: { start: string; end: string };
+  replaceRanges?: TimeRange[];
   syncedFiles?: SyncedFileInfo[];
   stats: Record<string, number | string | boolean>;
+}
+
+/** A half-open range of time, as ISO-8601 UTC timestamps. */
+export interface TimeRange {
+  start: string;
+  end: string;
 }
 
 export interface ImportFile {

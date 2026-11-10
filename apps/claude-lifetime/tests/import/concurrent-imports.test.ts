@@ -88,7 +88,7 @@ describe('a commit saves the records it previewed, or nothing', () => {
     const writer = new StagingWriter(t.db);
     await writer.addBatch({ usage: [day('2025-03-01', 110_000, 'b1'), day('2025-03-02', 220_000, 'b2'), day('2025-03-03', 320_000, 'b3')] });
     await writer.finish();
-    const restated = parsed({ source: API, contentHash: 'report-2', fileName: 'usage-march.json', replaceRange: { start: '2025-03-01T00:00:00.000Z', end: '2025-03-04T00:00:00.000Z' } });
+    const restated = parsed({ source: API, contentHash: 'report-2', fileName: 'usage-march.json', replaceRanges: [{ start: '2025-03-01T00:00:00.000Z', end: '2025-03-04T00:00:00.000Z' }] });
     const generation = await importGeneration(t.db, t.userId);
     const preview = await previewImport(t.db, t.userId, restated);
     expect(preview.replaced).toEqual({ usageRows: 3, costRows: 0, tokens: 600_000 });

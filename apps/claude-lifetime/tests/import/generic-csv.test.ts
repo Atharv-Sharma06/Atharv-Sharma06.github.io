@@ -77,7 +77,7 @@ describe('generic CSV: the documented shape', () => {
       warnings: [],
     });
     // rows are deduplicated by key, not replaced by range
-    expect(parsed.replaceRange).toBeUndefined();
+    expect(parsed.replaceRanges).toBeUndefined();
     expect(parsed.stats).toMatchObject({
       rows: 4,
       tokens: 85010,

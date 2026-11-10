@@ -106,7 +106,7 @@ describe('API usage report: the documented examples', () => {
       recordsSeen: 1,
       recordsSkipped: 0,
       missingFields: [],
-      replaceRange: { start: '2025-08-01T00:00:00.000Z', end: '2025-08-02T00:00:00.000Z' },
+      replaceRanges: [{ start: '2025-08-01T00:00:00.000Z', end: '2025-08-02T00:00:00.000Z' }],
     });
     expect(parsed.stats).toMatchObject({ api: 'usage-cost', pages: 1, timeBuckets: 1, emptyBuckets: 0, rows: 1, inputTokens: 1500, outputTokens: 500 });
     // the example says has_more: true and the next page is not in the file
@@ -114,7 +114,11 @@ describe('API usage report: the documented examples', () => {
   });
 
   it('parses the Analytics API usage example', async () => {
-    const { parsed, out } = await parse(fixture('analytics-usage.doc-example.json'));
+    // The documented example is the first page of a longer report ("has_more": true). On its own it is
+    // refused (see "several pages"); here it stands for a page that ends the report.
+    const example = json('analytics-usage.doc-example.json');
+    expect(example.has_more).toBe(true);
+    const { parsed, out } = await parse(JSON.stringify({ ...example, has_more: false, next_page: null }));
 
     expect(out.usage).toEqual<StagedUsage[]>([
       {
@@ -141,12 +145,12 @@ describe('API usage report: the documented examples', () => {
       source: { kind: 'api_usage_report', label: 'Anthropic API usage report', externalRef: '' },
       recordsSeen: 1,
       recordsSkipped: 0,
-      replaceRange: { start: '2026-09-03T00:00:00.000Z', end: '2026-09-04T00:00:00.000Z' },
+      replaceRanges: [{ start: '2026-09-03T00:00:00.000Z', end: '2026-09-04T00:00:00.000Z' }],
     });
     expect(parsed.stats).toMatchObject({ api: 'analytics', pages: 1, rows: 1, groupedBy: 'model', requests: 4210, dataRefreshedAt: '2026-09-18T16:02:11Z' });
-    // grouped by model only: the tiers cannot be told apart, and the example has a next page
+    // grouped by model only: the tiers cannot be told apart
     expect(parsed.missingFields).toEqual(['service_tier', 'speed']);
-    expect(parsed.warnings.map((w) => w.code)).toEqual(['tier_not_grouped', 'more_pages_available']);
+    expect(parsed.warnings.map((w) => w.code)).toEqual(['tier_not_grouped']);
   });
 
   it('is recognised by the detection helpers', () => {
@@ -188,7 +192,7 @@ describe('API usage report: several pages', () => {
       // the last page says has_more: false, so nothing is missing
       expect(parsed.warnings.map((w) => w.code)).not.toContain('more_pages_available');
       // 1 March up to and including the empty bucket of 7 March
-      expect(parsed.replaceRange).toEqual({ start: '2026-03-01T00:00:00.000Z', end: '2026-03-08T00:00:00.000Z' });
+      expect(parsed.replaceRanges).toEqual([{ start: '2026-03-01T00:00:00.000Z', end: '2026-03-08T00:00:00.000Z' }]);
     }
     expect(asArray.parsed.stats.layout).toBe('array');
     expect(asLines.parsed.stats.layout).toBe('lines');
@@ -226,8 +230,56 @@ describe('API usage report: several pages', () => {
     const { parsed } = await parse(page1);
     const warning = parsed.warnings.find((w) => w.code === 'more_pages_available');
     expect(warning?.message).toMatch(/next_page/);
+    expect(warning?.message).toMatch(/together with these pages or on its own/);
+    expect(warning).toMatchObject({ count: 1, sample: 'missing from 2026-03-04 00:00 UTC' });
     // the range ends with the last bucket that is in the file
-    expect(parsed.replaceRange).toEqual({ start: '2026-03-01T00:00:00.000Z', end: '2026-03-04T00:00:00.000Z' });
+    expect(parsed.replaceRanges).toEqual([{ start: '2026-03-01T00:00:00.000Z', end: '2026-03-04T00:00:00.000Z' }]);
+  });
+
+  it('leaves the time of a legacy page that was left out alone, and says that it is missing', async () => {
+    // three pages of three days each; the middle one is not selected
+    const first = page([bucket(1, [result({ model: 'claude-opus-5' })]), bucket(2, []), bucket(3, [result({ model: 'claude-opus-5' })])], true);
+    const last = page([bucket(7, [result({ model: 'claude-opus-5' })]), bucket(8, []), bucket(9, [])]);
+    for (const input of [[JSON.stringify(first), JSON.stringify(last)], JSON.stringify([first, last])]) {
+      const { parsed, out } = await parse(input);
+      expect(out.usage.map((u) => u.occurredAt.slice(0, 10))).toEqual(['2026-04-01', '2026-04-03', '2026-04-07']);
+      // 4 to 6 April are in neither page: nothing stored for them may be replaced
+      expect(parsed.replaceRanges).toEqual([
+        { start: '2026-04-01T00:00:00.000Z', end: '2026-04-04T00:00:00.000Z' },
+        { start: '2026-04-07T00:00:00.000Z', end: '2026-04-10T00:00:00.000Z' },
+      ]);
+      expect(parsed.warnings.find((w) => w.code === 'more_pages_available')).toMatchObject({ count: 1, sample: 'missing from 2026-04-04 00:00 UTC' });
+    }
+    // two reports of separate periods are two ranges as well, and nothing is missing
+    const april = page([bucket(1, [result({ model: 'claude-opus-5' })]), bucket(2, [])]);
+    const later = page([bucket(20, [result({ model: 'claude-opus-5' })])]);
+    const both = await parse([JSON.stringify(april), JSON.stringify(later)]);
+    expect(both.parsed.replaceRanges).toHaveLength(2);
+    expect(both.parsed.warnings.map((w) => w.code)).not.toContain('more_pages_available');
+  });
+
+  it('refuses pages of the Analytics API without the last page: its rows are ranked by size, so a part is not a period', async () => {
+    const big = row(day(1), day(2), { model: 'claude-opus-5' }, { uncached_input_tokens: 8000 });
+    const alsoBig = row(day(3), day(4), { model: 'claude-opus-5' }, { uncached_input_tokens: 9000 });
+    const small = row(day(1), day(2), { model: 'claude-haiku-5-5' }, { uncached_input_tokens: 500 });
+    const firstPage = JSON.stringify({ ...page([alsoBig, big], true), data_refreshed_at: '2026-04-10T00:00:00Z' });
+    const lastPage = JSON.stringify({ ...page([small]), data_refreshed_at: '2026-04-10T00:00:00Z' });
+
+    const error = await parse(firstPage).catch((e) => e);
+    expect(error.code).toBe('incomplete_report');
+    expect(error.message).toMatch(/select all pages together/);
+    // the documented example is such a first page
+    expect(await codeOf(parse(fixture('analytics-usage.doc-example.json')))).toBe('incomplete_report');
+
+    // with its last page the report is complete, in whatever order the files are given
+    for (const files of [[firstPage, lastPage], [lastPage, firstPage]]) {
+      const { parsed, out } = await parse(files);
+      expect(out.usage.map((u) => u.inputTokens).sort((a, b) => a - b)).toEqual([500, 8000, 9000]);
+      expect(parsed.replaceRanges).toEqual([{ start: '2026-04-01T00:00:00.000Z', end: '2026-04-04T00:00:00.000Z' }]);
+      expect(parsed.warnings.map((w) => w.code)).not.toContain('more_pages_available');
+    }
+    // rows saved without the page around them carry no such statement and are taken as they are
+    expect((await parse(JSON.stringify([alsoBig, big]))).out.usage).toHaveLength(2);
   });
 
   it('counts a page that is in the input twice only once', async () => {
@@ -244,7 +296,7 @@ describe('API usage report: several pages', () => {
     const asLines = await parse(buckets.map((b) => JSON.stringify(b)).join('\n'));
     expect(flat(asList.out.usage)).toEqual(expectedRows);
     expect(flat(asLines.out.usage)).toEqual(expectedRows);
-    expect(asList.parsed.replaceRange).toEqual({ start: '2026-03-01T00:00:00.000Z', end: '2026-03-08T00:00:00.000Z' });
+    expect(asList.parsed.replaceRanges).toEqual([{ start: '2026-03-01T00:00:00.000Z', end: '2026-03-08T00:00:00.000Z' }]);
     expect(asList.parsed.stats).toMatchObject({ pages: 0, timeBuckets: 7, emptyBuckets: 3 });
 
     const rows = json('analytics-usage.daily.json').data as unknown[];
@@ -386,7 +438,7 @@ describe('API usage report: what a report lacks', () => {
       JSON.stringify(page([bucket(1, []), bucket(2, []), bucket(3, [result({ model: 'claude-opus-5-5', service_tier: 'standard', speed: 'standard' })]), bucket(4, []), bucket(5, [])])),
     );
     expect(out.usage.map((u) => u.occurredAt)).toEqual(['2026-04-03T00:00:00.000Z']);
-    expect(parsed.replaceRange).toEqual({ start: '2026-04-01T00:00:00.000Z', end: '2026-04-06T00:00:00.000Z' });
+    expect(parsed.replaceRanges).toEqual([{ start: '2026-04-01T00:00:00.000Z', end: '2026-04-06T00:00:00.000Z' }]);
     expect(parsed.stats).toMatchObject({ timeBuckets: 5, emptyBuckets: 4 });
   });
 
@@ -400,7 +452,7 @@ describe('API usage report: what a report lacks', () => {
       ['2026-09-01T00:00:00.000Z', 30 * 86400, 'claude-opus-5', 9_000_000],
       ['2026-09-01T00:00:00.000Z', 30 * 86400, 'claude-sonnet-5', 100],
     ]);
-    expect(parsed.replaceRange).toEqual({ start: '2026-09-01T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z' });
+    expect(parsed.replaceRanges).toEqual([{ start: '2026-09-01T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z' }]);
     const warning = parsed.warnings.find((w) => w.code === 'no_time_buckets');
     expect(warning).toMatchObject({ count: 2, sample: '2026-09-01 to 2026-10-01' });
     expect(warning?.message).toMatch(/start of the range/);
@@ -433,7 +485,7 @@ describe('API usage report: what a report lacks', () => {
     expect(parsed.warnings.map((w) => w.code)).not.toContain('more_pages_available');
   });
 
-  it('notes US-only inference and totals that do not add up', async () => {
+  it('files US-only inference under its own price tier, and notes totals that do not add up', async () => {
     const { parsed, out } = await parse(
       JSON.stringify(
         page([
@@ -442,8 +494,9 @@ describe('API usage report: what a report lacks', () => {
         ]),
       ),
     );
-    expect(out.usage).toHaveLength(2);
-    expect(parsed.warnings.find((w) => w.code === 'us_inference_premium')).toMatchObject({ count: 1 });
+    // priced at 1.1 times the standard price, as published; no warning is needed any more
+    expect(out.usage.map((u) => u.priceTier)).toEqual(['standard_us', 'standard']);
+    expect(parsed.warnings.map((w) => w.code)).not.toContain('us_inference_premium');
     expect(parsed.warnings.find((w) => w.code === 'total_mismatch')).toMatchObject({ count: 1 });
     expect(parsed.recordsSkipped).toBe(0);
   });
@@ -535,6 +588,66 @@ describe('API usage report: bad input', () => {
     expect(emptyAnalytics.code).toBe('no_rows');
   });
 
+  it('refuses the same period under two groupings, which would be added up', async () => {
+    const total = (d: number, input: number) => bucket(d, [result({ uncached_input_tokens: input, output_tokens: input / 10 })]);
+    const byModel = (d: number, a: number, b: number) =>
+      bucket(d, [
+        result({ model: 'claude-opus-5', uncached_input_tokens: a, output_tokens: a / 10 }),
+        result({ model: 'claude-haiku-5-5', uncached_input_tokens: b, output_tokens: b / 10 }),
+      ]);
+    const ungrouped = JSON.stringify(page([total(1, 1000), total(2, 2000)]));
+    const grouped = JSON.stringify(page([byModel(1, 700, 300), byModel(2, 1500, 500)]));
+
+    const error = await parse([ungrouped, grouped]).catch((e) => e);
+    expect(error.code).toBe('mixed_grouping');
+    expect(error.message).toMatch(/once not broken down and once broken down by model \(for example on 2026-04-01/);
+    expect(error.message).toMatch(/one at a time/);
+    // also when both were saved into one file, and whichever comes first
+    expect(await codeOf(parse(JSON.stringify([JSON.parse(grouped), JSON.parse(ungrouped)])))).toBe('mixed_grouping');
+    expect(await codeOf(parse([grouped, ungrouped]))).toBe('mixed_grouping');
+
+    // by model next to by workspace: the default workspace has no id, so its row looks like an ungrouped one
+    const byWorkspace = JSON.stringify(
+      page([
+        bucket(1, [result({ uncached_input_tokens: 400, output_tokens: 40 }), result({ workspace_id: 'wrkspc_1', uncached_input_tokens: 600, output_tokens: 60 })]),
+        bucket(2, [result({ uncached_input_tokens: 2000, output_tokens: 200 })]),
+      ]),
+    );
+    expect(await codeOf(parse([grouped, byWorkspace]))).toBe('mixed_grouping');
+
+    // Analytics API rows
+    const analyticsTotal = JSON.stringify(page([row(day(1), day(2), {}, { uncached_input_tokens: 1000, output_tokens: 100 })]));
+    const analyticsByModel = JSON.stringify(
+      page([
+        row(day(1), day(2), { model: 'claude-opus-5' }, { uncached_input_tokens: 700, output_tokens: 70 }),
+        row(day(1), day(2), { model: 'claude-haiku-5-5' }, { uncached_input_tokens: 300, output_tokens: 30 }),
+      ]),
+    );
+    expect(await codeOf(parse([analyticsTotal, analyticsByModel]))).toBe('mixed_grouping');
+  });
+
+  it('does not mistake the pages of one report for two groupings', async () => {
+    // Grouped by model and workspace. The largest rows, on the first page, are all in the default workspace,
+    // whose id is null: that page looks as if it were grouped by model alone.
+    const first = page(
+      [
+        row(day(1), day(2), { model: 'claude-opus-5' }, { uncached_input_tokens: 9000 }),
+        row(day(2), day(3), { model: 'claude-opus-5' }, { uncached_input_tokens: 8000 }),
+      ],
+      true,
+    );
+    const second = page([
+      row(day(1), day(2), { model: 'claude-opus-5', workspace_id: 'wrkspc_1' }, { uncached_input_tokens: 700 }),
+      row(day(2), day(3), { model: 'claude-haiku-5-5', workspace_id: 'wrkspc_1' }, { uncached_input_tokens: 60 }),
+    ]);
+    const { out } = await parse([JSON.stringify(first), JSON.stringify(second)]);
+    expect(out.usage.map((u) => u.inputTokens)).toEqual([9000, 8000, 700, 60]);
+    // the same report in two files, or the same page twice, is recognised by its rows and counted once
+    const again = await parse([JSON.stringify([first, second]), JSON.stringify([first, second])]);
+    expect(again.out.usage).toHaveLength(4);
+    expect(again.parsed.recordsSkipped).toBe(4);
+  });
+
   it('refuses a mix of the two APIs, and one day at two granularities', async () => {
     const legacy = JSON.stringify(page([bucket(1, [result({ model: 'claude-opus-5' })])]));
     const analytics = JSON.stringify(page([row(day(2), day(3), { model: 'claude-opus-5' })]));
@@ -577,10 +690,30 @@ describe('API usage report: bad input', () => {
     expect(parsed.recordsSkipped).toBe(5);
     expect(parsed.warnings.find((w) => w.code === 'invalid_number')).toMatchObject({ count: 3, sample: 'output_tokens: -5 (2026-04-01T00:00:00.000Z)' });
     expect(parsed.warnings.find((w) => w.code === 'invalid_timestamp')).toMatchObject({ count: 2, sample: 'yesterday' });
-    // the bucket with the unreadable start is not part of the range that gets replaced
-    expect(parsed.replaceRange).toEqual({ start: '2026-04-01T00:00:00.000Z', end: '2026-04-04T00:00:00.000Z' });
+    // the bucket with the unreadable start is not part of what gets replaced
+    expect(parsed.replaceRanges).toEqual([
+      { start: '2026-04-01T00:00:00.000Z', end: '2026-04-02T00:00:00.000Z' },
+      { start: '2026-04-03T00:00:00.000Z', end: '2026-04-04T00:00:00.000Z' },
+    ]);
 
     expect(await codeOf(parse(JSON.stringify(page([bucket(1, [result({ output_tokens: -1 })])]))))).toBe('no_valid_rows');
+  });
+
+  it('says that a count is too large to store, rather than calling it not a whole number', async () => {
+    const { parsed, out } = await parse(
+      JSON.stringify(
+        page([
+          row(day(1), day(2), { model: 'claude-opus-5' }, { requests: 3_000_000_000 }),
+          row(day(2), day(3), { model: 'claude-opus-5' }, { uncached_input_tokens: '9007199254740993' }),
+          row(day(3), day(4), { model: 'claude-opus-5' }),
+        ]),
+      ),
+    );
+    expect(out.usage).toHaveLength(1);
+    const warning = parsed.warnings.find((w) => w.code === 'number_too_large');
+    expect(warning).toMatchObject({ count: 2, sample: 'requests: 3000000000 (2026-04-01T00:00:00.000Z)' });
+    expect(warning?.message).toMatch(/too large to store/);
+    expect(parsed.warnings.map((w) => w.code)).not.toContain('invalid_number');
   });
 
   it('reports progress and can be cancelled', async () => {

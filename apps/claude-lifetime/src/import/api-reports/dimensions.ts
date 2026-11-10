@@ -1,4 +1,5 @@
 import { sha256Hex } from '@/core/sha256';
+import type { TimeRange } from '@/core/types';
 import { INT32_MAX, isObject, parseTimestamp, type Json } from '../generic/values';
 
 /**
@@ -150,10 +151,9 @@ export function bucketSecondsBetween(startMs: number, endMs: number | null): num
 export const isTimeBucket = (seconds: number): boolean => seconds === 60 || seconds === 3600 || seconds === 86400;
 
 /**
- * The half-open UTC range a report covers: from its earliest bucket start to its
- * latest bucket end. Existing rows of the same source inside it are replaced by the
- * import (ParsedImport.replaceRange), which is how a report that restates a period
- * with revised figures is kept from being counted on top of the earlier one.
+ * Earliest start and latest end of the buckets it is given. Used for one file at a
+ * time: a file that leaves out periods without usage still speaks for the whole
+ * stretch from its first row to its last.
  */
 export class RangeTracker {
   private start = Infinity;
@@ -166,9 +166,48 @@ export class RangeTracker {
     if (until > this.end) this.end = until;
   }
 
-  get(): { start: string; end: string } | undefined {
-    if (this.start === Infinity) return undefined;
-    return { start: new Date(this.start).toISOString(), end: new Date(this.end).toISOString() };
+  get empty(): boolean {
+    return this.start === Infinity;
+  }
+
+  /** The range in epoch milliseconds, or null when nothing was added. */
+  bounds(): [number, number] | null {
+    return this.empty ? null : [this.start, this.end];
+  }
+}
+
+/**
+ * The time an import speaks for, as a set of half-open UTC ranges
+ * (ParsedImport.replaceRanges). Existing rows of the same source inside a range are
+ * replaced by the import, which is how a report that restates a period with revised
+ * figures is kept from being counted on top of the earlier one.
+ *
+ * Ranges that overlap or touch are joined. The time between two ranges stays out of
+ * it: two files of January and of March say nothing about February, and what is
+ * stored for February must not be touched.
+ */
+export class Coverage {
+  private readonly intervals: Array<[number, number]> = [];
+
+  add(startMs: number, endMs: number | null): void {
+    this.intervals.push([startMs, endMs !== null && endMs > startMs ? endMs : startMs + 1]);
+  }
+
+  /** The joined ranges in epoch milliseconds, in time order. */
+  merged(): Array<[number, number]> {
+    const sorted = [...this.intervals].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const out: Array<[number, number]> = [];
+    for (const [start, end] of sorted) {
+      const last = out[out.length - 1];
+      if (last !== undefined && start <= last[1]) {
+        if (end > last[1]) last[1] = end;
+      } else out.push([start, end]);
+    }
+    return out;
+  }
+
+  ranges(): TimeRange[] {
+    return this.merged().map(([start, end]) => ({ start: new Date(start).toISOString(), end: new Date(end).toISOString() }));
   }
 }
 
@@ -212,6 +251,97 @@ export class GranularityGuard {
   conflict(): { day: string; widths: [number, number] } | null {
     if (this.clash === null) return null;
     return { day: new Date(this.clash.day * DAY_MS).toISOString().slice(0, 10), widths: this.clash.widths };
+  }
+}
+
+/**
+ * Notices when one import states the same usage twice under two groupings: the
+ * ungrouped report of a period next to the same report by model, say. Such rows have
+ * different keys, so nothing would stop them from being added up.
+ *
+ * What a report is grouped by cannot be read off a single row, because a dimension is
+ * null both when the report is not grouped by it and when a row has no value for it.
+ * So the dimensions that have a value anywhere in a unit of input (a file, or a page)
+ * stand for the unit. Units are put together by that set, and each set's figures are
+ * added up per time bucket. Two sets that give the very same figures for every bucket
+ * they share are two statements of one usage. Pages of one report never do that: they
+ * hold different rows of a bucket, so their figures differ.
+ */
+export class GroupingGuard {
+  /** Dimension names of the unit being read, and its figures per bucket. */
+  private names = new Set<string>();
+  private sums = new Map<string, { figures: number[]; rows: number }>();
+  private readonly units: Array<{ names: Set<string>; sums: Map<string, { figures: number[]; rows: number }> }> = [];
+
+  /**
+   * @param tolerancePerRow how far two sums may lie apart per row that went into them
+   *   and still count as the same figure (amounts are rounded row by row; counts are not).
+   */
+  constructor(private readonly tolerancePerRow: number) {}
+
+  /** A row of the current unit, whether or not it is imported. */
+  add(startMs: number, bucketSeconds: number, dimensionNames: readonly string[], figures: readonly number[]): void {
+    for (const name of dimensionNames) this.names.add(name);
+    const bucket = `${startMs}/${bucketSeconds}`;
+    const held = this.sums.get(bucket);
+    if (held === undefined) this.sums.set(bucket, { figures: [...figures], rows: 1 });
+    else {
+      for (let i = 0; i < figures.length; i++) held.figures[i] = (held.figures[i] ?? 0) + figures[i];
+      held.rows++;
+    }
+  }
+
+  /** The current unit is complete. */
+  endUnit(): void {
+    if (this.sums.size > 0) this.units.push({ names: this.names, sums: this.sums });
+    this.names = new Set();
+    this.sums = new Map();
+  }
+
+  /** Two groupings that state the same figures, with a day they share, or null. */
+  conflict(): { day: string; groupings: [string[], string[]] } | null {
+    this.endUnit();
+    const sets = new Map<string, { names: string[]; sums: Map<string, { figures: number[]; rows: number }> }>();
+    for (const unit of this.units) {
+      const names = [...unit.names].sort();
+      const id = names.join('\n');
+      let set = sets.get(id);
+      if (set === undefined) sets.set(id, (set = { names, sums: new Map() }));
+      for (const [bucket, sum] of unit.sums) {
+        const held = set.sums.get(bucket);
+        if (held === undefined) set.sums.set(bucket, { figures: [...sum.figures], rows: sum.rows });
+        else {
+          for (let i = 0; i < sum.figures.length; i++) held.figures[i] = (held.figures[i] ?? 0) + sum.figures[i];
+          held.rows += sum.rows;
+        }
+      }
+    }
+    const all = [...sets.values()];
+    for (let a = 0; a < all.length; a++) {
+      for (let b = a + 1; b < all.length; b++) {
+        let shared: string | null = null;
+        let same = true;
+        let nonZero = false;
+        for (const [bucket, x] of all[a].sums) {
+          const y = all[b].sums.get(bucket);
+          if (y === undefined) continue;
+          shared ??= bucket;
+          const tolerance = this.tolerancePerRow * (x.rows + y.rows);
+          for (let i = 0; i < Math.max(x.figures.length, y.figures.length); i++) {
+            const left = x.figures[i] ?? 0;
+            const right = y.figures[i] ?? 0;
+            if (Math.abs(left - right) > tolerance) same = false;
+            if (left !== 0 || right !== 0) nonZero = true;
+          }
+          if (!same) break;
+        }
+        if (shared !== null && same && nonZero) {
+          const day = new Date(Number(shared.slice(0, shared.indexOf('/')))).toISOString().slice(0, 10);
+          return { day, groupings: [all[a].names, all[b].names] };
+        }
+      }
+    }
+    return null;
   }
 }
 

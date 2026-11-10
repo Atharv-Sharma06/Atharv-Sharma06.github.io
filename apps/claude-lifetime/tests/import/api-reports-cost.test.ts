@@ -123,7 +123,7 @@ describe('API cost report: the documented examples', () => {
       recordsSeen: 1,
       recordsSkipped: 0,
       missingFields: [],
-      replaceRange: { start: '2025-08-01T00:00:00.000Z', end: '2025-08-02T00:00:00.000Z' },
+      replaceRanges: [{ start: '2025-08-01T00:00:00.000Z', end: '2025-08-02T00:00:00.000Z' }],
     });
     expect(parsed.stats).toMatchObject({ api: 'usage-cost', pages: 1, rows: 1, totalUsd: '1.2378912' });
     expect(parsed.warnings.map((w) => w.code)).toEqual(['more_pages_available']);
@@ -145,7 +145,7 @@ describe('API cost report: the documented examples', () => {
       source: { kind: 'api_cost_report', label: 'Anthropic API cost report', externalRef: '' },
       recordsSeen: 3,
       missingFields: [],
-      replaceRange: { start: '2026-09-01T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z' },
+      replaceRanges: [{ start: '2026-09-01T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z' }],
     });
     expect(parsed.stats).toMatchObject({ api: 'analytics', totalUsd: '1412.954321', listTotalUsd: '1516.154321', groupedBy: 'cost_type, model, token_type' });
     // the rows cover a whole month each
@@ -166,7 +166,7 @@ describe('API cost report: rows', () => {
         ['2026-04-02', 'web_search', '10'],
         ['2026-04-03', 'tokens', '0.755'],
       ]);
-      expect(parsed.replaceRange).toEqual({ start: '2026-04-01T00:00:00.000Z', end: '2026-04-05T00:00:00.000Z' });
+      expect(parsed.replaceRanges).toEqual([{ start: '2026-04-01T00:00:00.000Z', end: '2026-04-05T00:00:00.000Z' }]);
       expect(parsed.stats).toMatchObject({ pages: 2, timeBuckets: 4, emptyBuckets: 2, totalUsd: '13.255' });
       expect(parsed.warnings).toEqual([]);
     }
@@ -269,6 +269,32 @@ describe('API cost report: rows', () => {
   });
 });
 
+describe('API cost report: one period stated twice', () => {
+  it('refuses daily totals next to the same days itemised, which would double the spend', async () => {
+    // $10.00 on 1 April and $4.00 on 2 April, once as totals and once by what was billed
+    const totals = JSON.stringify(page([bucket(1, [result('1000')]), bucket(2, [result('400')])]));
+    const itemised = JSON.stringify(
+      page([
+        bucket(1, [tokens('600.000001'), tokens('399.999999', { token_type: 'uncached_input_tokens', description: 'Claude Opus 5 Usage - Input Tokens' })]),
+        // rounded row by row, the items miss the total by a millionth of a cent
+        bucket(2, [tokens('133.333333'), tokens('133.333333', { model: 'claude-sonnet-5', description: 'Claude Sonnet 5 Usage - Output Tokens' }), result('133.333333', { cost_type: 'web_search', description: 'Web Search Usage' })]),
+      ]),
+    );
+    const error = await parse([totals, itemised]).catch((e) => e);
+    expect(error.code).toBe('mixed_grouping');
+    expect(error.message).toMatch(/same cost twice/);
+    expect(await codeOf(parse(itemised))).toBe('no error');
+    expect((await parse(totals)).parsed.stats.totalUsd).toBe('14');
+
+    // two reports of different days, grouped differently, are not the same cost
+    const otherDays = JSON.stringify(page([bucket(5, [tokens('600'), tokens('400', { token_type: 'uncached_input_tokens' })])]));
+    expect((await parse([totals, otherDays])).parsed.stats.totalUsd).toBe('24');
+    // ... nor are reports of the same days whose amounts differ (another workspace, say)
+    const otherAmounts = JSON.stringify(page([bucket(1, [tokens('700'), tokens('200', { token_type: 'uncached_input_tokens' })])]));
+    expect(await codeOf(parse([totals, otherAmounts]))).toBe('no error');
+  });
+});
+
 describe('API cost report: bad input', () => {
   it('explains files that are not cost reports', async () => {
     expect(await codeOf(parse(''))).toBe('empty_file');
@@ -276,7 +302,10 @@ describe('API cost report: bad input', () => {
     expect(await codeOf(parse('{"data": {"nope": true}}'))).toBe('not_a_report');
     expect(await codeOf(parse(fixture('usage-report.doc-example.json')))).toBe('wrong_report_type');
     expect(await codeOf(parse(fixture('analytics-usage.doc-example.json')))).toBe('wrong_report_type');
-    expect(await codeOf(parse(JSON.stringify(page([bucket(1, []), bucket(2, [])]))))).toBe('no_rows');
+    const empty = await parse(JSON.stringify(page([bucket(1, []), bucket(2, [])]))).catch((e) => e);
+    expect(empty.code).toBe('no_rows');
+    // empty buckets look the same in both kinds of report, so the message names both
+    expect(empty.message).toBe('The report has 2 time buckets between 2026-04-01 and 2026-04-03, but none of them contains any usage or cost. There is nothing to import.');
     expect(await codeOf(parse('{"type":"error","error":{"type":"permission_error","message":"Admin API key required"}}'))).toBe('api_error_response');
     const usage = await parse(fixture('usage-report.doc-example.json')).catch((e) => e);
     expect(usage.message).toMatch(/usage report, not a cost report/);

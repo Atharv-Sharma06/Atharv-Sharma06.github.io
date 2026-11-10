@@ -7,9 +7,11 @@ import {
   API_REPORTS_PARSER_VERSION,
   bucketKey,
   bucketSecondsBetween,
+  Coverage,
   describeBucket,
   dimensionsOf,
   GranularityGuard,
+  GroupingGuard,
   isTimeBucket,
   RangeTracker,
   reportTime,
@@ -23,9 +25,19 @@ import {
  * SDK produces — the rows or time buckets themselves as a list or as JSON Lines.
  *
  * The reader owns everything the two report kinds have in common: recognising the
- * shape, time buckets, deduplication keys, the range the report restates, and the
+ * shape, time buckets, deduplication keys, the time the report restates, and the
  * warnings about paging and missing time buckets. usage.ts and cost.ts turn a row's
  * measurements into staged records.
+ *
+ * Which time an import speaks for depends on the API, because the two page differently:
+ *  - The legacy API lists every time bucket of the requested range, empty ones
+ *    included, oldest first, a fixed number of buckets per page. So exactly the
+ *    buckets that are listed are restated; a page on its own is a complete statement
+ *    of its buckets, and the time of a page that was left out is not touched.
+ *  - The Analytics API leaves out buckets without usage and ranks rows by size across
+ *    the whole range, so every page reaches from the first to the last day. A file
+ *    speaks for the stretch from its first row to its last, and a selection that lacks
+ *    the last page is refused: its rows are the largest ones, not a period.
  */
 export interface ReportRow {
   /** Bucket start, ISO-8601 UTC. */
@@ -50,12 +62,26 @@ export interface ReportKind {
   /** Text fields of a legacy result that are measurements rather than dimensions. */
   measurementFields: ReadonlySet<string>;
   phase: string;
+  /** What a row measures, as numbers that add up: used to notice one period stated twice under two groupings. */
+  figures(metrics: Json): number[];
+  /** How far two sums of figures may differ per row and still be the same statement (amounts are rounded per row). */
+  figureTolerance: number;
 }
 
 const ENDPOINTS = {
   usage: '/v1/organizations/usage_report/messages or /v1/organizations/analytics/usage',
   cost: '/v1/organizations/cost_report or /v1/organizations/analytics/cost',
 };
+
+/** The error for an import that states one period under two groupings (see GroupingGuard). */
+export function mixedGrouping(clash: { day: string; groupings: [string[], string[]] }, what: string): ImportError {
+  const name = (names: string[]) => (names.length === 0 ? 'not broken down' : `broken down by ${names.join(', ')}`);
+  return new ImportError(
+    `This import holds the same ${what} twice: once ${name(clash.groupings[0])} and once ${name(clash.groupings[1])} (for example on ${clash.day}, where both add up to the same figures). ` +
+      `Adding them up would count that ${what} twice. Import only the more detailed files, or import the files one at a time: each import replaces what earlier ones said about the period it covers.`,
+    'mixed_grouping',
+  );
+}
 
 /** The error for an import that states one day at two granularities (see GranularityGuard). */
 export function mixedGranularity(clash: { day: string; widths: [number, number] }, what: string): ImportError {
@@ -71,9 +97,21 @@ export class ReportReader {
   readonly meter: InputMeter;
   readonly models: ModelRegistry;
 
-  private readonly range = new RangeTracker();
+  private readonly coverage = new Coverage();
+  /** First to last row of the file being read (Analytics API). */
+  private fileRange = new RangeTracker();
   private readonly granularity = new GranularityGuard();
+  /**
+   * One guard takes a file as the unit and one a page. A report saved page by page in one file is
+   * whole only as the file; two reports saved into one file are apart only as pages.
+   */
+  private readonly groupingByFile: GroupingGuard;
+  private readonly groupingByPage: GroupingGuard;
   private readonly keys = new Set<string>();
+  /** Starts of all legacy buckets, and where each legacy page that announces a further page ends. */
+  private readonly bucketStarts = new Set<number>();
+  private readonly continuesAt: number[] = [];
+  private pageEnd = -Infinity;
   private format: ApiReportFormat | null = null;
   private shape: 'legacy' | 'analytics' | null = null;
   private pages = 0;
@@ -98,6 +136,8 @@ export class ReportReader {
     requireFiles(files);
     this.meter = new InputMeter(files, sink, ctx, kind.phase);
     this.models = new ModelRegistry(sink);
+    this.groupingByFile = new GroupingGuard(kind.figureTolerance);
+    this.groupingByPage = new GroupingGuard(kind.figureTolerance);
   }
 
   /** Every row of every file, except rows that repeat an earlier one. */
@@ -105,7 +145,12 @@ export class ReportReader {
     for (const file of this.files) {
       if (file.size === 0) continue;
       const info = newJsonInputInfo();
+      this.fileRange = new RangeTracker();
       for await (const value of readJsonValues(file.blob, this.meter.onBytes, info)) yield* this.entry(value);
+      const stretch = this.fileRange.bounds();
+      if (stretch !== null) this.coverage.add(stretch[0], stretch[1]);
+      this.groupingByFile.endUnit();
+      this.groupingByPage.endUnit();
       if (info.layout !== null) this.layouts.add(info.layout);
       if (info.truncated) {
         this.warnings.add(
@@ -137,13 +182,15 @@ export class ReportReader {
   finish(extra: { missingFields: string[]; stats: Record<string, number | string | boolean> }): ParsedImport {
     this.meter.report();
     const what = this.kind.kind;
-    const range = this.range.get();
+    const ranges = this.coverage.ranges();
 
     if (this.seen === 0) {
-      const covered = range ? ` between ${range.start.slice(0, 10)} and ${range.end.slice(0, 10)}` : '';
+      const covered = ranges.length > 0 ? ` between ${ranges[0].start.slice(0, 10)} and ${ranges[ranges.length - 1].end.slice(0, 10)}` : '';
+      // Empty buckets look the same in a usage and in a cost report.
+      const nothing = this.format === null ? 'usage or cost' : what;
       throw new ImportError(
         this.buckets > 0
-          ? `The report has ${this.buckets} time bucket${this.buckets === 1 ? '' : 's'}${covered}, but none of them contains any ${what}. There is nothing to import.`
+          ? `The report has ${this.buckets} time bucket${this.buckets === 1 ? '' : 's'}${covered}, but none of them contains any ${nothing}. There is nothing to import.`
           : `The report contains no rows ("data" is empty), so there is nothing to import. Check the date range of the request; the Analytics API also returns nothing until the data for a period has been processed.`,
         'no_rows',
       );
@@ -158,6 +205,20 @@ export class ReportReader {
 
     const clash = this.granularity.conflict();
     if (clash !== null) throw mixedGranularity(clash, what);
+    const regrouped = this.groupingByFile.conflict() ?? this.groupingByPage.conflict();
+    if (regrouped !== null) throw mixedGrouping(regrouped, what);
+
+    // Rows of the Analytics API are ranked by size across the whole range, so the pages before the last
+    // one are the largest rows of every day, not a period. Stored as they are they would pass for the
+    // period's usage, and a later import of the remaining pages would replace them.
+    if (this.shape === 'analytics' && this.morePages > 0 && this.lastPages === 0) {
+      throw new ImportError(
+        'This is only part of a report: every page in the selection says that a further page follows ("has_more" is true), and the last page is missing. ' +
+          'The rows of this API are ranked by size, not by date, so a part of the report does not cover a period. ' +
+          'Request the remaining pages (pass each "next_page" value as the "page" parameter) and select all pages together. Nothing was saved.',
+        'incomplete_report',
+      );
+    }
 
     if (this.wholeRangeRows > 0) {
       this.warnings.add(
@@ -168,13 +229,17 @@ export class ReportReader {
         this.wholeRangeRows,
       );
     }
-    if (this.morePages > 0 && this.lastPages === 0) {
+    // A legacy page that announces a further page ends where that page begins. When no bucket of the
+    // selection starts there, the page that follows was left out.
+    const open = this.continuesAt.filter((end) => !this.bucketStarts.has(end)).sort((a, b) => a - b);
+    if (open.length > 0 || (this.shape === 'legacy' && this.continuesAt.length === 0 && this.morePages > 0 && this.lastPages === 0)) {
       this.warnings.add(
         'more_pages_available',
-        'The report continues on a further page that is not in this file ("has_more" is true on every page). ' +
-          'Request the next page with the "next_page" value as the "page" parameter and import it as well; until then the period is incomplete.',
-        undefined,
-        this.morePages,
+        'The report continues on a page that is not in the selection ("has_more" is true on the page before it). ' +
+          'The time that page covers is missing here and is left as it is. Request it with the "next_page" value as the "page" parameter and import it, ' +
+          'together with these pages or on its own.',
+        open.length > 0 ? `missing from ${new Date(open[0]).toISOString().slice(0, 16).replace('T', ' ')} UTC` : undefined,
+        Math.max(open.length, 1),
       );
     }
 
@@ -191,7 +256,7 @@ export class ReportReader {
       recordsSkipped: this.skippedRows,
       missingFields: extra.missingFields,
       warnings: this.warnings.toArray(),
-      ...(range ? { replaceRange: range } : {}),
+      ...(ranges.length > 0 ? { replaceRanges: ranges } : {}),
       stats: {
         api: legacy ? 'usage-cost' : 'analytics',
         pages: this.pages,
@@ -238,7 +303,19 @@ export class ReportReader {
     if (typeof entry.data_refreshed_at === 'string' && (this.dataRefreshedAt === null || entry.data_refreshed_at > this.dataRefreshedAt)) {
       this.dataRefreshedAt = entry.data_refreshed_at;
     }
+    this.pageEnd = -Infinity;
+    // Rows that stood on their own before this page are a unit of their own.
+    this.groupingByPage.endUnit();
     for (const item of entry.data) yield* this.item(item, false);
+    this.groupingByPage.endUnit();
+    if (entry.has_more === true && this.shape === 'legacy' && this.pageEnd !== -Infinity) this.continuesAt.push(this.pageEnd);
+  }
+
+  /** A time bucket of the legacy API: listed, so restated, with or without results. */
+  private legacyBucket(startMs: number, endMs: number | null): void {
+    this.coverage.add(startMs, endMs);
+    this.bucketStarts.add(startMs);
+    if (endMs !== null && endMs > this.pageEnd) this.pageEnd = endMs;
   }
 
   private *item(item: unknown, bare: boolean): Generator<ReportRow> {
@@ -258,8 +335,8 @@ export class ReportReader {
       this.setShape('legacy');
       this.buckets++;
       this.emptyBuckets++;
-      // An empty bucket is a statement too: nothing was used then. It belongs to the restated range.
-      if (startMs !== null) this.range.add(startMs, endMs);
+      // An empty bucket is a statement too: nothing was used then. It belongs to the restated time.
+      if (startMs !== null) this.legacyBucket(startMs, endMs);
       return;
     }
     this.setFormat(kind);
@@ -273,7 +350,7 @@ export class ReportReader {
         this.warnings.add('invalid_timestamp', 'Time buckets whose "starting_at" is not a valid timestamp were skipped.', clip(item.starting_at), results.length);
         return;
       }
-      this.range.add(startMs, endMs);
+      this.legacyBucket(startMs, endMs);
       for (const result of results) {
         if (!isObject(result)) {
           this.seen++;
@@ -291,7 +368,7 @@ export class ReportReader {
       this.skip('invalid_timestamp', 'Rows whose "starting_at" is not a valid timestamp were skipped.', clip(item.starting_at));
       return;
     }
-    this.range.add(startMs, endMs);
+    this.fileRange.add(startMs, endMs);
     const metrics = (this.kind.kind === 'usage' ? item.usage : item.cost) as Json;
     const row = this.row(startMs, endMs, isObject(item.group) ? item.group : {}, metrics);
     if (row !== null) yield row;
@@ -303,6 +380,11 @@ export class ReportReader {
     const bucketSeconds = bucketSecondsBetween(startMs, endMs);
     const dimensions = this.shape === 'legacy' ? dimensionsOf(dims, 'result', this.kind.measurementFields) : dimensionsOf(dims, 'group');
     const dedupKey = bucketKey(this.kind.keyPrefix, startIso, bucketSeconds, dimensions);
+    // Before repeats are dropped: a file's figures are what it states, whatever is imported of it.
+    const names = dimensions.pairs.map(([name]) => name);
+    const figures = this.kind.figures(metrics);
+    this.groupingByFile.add(startMs, bucketSeconds, names, figures);
+    this.groupingByPage.add(startMs, bucketSeconds, names, figures);
     if (this.keys.has(dedupKey)) {
       this.skip(
         'duplicate_rows',
@@ -319,7 +401,7 @@ export class ReportReader {
       this.wholeRangeRows++;
       this.wholeRangeSample ??= `${startIso.slice(0, 10)} to ${new Date(endMs as number).toISOString().slice(0, 10)}`;
     }
-    return { startIso, bucketSeconds, dims, metrics, dimensionNames: dimensions.pairs.map(([name]) => name), dedupKey };
+    return { startIso, bucketSeconds, dims, metrics, dimensionNames: names, dedupKey };
   }
 
   private setShape(shape: 'legacy' | 'analytics'): void {

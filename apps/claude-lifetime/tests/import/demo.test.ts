@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getCoverage } from '@/analytics/coverage';
 import { getOverview } from '@/analytics/overview';
 import { getBeforeAfter, listPeriods } from '@/analytics/subscriptions';
@@ -11,6 +11,10 @@ import { loadDemoDataset } from '@/import/demo/load';
 import { collectingSink } from '../helpers/sink';
 
 const NOW = new Date('2026-11-10T12:00:00Z');
+
+// The dataset holds years of usage and is loaded several times here: tens of seconds on a quiet
+// machine, and more than the default minute when other suites run next to it.
+vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 
 describe('synthetic demo dataset', () => {
   let t: TestDb;

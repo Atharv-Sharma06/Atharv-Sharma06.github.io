@@ -167,8 +167,8 @@ export function ImportHistory({ autoSync = false, locked = false, onDeleted }: {
         </p>
         {replacedEarlier ? (
           <p>
-            This import replaced {plural(replacedEarlier.count, 'record')} that an earlier import had stored for the same period. Deleting it does not
-            bring them back: that period will be empty until the earlier file is imported again.
+            This import replaced {plural(replacedEarlier.count, 'record')} that an earlier import had stored. Deleting it does not bring them back:
+            they will be missing until the earlier file is imported again.
           </p>
         ) : null}
         {deleting?.sourceKind === 'claude_code' && !deleting.isSynthetic && autoSync ? (

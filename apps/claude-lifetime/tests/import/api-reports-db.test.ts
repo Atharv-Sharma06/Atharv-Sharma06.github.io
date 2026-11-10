@@ -21,15 +21,19 @@ beforeEach(() => t.reset());
 
 const fixture = (name: string) => readFileSync(new URL(`../fixtures/api-reports/${name}`, import.meta.url));
 
-async function importWith(parser: ImportParser, name: string, content: string | Uint8Array, ctx: ParseContext = {}) {
+/** One import of several files selected together. */
+async function importFiles(parser: ImportParser, files: Array<[name: string, content: string | Uint8Array]>, ctx: ParseContext = {}) {
   await resetStaging(t.db);
   const writer = new StagingWriter(t.db);
-  const parsed = await parser.parse([fileOf(name, content)], writer, ctx);
+  const parsed = await parser.parse(files.map(([name, content]) => fileOf(name, content)), writer, ctx);
   await writer.finish();
   const preview = await previewImport(t.db, t.userId, parsed);
   const result = await commitImport(t.db, t.userId, parsed);
   return { parsed, preview, result };
 }
+
+const importWith = (parser: ImportParser, name: string, content: string | Uint8Array, ctx: ParseContext = {}) =>
+  importFiles(parser, [[name, content]], ctx);
 
 const rows = async <T = Record<string, unknown>>(sql: string) => (await t.db.query<T>(sql)).rows;
 const count = async (table: string) => (await rows<{ n: number }>(`SELECT count(*)::int AS n FROM ${table}`))[0].n;
@@ -126,7 +130,7 @@ describe('API usage reports in the database', () => {
       bucket(7, []),
     );
     const second = await importWith(apiUsageReportParser, 'april-4-7.json', revised);
-    expect(second.parsed.replaceRange).toEqual({ start: '2026-04-04T00:00:00.000Z', end: '2026-04-08T00:00:00.000Z' });
+    expect(second.parsed.replaceRanges).toEqual([{ start: '2026-04-04T00:00:00.000Z', end: '2026-04-08T00:00:00.000Z' }]);
     // Of the three stored rows in the restated range, two are replaced: 4 April is stated differently and the Opus row
     // of 5 April is not stated any more. The Sonnet row of 5 April is stated exactly as stored and stays where it is.
     expect(second.preview.replaced).toEqual({ usageRows: 2, costRows: 0, tokens: Math.round((4000 + 700) * 1.1) });
@@ -247,7 +251,7 @@ describe('API usage reports in the database', () => {
 
     // a report in which 3 April has no usage any more: the empty bucket clears the day
     const third = await importWith(apiUsageReportParser, 'day-2-3.json', report(bucket(2, [usageResult('claude-sonnet-4-6', 2100, { service_tier: 'standard', speed: 'standard' })]), bucket(3, [])));
-    expect(third.parsed.replaceRange).toEqual({ start: '2026-04-02T00:00:00.000Z', end: '2026-04-04T00:00:00.000Z' });
+    expect(third.parsed.replaceRanges).toEqual([{ start: '2026-04-02T00:00:00.000Z', end: '2026-04-04T00:00:00.000Z' }]);
     expect(third.result.replaced.usageRows).toBe(2);
     expect(await inputPerDay()).toEqual({ '04-01': 1000, '04-02': 2100 });
   });
@@ -271,6 +275,72 @@ describe('API usage reports in the database', () => {
     // and the export again restores its own view of its days
     await importWith(consoleCsvParser, 'claude_api_tokens_2026_04.csv', csv);
     expect(await inputPerDay()).toEqual({ '04-01': 1000, '04-02': 2000, '04-03': 3000 });
+  });
+
+  it('leaves what is stored between two files of one import alone', async () => {
+    const header =
+      'usage_date_utc,model_version,api_key,workspace,usage_type,context_window,usage_input_tokens_no_cache,usage_input_tokens_cache_write_5m,usage_input_tokens_cache_write_1h,usage_input_tokens_cache_read,usage_output_tokens,web_search_count,inference_geo,speed';
+    const month = (m: string, input: number) =>
+      `${header}\n2026-${m}-05,claude-sonnet-4-6,k,Default,standard,≤ 200k,${input},0,0,0,10,0,global,\n2026-${m}-20,claude-sonnet-4-6,k,Default,standard,≤ 200k,${input},0,0,0,10,0,global,\n`;
+    await importWith(consoleCsvParser, 'claude_api_tokens_2026_02.csv', month('02', 2000));
+
+    // January and March are selected together. Neither file says anything about February.
+    const both = await importFiles(consoleCsvParser, [
+      ['claude_api_tokens_2026_01.csv', month('01', 1000)],
+      ['claude_api_tokens_2026_03.csv', month('03', 3000)],
+    ]);
+    expect(both.parsed.replaceRanges).toEqual([
+      { start: '2026-01-05T00:00:00.000Z', end: '2026-01-21T00:00:00.000Z' },
+      { start: '2026-03-05T00:00:00.000Z', end: '2026-03-21T00:00:00.000Z' },
+    ]);
+    expect(both.preview.replaced).toEqual({ usageRows: 0, costRows: 0, tokens: 0 });
+    expect(both.result.replaced).toEqual({ usageRows: 0, costRows: 0 });
+    expect(await rows(`SELECT to_char(occurred_at AT TIME ZONE 'UTC', 'MM') AS month, sum(input_tokens)::int AS tokens FROM usage_records GROUP BY 1 ORDER BY 1`)).toEqual([
+      { month: '01', tokens: 2000 },
+      { month: '02', tokens: 4000 },
+      { month: '03', tokens: 6000 },
+    ]);
+    expect(await count('import_batches')).toBe(2);
+
+    // a later export of February alone still replaces February, and only February
+    const again = await importWith(consoleCsvParser, 'claude_api_tokens_2026_02.csv', month('02', 2500));
+    expect(again.result.replaced.usageRows).toBe(2);
+    expect((await rows<{ tokens: number }>(`SELECT sum(input_tokens)::int AS tokens FROM usage_records`))[0].tokens).toBe(13_000);
+  });
+
+  it('pages of a legacy report that are imported with one page missing do not clear the days of that page', async () => {
+    const week = (from: number, more: boolean) =>
+      JSON.stringify({ data: [0, 1, 2].map((i) => bucket(from + i, [usageResult('claude-sonnet-4-6', 100)])), has_more: more, next_page: more ? 'page_next' : null });
+    // the whole report was imported once
+    await importFiles(apiUsageReportParser, [['p1.json', week(1, true)], ['p2.json', week(4, true)], ['p3.json', week(7, false)]]);
+    expect(await count('usage_records')).toBe(9);
+
+    // later the first and the last page are imported again without the middle one
+    const partial = await importFiles(apiUsageReportParser, [['p1.json', week(1, true)], ['p3.json', week(7, false)]]);
+    expect(partial.preview.replaced).toMatchObject({ usageRows: 0 });
+    expect(partial.preview.warnings.map((w) => w.code)).toContain('more_pages_available');
+    expect(await count('usage_records')).toBe(9);
+    expect(await inputPerDay()).toMatchObject({ '04-04': 100, '04-05': 100, '04-06': 100 });
+  });
+
+  it('lets an hourly Console export of a day replace that day in a stored month export, although it lists only the hours with usage', async () => {
+    const header =
+      'usage_date_utc,model_version,api_key,workspace,usage_type,context_window,usage_input_tokens_no_cache,usage_input_tokens_cache_write_5m,usage_input_tokens_cache_write_1h,usage_input_tokens_cache_read,usage_output_tokens,web_search_count,inference_geo,speed';
+    const line = (when: string, input: number) => `${when},claude-sonnet-4-6,k,Default,standard,≤ 200k,${input},0,0,0,10,0,global,`;
+    const monthFile = [header, line('2026-04-03', 500), line('2026-04-04', 900), line('2026-04-05', 700), ''].join('\n');
+    const dayFile = [header, line('2026-04-04 09:00', 300), line('2026-04-04 13:00', 400), line('2026-04-04 16:00', 250), ''].join('\n');
+
+    await importWith(consoleCsvParser, 'claude_api_tokens_2026_04.csv', monthFile);
+    const hourly = await importWith(consoleCsvParser, 'claude_api_tokens_2026_04_04.csv', dayFile);
+    expect(hourly.parsed.replaceRanges).toEqual([{ start: '2026-04-04T00:00:00.000Z', end: '2026-04-05T00:00:00.000Z' }]);
+    expect(hourly.result).toMatchObject({ replaced: { usageRows: 1 }, inserted: { usageRows: 3 } });
+    // the day now holds what the hours add up to, and its neighbours are as they were
+    expect(await inputPerDay()).toEqual({ '04-03': 500, '04-04': 950, '04-05': 700 });
+
+    // the month export again: its daily total takes the place of the hours
+    const monthly = await importWith(consoleCsvParser, 'claude_api_tokens_2026_04.csv', monthFile);
+    expect(monthly.result).toMatchObject({ replaced: { usageRows: 3 }, inserted: { usageRows: 1 } });
+    expect(await inputPerDay()).toEqual({ '04-03': 500, '04-04': 900, '04-05': 700 });
   });
 
   it('keeps usage without a model, with no model attached', async () => {
@@ -319,29 +389,47 @@ describe('API cost reports in the database', () => {
     expect(preview.costRows).toEqual({ total: 4, new: 4, duplicate: 0 });
     expect(result.inserted.costRows).toBe(4);
     expect(await costs()).toEqual([
-      { day: '04-01', model_key: 'claude-sonnet-4-6', cost_type: 'tokens', token_type: 'output_tokens', description: 'Claude Sonnet 4.6 Usage - Output Tokens', amount_usd: '1.234500', bucket_seconds: 86400 },
-      { day: '04-01', model_key: null, cost_type: 'web_search', token_type: null, description: 'Web Search Usage', amount_usd: '10.000000', bucket_seconds: 86400 },
-      { day: '04-02', model_key: 'claude-sonnet-4-6', cost_type: 'tokens', token_type: 'output_tokens', description: 'Claude Sonnet 4.6 Usage - Output Tokens', amount_usd: '0.000100', bucket_seconds: 86400 },
-      { day: '04-02', model_key: 'claude-sonnet-4-6', cost_type: 'tokens', token_type: 'cache_read_input_tokens', description: 'Claude Sonnet 4.6 Usage - Cache Read', amount_usd: '412.800000', bucket_seconds: 86400 },
+      { day: '04-01', model_key: 'claude-sonnet-4-6', cost_type: 'tokens', token_type: 'output_tokens', description: 'Claude Sonnet 4.6 Usage - Output Tokens', amount_usd: '1.23450000', bucket_seconds: 86400 },
+      { day: '04-01', model_key: null, cost_type: 'web_search', token_type: null, description: 'Web Search Usage', amount_usd: '10.00000000', bucket_seconds: 86400 },
+      { day: '04-02', model_key: 'claude-sonnet-4-6', cost_type: 'tokens', token_type: 'output_tokens', description: 'Claude Sonnet 4.6 Usage - Output Tokens', amount_usd: '0.00010000', bucket_seconds: 86400 },
+      { day: '04-02', model_key: 'claude-sonnet-4-6', cost_type: 'tokens', token_type: 'cache_read_input_tokens', description: 'Claude Sonnet 4.6 Usage - Cache Read', amount_usd: '412.80000000', bucket_seconds: 86400 },
     ]);
-    expect(await rows(`SELECT sum(amount_usd)::text AS total FROM reported_costs`)).toEqual([{ total: '424.034600' }]);
+    expect(await rows(`SELECT sum(amount_usd)::text AS total FROM reported_costs`)).toEqual([{ total: '424.03460000' }]);
     expect(await rows(`SELECT kind::text AS kind, label FROM data_sources`)).toEqual([{ kind: 'api_cost_report', label: 'Anthropic API cost report' }]);
     // cost is spend, not usage
     expect(await count('usage_records')).toBe(0);
   });
 
+  it('keeps amounts smaller than a millionth of a dollar, so that many small rows add up to what the report says', async () => {
+    // an hourly report of a month with small cache-read rows: 720 rows of 0.000049 cents each
+    const hours = Array.from({ length: 720 }, (_, i) => {
+      const start = Date.parse('2026-04-01T00:00:00Z') + i * 3_600_000;
+      return {
+        starting_at: new Date(start).toISOString(),
+        ending_at: new Date(start + 3_600_000).toISOString(),
+        group: { model: 'claude-sonnet-4-6', cost_type: 'tokens', token_type: 'cache_read_input_tokens' },
+        cost: { currency: 'USD', amount: '0.000049', list_amount: '0.000049', requests: 1 },
+      };
+    });
+    const { parsed } = await importWith(apiCostReportParser, 'hourly-cost.json', JSON.stringify({ data: hours, has_more: false, next_page: null }));
+    expect(parsed.stats.totalUsd).toBe('0.0003528');
+    expect(await rows(`SELECT sum(amount_usd)::text AS total, count(*)::int AS n, min(amount_usd)::text AS smallest FROM reported_costs`)).toEqual([
+      { total: '0.00035280', n: 720, smallest: '0.00000049' },
+    ]);
+  });
+
   it('stores the documented examples: the legacy report and the Analytics API rows', async () => {
     await importWith(apiCostReportParser, 'legacy.json', fixture('cost-report.doc-example.json'));
-    // "123.78912" cents is $1.2378912; the amount column keeps six decimals
+    // "123.78912" cents is $1.2378912: stored as reported, to the hundred-millionth of a dollar
     expect(await costs()).toEqual([
-      { day: '08-01', model_key: 'claude-opus-5-5', cost_type: 'tokens', token_type: 'cache_creation.ephemeral_1h_input_tokens', description: 'Claude Opus 5.5 Usage - Input Tokens', amount_usd: '1.237891', bucket_seconds: 86400 },
+      { day: '08-01', model_key: 'claude-opus-5-5', cost_type: 'tokens', token_type: 'cache_creation.ephemeral_1h_input_tokens', description: 'Claude Opus 5.5 Usage - Input Tokens', amount_usd: '1.23789120', bucket_seconds: 86400 },
     ]);
 
     await importWith(apiCostReportParser, 'analytics.json', fixture('analytics-cost.json'));
     expect((await costs()).slice(1)).toEqual([
-      { day: '09-01', model_key: 'claude-opus-5', cost_type: 'web_search', token_type: null, description: null, amount_usd: '12.500000', bucket_seconds: 2592000 },
-      { day: '09-01', model_key: 'claude-opus-5', cost_type: 'tokens', token_type: 'cache_read_input_tokens', description: null, amount_usd: '412.800000', bucket_seconds: 2592000 },
-      { day: '09-01', model_key: 'claude-opus-5', cost_type: 'tokens', token_type: 'output_tokens', description: null, amount_usd: '987.654321', bucket_seconds: 2592000 },
+      { day: '09-01', model_key: 'claude-opus-5', cost_type: 'web_search', token_type: null, description: null, amount_usd: '12.50000000', bucket_seconds: 2592000 },
+      { day: '09-01', model_key: 'claude-opus-5', cost_type: 'tokens', token_type: 'cache_read_input_tokens', description: null, amount_usd: '412.80000000', bucket_seconds: 2592000 },
+      { day: '09-01', model_key: 'claude-opus-5', cost_type: 'tokens', token_type: 'output_tokens', description: null, amount_usd: '987.65432100', bucket_seconds: 2592000 },
     ]);
   });
 
@@ -349,7 +437,7 @@ describe('API cost reports in the database', () => {
     await importWith(apiUsageReportParser, 'usage.json', report(bucket(1, [usageResult('claude-sonnet-4-6', 1000)]), bucket(2, [usageResult('claude-sonnet-4-6', 2000)])));
     await importWith(apiCostReportParser, 'cost-1.json', report(bucket(1, [costResult('100')]), bucket(2, [costResult('200')]), bucket(3, [costResult('300')])));
     const total = async () => (await rows<{ total: string }>(`SELECT sum(amount_usd)::text AS total FROM reported_costs`))[0].total;
-    expect(await total()).toBe('6.000000');
+    expect(await total()).toBe('6.00000000');
 
     const revised = await importWith(apiCostReportParser, 'cost-2.json', report(bucket(2, [costResult('250')]), bucket(3, [costResult('300'), costResult('50', { token_type: 'uncached_input_tokens' })]), bucket(4, [])));
     // 2 April is stated differently and replaced; the 3.00 of 3 April is stated as stored and stays
@@ -357,7 +445,7 @@ describe('API cost reports in the database', () => {
     expect(revised.preview.costRows).toMatchObject({ total: 3, new: 2, duplicate: 1 });
     expect(revised.result.replaced).toEqual({ usageRows: 0, costRows: 1 });
     // 1.00 + 2.50 + 3.00 + 0.50
-    expect(await total()).toBe('7.000000');
+    expect(await total()).toBe('7.00000000');
     expect(await count('reported_costs')).toBe(4);
     // the two kinds of report are separate sources: the usage rows are untouched
     expect(await inputPerDay()).toEqual({ '04-01': 1000, '04-02': 2000 });
@@ -374,9 +462,9 @@ describe('API cost reports in the database', () => {
     const second = await importWith(consoleCsvParser, 'claude_api_cost_2026_04_01_to_2026_04_01.csv', csv);
     expect(second.result.replaced.costRows).toBe(1);
     expect(await costs()).toEqual([
-      { day: '04-01', model_key: null, cost_type: 'web_search', token_type: null, description: null, amount_usd: '0.020000', bucket_seconds: 86400 },
-      { day: '04-01', model_key: 'claude-sonnet-4-6', cost_type: 'tokens', token_type: 'output_tokens', description: null, amount_usd: '0.350000', bucket_seconds: 86400 },
-      { day: '04-01', model_key: 'claude-sonnet-4-6', cost_type: 'tokens', token_type: 'output_tokens', description: null, amount_usd: '0.700000', bucket_seconds: 86400 },
+      { day: '04-01', model_key: null, cost_type: 'web_search', token_type: null, description: null, amount_usd: '0.02000000', bucket_seconds: 86400 },
+      { day: '04-01', model_key: 'claude-sonnet-4-6', cost_type: 'tokens', token_type: 'output_tokens', description: null, amount_usd: '0.35000000', bucket_seconds: 86400 },
+      { day: '04-01', model_key: 'claude-sonnet-4-6', cost_type: 'tokens', token_type: 'output_tokens', description: null, amount_usd: '0.70000000', bucket_seconds: 86400 },
     ]);
     expect(await count('data_sources')).toBe(1);
   });

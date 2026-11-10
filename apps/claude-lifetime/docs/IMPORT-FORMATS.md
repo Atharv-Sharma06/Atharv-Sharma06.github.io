@@ -132,18 +132,36 @@ accounts.
 
 **Read from it:** per time bucket the uncached input, cache-read, cache-write (5-minute
 and 1-hour) and output tokens, web searches, and the dimensions the report was grouped by
-(model, service tier, context window, speed). Cost reports give billed amounts, which are
-stored as actual spend.
+(model, service tier, context window, speed, inference geography). Cost reports give
+billed amounts, which are stored as actual spend, to the hundred-millionth of a dollar.
 
 **Good to know**
 
 - A report restates its period: rows already stored for the same source and period are
   replaced where the new report states them differently or no longer lists them, not
   added to. Importing the same report twice changes nothing.
+- Each file speaks for its own period. Files of January and of March that are imported
+  together leave what is stored for February alone. A Console export speaks for the
+  stretch from its first row to its last, and an export with hourly rows for the whole
+  UTC days it touches.
+- Pages of the older usage and cost report endpoints can be imported together or one
+  at a time: each page is a complete statement of its days. If a page is missing, the
+  import says from when, and the time of that page is left as it is.
+- Pages of the analytics endpoints must be selected together. Their rows are ranked by
+  size, not by date, so a page on its own is not a period; a selection that lacks the
+  last page is refused.
+- The same period under two groupings in one import (for example not broken down, and
+  by model) is refused: added up, the usage would be counted twice. Import the more
+  detailed files, or one file at a time.
+- Reports that were filtered differently (one workspace, one API key) and grouped
+  alike look the same row for row, so they replace each other, also when they are
+  selected together. Request one report grouped by workspace or API key instead.
 - A report must cover whole stored periods. An hourly report that starts or ends in the
   middle of a day that is already stored as one daily total is refused, with the day
-  named: adding it would count that time twice. Export it from midnight to midnight
-  (UTC), or delete the earlier import first.
+  named: adding it would count that time twice. A report from the older endpoints that
+  runs from midnight to midnight (UTC) always fits. The analytics endpoints leave out
+  hours without usage, so their hourly report of a day can be refused although it
+  covers the day; delete the earlier import of that day first.
 - Rows that a later report replaced do not come back when that report is deleted.
   Import the earlier file again if you need them.
 - Group the report by model. Rows of an ungrouped report have no model and cannot be

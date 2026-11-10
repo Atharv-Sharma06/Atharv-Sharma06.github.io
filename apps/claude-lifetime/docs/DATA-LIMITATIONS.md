@@ -69,13 +69,17 @@ would be counted twice; leave one of the two sources out of the totals in Settin
 | Who can get them | The Admin API needs an organization admin key and is **not available to individual accounts**. The Claude Console's Usage and Cost pages can be exported as CSV. |
 
 A later report for the same period replaces the earlier rows where it states them
-differently or no longer lists them; it is not added. Reports filtered differently (one
-workspace, one API key) for the same period therefore replace each other. Import
-unfiltered reports, or select the files together in one import. A report cannot replace
-part of a stored total: an hourly report that begins in the middle of a day stored as
-one daily row is refused rather than counted on top of it. Rows that were replaced do
-not return when the replacing import is deleted; the import history notes this on both
-imports.
+differently or no longer lists them; it is not added. Each file speaks for its own
+period, so files of two separate months leave the time between them alone. Reports
+filtered differently (one workspace, one API key) for the same period replace each
+other, also when they are selected together, because a file does not say what it was
+filtered by: request one report grouped by workspace or API key instead. The same
+period under two groupings in one import is refused, since adding the two up would
+double it. A report cannot replace part of a stored total: an hourly report that begins
+in the middle of a day stored as one daily row is refused rather than counted on top of
+it. Pages of the analytics endpoints must be selected together: their rows are ranked
+by size, so one page is not a period. Rows that were replaced do not return when the
+replacing import is deleted; the import history notes this on both imports.
 
 ## CSV, JSON and manual entries
 

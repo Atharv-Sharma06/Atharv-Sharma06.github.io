@@ -397,7 +397,7 @@ model ReportedCost {
   costType      String?  @map("cost_type")
   tokenType     String?  @map("token_type")
   description   String?
-  amountUsd     Decimal  @map("amount_usd") @db.Decimal(18, 6)
+  amountUsd     Decimal  @map("amount_usd") @db.Decimal(20, 8)
   dedupKey      String   @map("dedup_key")
 
   user   User          @relation(fields: [userId], references: [id], onDelete: Cascade)

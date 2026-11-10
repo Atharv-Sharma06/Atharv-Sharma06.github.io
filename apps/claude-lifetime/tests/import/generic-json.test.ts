@@ -54,7 +54,7 @@ describe('generic JSON: the documented shape', () => {
       missingFields: [],
       warnings: [],
     });
-    expect(parsed.replaceRange).toBeUndefined();
+    expect(parsed.replaceRanges).toBeUndefined();
     expect(parsed.stats).toMatchObject({ rows: 4, tokens: 85010, conversations: 2, confidence: 'estimated', layout: 'document' });
   });
 
@@ -251,6 +251,245 @@ describe('generic JSON: files that are something else', () => {
     const { parsed, out } = await parse(cut);
     expect(out.usage.map((u) => u.dedupKey)).toEqual(['generic:a', 'generic:b']);
     expect(warning(parsed, 'truncated_file')).toMatchObject({ count: 1 });
+  });
+
+  it('reads a version written as text, and says plainly what is wrong with any other', async () => {
+    for (const version of ['1', ' 1 ', '1.0', 1.0]) {
+      expect((await parse(wrap([record()], { version }))).out.usage, JSON.stringify(version)).toHaveLength(1);
+    }
+    for (const version of [2, '2']) {
+      const newer = await errorOf(parse(wrap([record()], { version })));
+      expect(newer.code, JSON.stringify(version)).toBe('unsupported_version');
+      expect(newer.message).toBe('The file is version 2 of the usage format; this version of the app reads version 1. Update the app, or export the data as version 1.');
+    }
+    // No file is told to update the app in order to read the version the app reads, or a version that does not exist.
+    for (const version of ['one', '', null, true, 0, -1, { major: 1 }]) {
+      const error = await errorOf(parse(wrap([record()], { version })));
+      expect(error.code, JSON.stringify(version)).toBe('unsupported_version');
+      expect(error.message, JSON.stringify(version)).toMatch(/^The file gives its "version" as .+, which is not a version of the usage format\. Write "version": 1, or leave the field out\.$/);
+    }
+    expect((await errorOf(parse(wrap([record()], { version: 'one' })))).message).toContain('as "one",');
+  });
+
+  it('refuses a wrapped file whose "records" are not a list, and names them', async () => {
+    const keyed = await errorOf(parse(JSON.stringify({ format: 'claude-lifetime/usage', version: 1, records: { a: record() } })));
+    expect(keyed.code).toBe('invalid_records');
+    expect(keyed.message).toMatch(/^"records" in "usage-1\.json" is an object, not a list\. The usage records have to be a list in square brackets, for example "records": \[\{"timestamp": /);
+    // It is not read as a single record that lacks its timestamp.
+    expect(keyed.message).not.toMatch(/timestamp is missing|could be imported/);
+
+    const missing = await errorOf(parse(JSON.stringify({ format: 'claude-lifetime/usage', version: 1 })));
+    expect(missing.code).toBe('invalid_records');
+    expect(missing.message).toMatch(/^"usage-1\.json" is marked as a "claude-lifetime\/usage" file but has no "records"\. The usage records have to be a list under "records", for example /);
+
+    const text = await errorOf(parse(JSON.stringify({ records: 'none' })));
+    expect(text.code).toBe('invalid_records');
+    expect(text.message).toMatch(/^"records" in "usage-1\.json" is a string, not a list\./);
+
+    // The format is looked at first: a file of another format is not told to repair its records.
+    expect(await codeOf(parse(JSON.stringify({ format: 'somebody-else/v2', records: {} })))).toBe('wrong_format');
+
+    // A record may have a field of that name. It is ignored like every other field the format does not know.
+    const { parsed, out } = await parse([JSON.stringify(record({ records: 3 })), JSON.stringify(record({ records: 4, input_tokens: 2 }))].join('\n'));
+    expect(out.usage.map((u) => u.inputTokens)).toEqual([100, 2]);
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  it('explains an import without usable records by what kept them out, not by a note about the file', async () => {
+    // The first file was cut off inside its first record. The record of the second file has no timestamp.
+    const error = await errorOf(parse(['[{"timestamp": "2026-03-0', JSON.stringify([{ model: 'claude-opus-4-6', input_tokens: 5 }])]));
+    expect(error.code).toBe('no_valid_rows');
+    expect(error.message).toMatch(/^None of the 1 row could be imported\. Rows whose timestamp is missing or cannot be read were skipped\./);
+    expect(error.message).toMatch(/For example: \(empty\) \(record 1\)\./);
+    expect(error.message).not.toMatch(/ends unexpectedly/);
+  });
+});
+
+describe('generic JSON: the source a file names for itself', () => {
+  const sourced = (source: Record<string, unknown> | null, records: unknown[]) => wrap(records, source === null ? {} : { source });
+  // Two proxies, each numbering its requests from 1.
+  const eu = sourced({ label: 'EU proxy', ref: 'proxy-eu-1' }, [record({ id: 'req-0001', input_tokens: 1000 }), record({ id: 'req-0002', input_tokens: 2000 })]);
+  const us = sourced({ label: 'US proxy', ref: 'proxy-us-1' }, [
+    record({ id: 'req-0001', input_tokens: 400 }),
+    record({ id: 'req-0002', input_tokens: 500 }),
+    record({ id: 'req-0003', input_tokens: 600 }),
+  ]);
+  const bare = JSON.stringify([record({ id: 'req-0004', input_tokens: 4000 })]);
+
+  it('refuses files that name different sources, names both and says what to do', async () => {
+    const error = await errorOf(parse([eu, us]));
+    expect(error.code).toBe('mixed_sources');
+    expect(error.message).toBe(
+      '"usage-2.json" says its records come from "US proxy" (reference "proxy-us-1"), but the records read before it come from "EU proxy" (reference "proxy-eu-1"). ' +
+        'One import is filed under one source. Import the files one at a time, so that each is filed under its own source.',
+    );
+    // Whichever file comes first, the second is not filed under the first one's source.
+    const reversed = await errorOf(parse([us, eu]));
+    expect(reversed.code).toBe('mixed_sources');
+    expect(reversed.message).toMatch(/^"usage-2\.json" says its records come from "EU proxy" \(reference "proxy-eu-1"\), but the records read before it come from "US proxy" \(reference "proxy-us-1"\)\./);
+
+    // Records without ids do not collide, and are still not filed under another file's source.
+    const withoutIds = (text: string) => text.replace(/"id":"req-\d+",?/g, '').replace(/,\}/g, '}');
+    expect(await codeOf(parse([withoutIds(eu), withoutIds(us)]))).toBe('mixed_sources');
+
+    // One at a time, each file keeps its own source and every one of its records.
+    for (const [text, label, ref, count] of [[eu, 'EU proxy', 'proxy-eu-1', 2], [us, 'US proxy', 'proxy-us-1', 3]] as const) {
+      const { parsed, out } = await parse(text);
+      expect(parsed.source).toEqual({ kind: 'generic_json', label, externalRef: ref });
+      expect(out.usage.map((u) => u.dedupKey)).toEqual(Array.from({ length: count }, (_, i) => `generic:${ref}:req-000${i + 1}`));
+      expect(parsed.warnings).toEqual([]);
+    }
+  });
+
+  it('reads files together that name the same source, or none', async () => {
+    const more = sourced({ label: 'EU proxy', ref: 'proxy-eu-1' }, [record({ id: 'req-0003', input_tokens: 3000 })]);
+    const referenceOnly = sourced({ ref: 'proxy-eu-1' }, [record({ id: 'req-0005', input_tokens: 5000 })]);
+    const together = await parse([eu, more, bare, referenceOnly]);
+    expect(together.parsed.source).toEqual({ kind: 'generic_json', label: 'EU proxy', externalRef: 'proxy-eu-1' });
+    expect(together.out.usage.map((u) => u.dedupKey)).toEqual([1, 2, 3, 4, 5].map((n) => `generic:proxy-eu-1:req-000${n}`));
+    expect(together.parsed.warnings).toEqual([]);
+
+    // Files that name no source are the unnamed source, as before.
+    const unnamed = await parse([bare, JSON.stringify([record({ id: 'req-0009' })])]);
+    expect(unnamed.parsed.source).toEqual({ kind: 'generic_json', label: 'Custom usage data', externalRef: '' });
+    expect(unnamed.out.usage.map((u) => u.dedupKey)).toEqual(['generic:req-0004', 'generic:req-0009']);
+
+    // A name for records that have no reference can come late: nothing is filed differently because of it.
+    const namedLate = await parse([bare, sourced({ label: 'Proxy' }, [record({ id: 'req-0006' })])]);
+    expect(namedLate.parsed.source).toEqual({ kind: 'generic_json', label: 'Proxy', externalRef: '' });
+    expect(namedLate.out.usage.map((u) => u.dedupKey)).toEqual(['generic:req-0004', 'generic:req-0006']);
+  });
+
+  it('refuses a source that is named after records were read without one', async () => {
+    const error = await errorOf(parse([bare, us]));
+    expect(error.code).toBe('mixed_sources');
+    expect(error.message).toBe(
+      '"usage-2.json" says its records come from "US proxy" (reference "proxy-us-1"), but the records read before it name no source. ' +
+        'One import is filed under one source. Import the files one at a time, so that each is filed under its own source.',
+    );
+  });
+
+  it('refuses a JSON Lines file whose parts name different sources', async () => {
+    // Plain records first, then a wrapped document that names a source.
+    const error = await errorOf(parse([JSON.stringify(record({ id: 'a' })), us].join('\n')));
+    expect(error.code).toBe('mixed_sources');
+    expect(error.message).toBe(
+      '"usage-1.json" holds records of more than one source: some say they come from "US proxy" (reference "proxy-us-1"), but the records before them name no source. ' +
+        'One import is filed under one source. Save the records of each source in a file of their own and import the files one at a time, so that each is filed under its own source.',
+    );
+    // Two wrapped documents, one per line.
+    const twoDocuments = await errorOf(parse([eu, us].join('\n')));
+    expect(twoDocuments.code).toBe('mixed_sources');
+    expect(twoDocuments.message).toMatch(/some say they come from "US proxy" \(reference "proxy-us-1"\), but the records before them come from "EU proxy" \(reference "proxy-eu-1"\)\./);
+
+    // Documents of one source in one file are read as before.
+    const sameSource = await parse([eu, sourced({ label: 'EU proxy', ref: 'proxy-eu-1' }, [record({ id: 'req-0003' })])].join('\n'));
+    expect(sameSource.out.usage.map((u) => u.dedupKey)).toEqual([1, 2, 3].map((n) => `generic:proxy-eu-1:req-000${n}`));
+  });
+
+  it('refuses another name for the same reference, and says that the two are one source', async () => {
+    const renamed = sourced({ label: 'EU proxy (new)', ref: 'proxy-eu-1' }, [record({ id: 'req-0003' })]);
+    const error = await errorOf(parse([eu, renamed]));
+    expect(error.code).toBe('mixed_sources');
+    expect(error.message).toBe(
+      '"usage-2.json" says its records come from "EU proxy (new)" (reference "proxy-eu-1"), but the records read before it come from "EU proxy" (reference "proxy-eu-1"). ' +
+        'One import is filed under one source. Import the files one at a time. Files with the same "ref", or without one, are stored as one source, shown under the name that was imported last; ' +
+        'give each its own "ref" to keep them apart.',
+    );
+    const labelsOnly = await errorOf(parse([sourced({ label: 'Laptop' }, [record({ id: '1' })]), sourced({ label: 'Server' }, [record({ id: '2' })])]));
+    expect(labelsOnly.code).toBe('mixed_sources');
+    expect(labelsOnly.message).toMatch(/^"usage-2\.json" says its records come from "Server" \(no reference\), but the records read before it come from "Laptop" \(no reference\)\./);
+  });
+
+  it('takes label and reference from the same document when one without records comes first', async () => {
+    const header = sourced({ label: 'Header', ref: 'header-ref' }, []);
+    // Nothing was filed under the first document's source, so the second names the source: its label and its reference.
+    expect((await parse([header, us])).parsed.source).toEqual({ kind: 'generic_json', label: 'US proxy', externalRef: 'proxy-us-1' });
+    // A reference without a name does not get the name of the document before it.
+    expect((await parse([header, sourced({ ref: 'other' }, [record({ id: 'a' })])])).parsed.source).toEqual({ kind: 'generic_json', label: 'Custom usage data', externalRef: 'other' });
+
+    // A header line followed by plain records, as a tool that streams its export writes them.
+    const stream = await parse([sourced({ label: 'Stream', ref: 'stream-1' }, []), JSON.stringify(record({ id: 'a' })), JSON.stringify(record({ id: 'b' }))].join('\n'));
+    expect(stream.parsed.source).toEqual({ kind: 'generic_json', label: 'Stream', externalRef: 'stream-1' });
+    expect(stream.out.usage.map((u) => u.dedupKey)).toEqual(['generic:stream-1:a', 'generic:stream-1:b']);
+  });
+
+  it('files everything under the source chosen in the UI, whatever the files say', async () => {
+    const { parsed, out } = await parse([eu, us], { sourceLabel: 'All proxies', sourceRef: 'all-proxies' });
+    expect(parsed.source).toEqual({ kind: 'generic_json', label: 'All proxies', externalRef: 'all-proxies' });
+    expect(out.usage.map((u) => u.dedupKey)).toEqual(['generic:all-proxies:req-0001', 'generic:all-proxies:req-0002', 'generic:all-proxies:req-0003']);
+    expect(warning(parsed, 'duplicate_ids')).toMatchObject({ count: 2 });
+  });
+});
+
+describe('generic JSON: ids written as numbers', () => {
+  it('does not use a number that cannot be read exactly as an id, and keeps the record', async () => {
+    // 64-bit ids written as JSON numbers. JSON.parse keeps 53 bits, so all three arrive as 1234567890123456800.
+    const text = `[{"timestamp":"2026-03-01T09:15:00Z","input_tokens":100,"id":1234567890123456789},
+      {"timestamp":"2026-03-01T09:15:01Z","input_tokens":200,"id":1234567890123456790},
+      {"timestamp":"2026-03-01T09:15:02Z","input_tokens":300,"id":1234567890123456791}]`;
+    const { parsed, out } = await parse(text);
+    expect(out.usage.map((u) => u.inputTokens)).toEqual([100, 200, 300]);
+    // Each record is identified by its content, like a record without an id.
+    for (const u of out.usage) expect(u.dedupKey).toMatch(/^generic:[0-9a-f]{64}$/);
+    expect(new Set(out.usage.map((u) => u.dedupKey)).size).toBe(3);
+    expect(parsed.recordsSkipped).toBe(0);
+    expect(parsed.warnings.map((w) => w.code)).toEqual(['inexact_numeric_id']);
+    const note = warning(parsed, 'inexact_numeric_id');
+    expect(note).toMatchObject({ count: 3, sample: 'id read as 1234567890123456800 (record 1)' });
+    expect(note?.message).toMatch(/were not used/);
+    expect(note?.message).toMatch(/Write ids of this size as text, in quotation marks\.$/);
+
+    // The same keys every time the file is read, so importing it again adds nothing.
+    expect((await parse(text)).out.usage.map((u) => u.dedupKey)).toEqual(out.usage.map((u) => u.dedupKey));
+
+    // Written as text, the same ids are exact and are used.
+    const asText = await parse(text.replace(/"id":(\d+)/g, '"id":"$1"'));
+    expect(asText.out.usage.map((u) => u.dedupKey)).toEqual(['generic:1234567890123456789', 'generic:1234567890123456790', 'generic:1234567890123456791']);
+    expect(asText.parsed.warnings).toEqual([]);
+  });
+
+  it('leaves such a conversation id out instead of merging conversations', async () => {
+    const text = `[{"timestamp":"2026-03-01T09:15:00Z","input_tokens":100,"conversation_id":12345678901234567890},
+      {"timestamp":"2026-03-01T09:15:01Z","input_tokens":200,"conversation_id":12345678901234567891},
+      {"timestamp":"2026-03-01T09:15:02Z","input_tokens":300,"conversation_id":7,"id":9007199254740991},
+      {"timestamp":"2026-03-01T09:15:03Z","input_tokens":400,"conversation_id":12345678901234567892,"id":1.5}]`;
+    const { parsed, out } = await parse(text);
+    expect(out.usage.map((u) => [u.inputTokens, u.conversationKey])).toEqual([[100, null], [200, null], [300, 'generic::7'], [400, null]]);
+    // Whole numbers that JSON holds exactly are ids as before.
+    expect(out.usage[2].dedupKey).toBe('generic:9007199254740991');
+    expect(out.usage[3].dedupKey).toMatch(/^generic:[0-9a-f]{64}$/);
+    expect(out.conversations.map((c) => c.externalId)).toEqual(['7']);
+    expect(parsed.recordsSkipped).toBe(0);
+    // One warning for both kinds of id; a record with two such ids counts once.
+    expect(parsed.warnings.map((w) => w.code)).toEqual(['inexact_numeric_id']);
+    expect(warning(parsed, 'inexact_numeric_id')).toMatchObject({ count: 3, sample: 'conversation_id read as 12345678901234567000 (record 1)' });
+  });
+});
+
+describe('generic JSON: advice in warnings', () => {
+  it('is worded for a JSON file, which has no columns and no column mapping', async () => {
+    const { parsed } = await parse(
+      JSON.stringify([
+        record({ id: 'a' }),
+        record({ id: 'a', input_tokens: 6 }),
+        record({ input_tokens: 7 }),
+        record({ input_tokens: 7 }),
+        record({ id: 'b', timestamp: '1999-01-01' }),
+        record({ id: 'c', total_tokens: 999 }),
+      ]),
+    );
+    expect(parsed.warnings.map((w) => w.code).sort()).toEqual(['duplicate_ids', 'duplicate_rows', 'timestamp_out_of_range', 'total_mismatch']);
+    for (const w of parsed.warnings) expect(w.message, w.code).not.toMatch(/column|mapping/i);
+    expect(warning(parsed, 'duplicate_ids')?.message).toBe(
+      'Rows whose id already occurred earlier in the import were skipped, so each id is counted once. If "id" does not identify single records, leave it out of the records.',
+    );
+    expect(warning(parsed, 'duplicate_rows')?.message).toMatch(/give each one an "id" of its own\.$/);
+
+    const manyModels = await errorOf(parse(JSON.stringify(Array.from({ length: 250 }, (_, i) => record({ model: `customer-${i}`, id: `r${i}` })))));
+    expect(manyModels.code).toBe('too_many_models');
+    expect(manyModels.message).toMatch(/^The "model" field holds more than 200 different values/);
+    expect(manyModels.message).not.toMatch(/column|mapping/i);
   });
 });
 

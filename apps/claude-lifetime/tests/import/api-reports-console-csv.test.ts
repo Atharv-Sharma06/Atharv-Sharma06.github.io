@@ -41,7 +41,8 @@ describe('Claude Console usage export', () => {
       // "200k - 1M" on Claude Sonnet 4.5 is long-context usage
       ['2026-07-06T00:00:00.000Z', 'claude-sonnet-4-5', 'long_context', 400000, 0, 0, 0, 9000, 0],
       ['2026-07-08T00:00:00.000Z', 'claude-opus-4-8', 'batch', 7000, 0, 0, 0, 800, 0],
-      ['2026-07-08T00:00:00.000Z', 'claude-opus-4-8', 'fast', 3000, 0, 0, 0, 500, 0],
+      // fast mode with inference kept in the US: priced at 1.1 times the fast-mode price
+      ['2026-07-08T00:00:00.000Z', 'claude-opus-4-8', 'fast_us', 3000, 0, 0, 0, 500, 0],
     ]);
     expect(out.usage.every((u) => u.bucketSeconds === 86400 && u.confidence === 'exact' && u.requestCount === 0 && u.conversationKey === null)).toBe(true);
     expect(new Set(out.usage.map((u) => u.dedupKey)).size).toBe(6);
@@ -59,12 +60,9 @@ describe('Claude Console usage export', () => {
       recordsSkipped: 0,
       missingFields: [],
       // 5 July up to the end of 8 July
-      replaceRange: { start: '2026-07-05T00:00:00.000Z', end: '2026-07-09T00:00:00.000Z' },
+      replaceRanges: [{ start: '2026-07-05T00:00:00.000Z', end: '2026-07-09T00:00:00.000Z' }],
     });
-    expect(parsed.warnings.map((w) => [w.code, w.count])).toEqual([
-      ['possible_overlap_claude_code', 1],
-      ['us_inference_premium', 1],
-    ]);
+    expect(parsed.warnings.map((w) => [w.code, w.count])).toEqual([['possible_overlap_claude_code', 1]]);
   });
 
   it('reads hourly exports, CRLF line ends and a byte order mark', async () => {
@@ -74,7 +72,9 @@ describe('Claude Console usage export', () => {
       ['2026-07-04T11:00:00.000Z', 3600, 'standard', 31000000],
       ['2026-07-04T12:00:00.000Z', 3600, 'standard', 0],
     ]);
-    expect(parsed.replaceRange).toEqual({ start: '2026-07-04T11:00:00.000Z', end: '2026-07-04T13:00:00.000Z' });
+    // The Console exports hours one day at a time and leaves out hours without usage, so the file speaks
+    // for the whole UTC day: only then can it replace that day where it is stored as one daily total.
+    expect(parsed.replaceRanges).toEqual([{ start: '2026-07-04T00:00:00.000Z', end: '2026-07-05T00:00:00.000Z' }]);
     expect(parsed.recordsSeen).toBe(2);
   });
 
@@ -109,13 +109,36 @@ describe('Claude Console usage export', () => {
     expect(twice.parsed.recordsSkipped).toBe(2);
     expect(twice.parsed.warnings.find((w) => w.code === 'duplicate_rows')).toMatchObject({ count: 2 });
 
-    // two months in one import
+  });
+
+  it('speaks for each file on its own: the time between two files is not part of the import', async () => {
     const july = fixture('console-usage.csv').toString('utf8');
     const august = `${USAGE_HEADER}\n2026-08-01,claude-sonnet-5,k,Default,standard,≤ 200k,7,0,0,0,1,0,global,\n`;
     const both = await parse([july, august]);
     expect(both.out.usage).toHaveLength(7);
-    expect(both.parsed.replaceRange).toEqual({ start: '2026-07-05T00:00:00.000Z', end: '2026-08-02T00:00:00.000Z' });
+    // July's file has rows from the 5th to the 8th, August's on the 1st: what is stored for 9 to 31 July stays
+    expect(both.parsed.replaceRanges).toEqual([
+      { start: '2026-07-05T00:00:00.000Z', end: '2026-07-09T00:00:00.000Z' },
+      { start: '2026-08-01T00:00:00.000Z', end: '2026-08-02T00:00:00.000Z' },
+    ]);
     expect(both.parsed.fileName).toBe('2 files');
+
+    // a day without usage inside one file is covered by it; files that meet or overlap are one stretch
+    const gap = `${USAGE_HEADER}\n2026-07-01,claude-sonnet-5,k,Default,standard,≤ 200k,7,0,0,0,1,0,global,\n2026-07-04,claude-sonnet-5,k,Default,standard,≤ 200k,7,0,0,0,1,0,global,\n`;
+    expect((await parse([gap, july])).parsed.replaceRanges).toEqual([{ start: '2026-07-01T00:00:00.000Z', end: '2026-07-09T00:00:00.000Z' }]);
+  });
+
+  it('refuses an old and a new export of the same days in one import: they are the same usage under two sets of columns', async () => {
+    // an export made before the context_window, inference_geo and speed columns existed
+    const old = 'usage_date_utc,model_version,api_key,workspace,usage_type,usage_input_tokens_no_cache,usage_input_tokens_cache_write_5m,usage_input_tokens_cache_write_1h,usage_input_tokens_cache_read,usage_output_tokens,web_search_count';
+    const before = `${old}\n2026-07-05,claude-sonnet-5,k,Default,standard,300,0,0,0,30,0\n`;
+    const after = `${USAGE_HEADER}\n2026-07-05,claude-sonnet-5,k,Default,standard,≤ 200k,100,0,0,0,10,0,global,\n2026-07-05,claude-sonnet-5,k,Default,standard,200k - 1M,200,0,0,0,20,0,global,\n`;
+    const error = await parse([before, after]).catch((e) => e);
+    expect(error.code).toBe('mixed_grouping');
+    expect(error.message).toMatch(/same usage twice/);
+    // each on its own is fine
+    expect((await parse(before)).out.usage).toHaveLength(1);
+    expect((await parse(after)).out.usage).toHaveLength(2);
   });
 
   it('refuses a daily and an hourly export of the same day in one import', async () => {
@@ -182,7 +205,7 @@ describe('Claude Console cost export', () => {
       contentHash: createHash('sha256').update(bytes).digest('hex'),
       recordsSeen: 7,
       recordsSkipped: 0,
-      replaceRange: { start: '2026-02-12T00:00:00.000Z', end: '2026-02-15T00:00:00.000Z' },
+      replaceRanges: [{ start: '2026-02-12T00:00:00.000Z', end: '2026-02-15T00:00:00.000Z' }],
       warnings: [],
     });
     expect(parsed.stats.totalUsd).toBe('13');
@@ -215,7 +238,7 @@ describe('Console CSV detection and fall-through', () => {
   it('hands any other CSV file to the generic importer', async () => {
     const { parsed, out } = await parse('timestamp,model,input_tokens,output_tokens\n2026-03-01T10:00:00Z,claude-sonnet-4-6,1200,300\n', { options: { now: Date.UTC(2026, 10, 10) } });
     expect(parsed).toMatchObject({ format: 'generic/csv', source: { kind: 'generic_csv', label: 'Custom usage data', externalRef: '' } });
-    expect(parsed.replaceRange).toBeUndefined();
+    expect(parsed.replaceRanges).toBeUndefined();
     expect(out.usage).toHaveLength(1);
     expect(out.usage[0]).toMatchObject({ confidence: 'estimated', modelKey: 'claude-sonnet-4-6', inputTokens: 1200, outputTokens: 300 });
   });

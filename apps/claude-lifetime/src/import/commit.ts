@@ -12,8 +12,12 @@ import { stagingToken } from './staging';
  *  - messages           unique per (conversation, external_id); already-known messages
  *                       are skipped, so importing a file twice adds nothing
  *  - usage / cost rows  unique per (user, dedup_key)
- *  - restated reports   (ParsedImport.replaceRange) replace the same source's rows
- *                       inside the reported time range instead of adding to them.
+ *  - restated reports   (ParsedImport.replaceRanges) replace the same source's rows
+ *                       inside the reported time ranges instead of adding to them.
+ *  - a file read again  A custom CSV or JSON file has no ids of its own for rows, so a
+ *                       row is known by what was read from it. The same file imported
+ *                       into the same source again, with other columns or settings,
+ *                       replaces what its earlier import stored instead of adding to it.
  *                       Rows the new report states exactly as stored stay where they
  *                       are; a stored total that reaches beyond the range cannot be
  *                       replaced in part, and the import is refused
@@ -39,8 +43,10 @@ export interface ImportPreview {
   requests: { new: number; duplicate: number } | null;
   /** Prompts the person sent in Claude Code, counted the same way. They are not model requests. */
   prompts: { new: number; duplicate: number } | null;
-  /** Stored rows that will be replaced because the input restates their time range with other values. */
+  /** Stored rows that will be replaced: the input restates their time range with other values, or reads the same file differently. */
   replaced: { usageRows: number; costRows: number; tokens: number } | null;
+  /** The same file was imported into this source before and is read differently now; `replaced` counts the rows of that import that go. */
+  rereadsEarlierImport: boolean;
   /** Tokens this import would add (processed basis). */
   tokens: { exact: number; estimated: number };
   dateRange: { start: string | null; end: string | null };
@@ -113,6 +119,35 @@ const reaches = (x: string, start: string, end: string) =>
   `(${x}.occurred_at < ${end} AND CASE WHEN ${x}.bucket_seconds = 0 THEN ${x}.occurred_at >= ${start}
                                         ELSE ${x}.occurred_at + make_interval(secs => ${x}.bucket_seconds) > ${start} END)`;
 
+/** The same for a set of ranges, given as two parameters that hold their starts and their ends. */
+const eachRange = (starts: string, ends: string) => `unnest(${starts}::timestamptz[], ${ends}::timestamptz[]) AS rg(s, e)`;
+const insideAny = (x: string, starts: string, ends: string) => `EXISTS (SELECT 1 FROM ${eachRange(starts, ends)} WHERE ${inside(x, 'rg.s', 'rg.e')})`;
+const reachesAny = (x: string, starts: string, ends: string) => `EXISTS (SELECT 1 FROM ${eachRange(starts, ends)} WHERE ${reaches(x, 'rg.s', 'rg.e')})`;
+
+/**
+ * Kinds of source whose rows carry no identity of their own: a row is known by a hash of
+ * what was read from it. The same file read with other columns, another price tier or
+ * another declared exactness therefore yields other rows, which must take the place of
+ * the earlier ones rather than stand next to them.
+ */
+const REREAD_KINDS = new Set(['generic_csv', 'generic_json']);
+
+/** Imports of this very file (by its SHA-256) that the source already holds. */
+async function earlierReadings(db: SqlExecutor, userId: number, sourceId: number | null, parsed: ParsedImport): Promise<number[]> {
+  if (sourceId === null || parsed.contentHash === null || !REREAD_KINDS.has(parsed.source.kind)) return [];
+  const { rows } = await db.query<{ id: number }>(
+    `SELECT id FROM import_batches WHERE user_id = $1 AND source_id = $2 AND content_hash = $3 ORDER BY id`,
+    [userId, sourceId, parsed.contentHash],
+  );
+  return rows.map((r) => r.id);
+}
+
+/** The ranges an import restates, as the two parameters the helpers above take. Null when it restates none. */
+function restatedRanges(parsed: ParsedImport): { starts: string[]; ends: string[] } | null {
+  const ranges = parsed.replaceRanges ?? [];
+  return ranges.length === 0 ? null : { starts: ranges.map((r) => r.start), ends: ranges.map((r) => r.end) };
+}
+
 function describeTotal(seconds: number, at: string): string {
   const day = at.slice(0, 10);
   if (seconds === 86_400) return `the daily total for ${day} (UTC)`;
@@ -127,12 +162,12 @@ function describeTotal(seconds: number, at: string): string {
  * that time twice, and deleting it loses the morning. So such an import is refused,
  * with the row in the way named.
  */
-async function assertRangeReplaceable(db: SqlExecutor, sourceId: number, range: { start: string; end: string }): Promise<void> {
-  const args = [sourceId, range.start, range.end];
+async function assertRangesReplaceable(db: SqlExecutor, sourceId: number, ranges: { starts: string[]; ends: string[] }): Promise<void> {
+  const args = [sourceId, ranges.starts, ranges.ends];
   const cut = (table: string) =>
     `SELECT x.occurred_at, x.bucket_seconds, b.file_name
        FROM ${table} x JOIN import_batches b ON b.id = x.batch_id
-      WHERE x.source_id = $1 AND ${reaches('x', '$2::timestamptz', '$3::timestamptz')} AND NOT ${inside('x', '$2::timestamptz', '$3::timestamptz')}`;
+      WHERE x.source_id = $1 AND ${reachesAny('x', '$2', '$3')} AND NOT ${insideAny('x', '$2', '$3')}`;
   const row = await one<{ occurred_at: Date; bucket_seconds: number; file_name: string } | undefined>(
     db,
     `SELECT * FROM (${cut('usage_records')} UNION ALL ${cut('reported_costs')}) y ORDER BY occurred_at LIMIT 1`,
@@ -193,10 +228,12 @@ export async function previewImport(db: SqlExecutor, userId: number, parsed: Par
   // A report that restates a range of its source: a staged row is new unless the source already
   // holds it value for value; stored rows inside the range that the report states differently, or
   // not at all, are replaced. Without a range, a row is new when its key is not stored yet.
-  const range = parsed.replaceRange && sourceId !== null ? parsed.replaceRange : null;
-  if (range && sourceId !== null) await assertRangeReplaceable(db, sourceId, range);
-  const rangeArgs = [sourceId ?? 0, range?.start ?? null, range?.end ?? null];
-  const restated = (x: string) => `(${range ? 'true' : 'false'} AND ${x}.source_id = $2 AND ${inside(x, '$3::timestamptz', '$4::timestamptz')})`;
+  const range = sourceId !== null ? restatedRanges(parsed) : null;
+  if (range && sourceId !== null) await assertRangesReplaceable(db, sourceId, range);
+  // The same file read again: what its earlier imports stored is in question too.
+  const reread = await earlierReadings(db, userId, sourceId, parsed);
+  const rangeArgs = [sourceId ?? 0, range?.starts ?? [], range?.ends ?? [], reread];
+  const restated = (x: string) => `((${x}.source_id = $2 AND ${insideAny(x, '$3', '$4')}) OR ${x}.batch_id = ANY($5::int[]))`;
 
   const use = await one<Record<string, unknown>>(
     db,
@@ -233,17 +270,18 @@ export async function previewImport(db: SqlExecutor, userId: number, parsed: Par
   );
 
   let replaced: ImportPreview['replaced'] = null;
-  if (range) {
+  if (range || reread.length > 0) {
+    const inScope = (x: string) => `((${x}.source_id = $1 AND ${insideAny(x, '$2', '$3')}) OR ${x}.batch_id = ANY($4::int[]))`;
     const r = await one<{ usage_rows: number; tokens: unknown; cost_rows: number }>(
       db,
-      `SELECT (SELECT count(*) FROM usage_records u WHERE u.source_id = $1 AND ${inside('u', '$2::timestamptz', '$3::timestamptz')}
+      `SELECT (SELECT count(*) FROM usage_records u WHERE ${inScope('u')}
                   AND NOT EXISTS (SELECT 1 FROM stg_usage s WHERE ${sameUsage('s', 'u')}))::int AS usage_rows,
               (SELECT COALESCE(sum(u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_5m_tokens + u.cache_write_1h_tokens), 0)
-                 FROM usage_records u WHERE u.source_id = $1 AND ${inside('u', '$2::timestamptz', '$3::timestamptz')}
+                 FROM usage_records u WHERE ${inScope('u')}
                   AND NOT EXISTS (SELECT 1 FROM stg_usage s WHERE ${sameUsage('s', 'u')}))::bigint AS tokens,
-              (SELECT count(*) FROM reported_costs r WHERE r.source_id = $1 AND ${inside('r', '$2::timestamptz', '$3::timestamptz')}
+              (SELECT count(*) FROM reported_costs r WHERE ${inScope('r')}
                   AND NOT EXISTS (SELECT 1 FROM stg_costs s WHERE ${sameCost('s', 'r')}))::int AS cost_rows`,
-      [sourceId, range.start, range.end],
+      [sourceId, range?.starts ?? [], range?.ends ?? [], reread],
     );
     replaced = { usageRows: r.usage_rows, costRows: r.cost_rows, tokens: toNumber(r.tokens) };
   }
@@ -272,9 +310,10 @@ export async function previewImport(db: SqlExecutor, userId: number, parsed: Par
   // Cost rows name a model too, so a cost report is not described as recording none.
   const rowsWithModelBase = newMessages + newUsage + newCost;
   const rowsWithoutModel = toNumber(msg.without_model) + toNumber(use.without_model) + cost.without_model;
-  // What the import covers: its new records, and for a restated report the whole range it speaks for.
-  const lastOfRange = parsed.replaceRange ? new Date(Date.parse(parsed.replaceRange.end) - 1).toISOString() : null;
-  const starts = [toIso(msg.first_at), toIso(use.first_at), toIso(cost.first_at), parsed.replaceRange?.start ?? null].filter(Boolean) as string[];
+  // What the import covers: its new records, and for a restated report all the time it speaks for.
+  const spoken = parsed.replaceRanges ?? [];
+  const lastOfRange = spoken.length > 0 ? new Date(Date.parse(spoken[spoken.length - 1].end) - 1).toISOString() : null;
+  const starts = [toIso(msg.first_at), toIso(use.first_at), toIso(cost.first_at), spoken[0]?.start ?? null].filter(Boolean) as string[];
   const ends = [toIso(msg.last_at), toIso(use.last_at), toIso(cost.last_at), lastOfRange].filter(Boolean) as string[];
   const replacedRows = (replaced?.usageRows ?? 0) + (replaced?.costRows ?? 0);
   const stat = (name: string) => (typeof parsed.stats[name] === 'number' ? (parsed.stats[name] as number) : null);
@@ -315,6 +354,7 @@ export async function previewImport(db: SqlExecutor, userId: number, parsed: Par
         : null,
     prompts: stat('newHumanPrompts') !== null ? { new: stat('newHumanPrompts')!, duplicate: stat('duplicateHumanPrompts') ?? 0 } : null,
     replaced,
+    rereadsEarlierImport: reread.length > 0 && replacedRows > 0,
     tokens: { exact: toNumber(use.exact_tokens), estimated: toNumber(msg.tokens) + toNumber(use.estimated_tokens) },
     dateRange: {
       start: starts.length ? starts.sort()[0] : null,
@@ -418,6 +458,8 @@ export async function commitImport(
     }
 
     const existingSourceId = await sourceIdFor(tx, userId, parsed);
+    // Looked up before this import gets a batch of its own, which has the same file and source.
+    const reread = await earlierReadings(tx, userId, existingSourceId, parsed);
     const source = await one<{ id: number }>(
       tx,
       `INSERT INTO data_sources (user_id, kind, label, external_ref, is_synthetic)
@@ -451,23 +493,28 @@ export async function commitImport(
 
     const replaced = { usageRows: 0, costRows: 0 };
     const supersededBatches = new Map<number, number>();
-    if (parsed.replaceRange && existingSourceId !== null) {
-      await assertRangeReplaceable(tx, sourceId, parsed.replaceRange);
-      const range = [sourceId, parsed.replaceRange.start, parsed.replaceRange.end];
-      // Stored rows that the report states exactly as they are stay with the import that brought them.
-      const u = await tx.query<{ batch_id: number }>(
-        `DELETE FROM usage_records u WHERE u.source_id = $1 AND ${inside('u', '$2::timestamptz', '$3::timestamptz')}
-            AND NOT EXISTS (SELECT 1 FROM stg_usage s WHERE ${sameUsage('s', 'u')}) RETURNING u.batch_id`,
-        range,
+    const restated = existingSourceId !== null ? restatedRanges(parsed) : null;
+    /** Conversations that lose rows here; they are tidied up once the new rows are in. */
+    const emptied = new Set<number>();
+    if (restated || reread.length > 0) {
+      if (restated) await assertRangesReplaceable(tx, sourceId, restated);
+      const scope = [sourceId, restated?.starts ?? [], restated?.ends ?? [], reread];
+      const inScope = (x: string) => `((${x}.source_id = $1 AND ${insideAny(x, '$2', '$3')}) OR ${x}.batch_id = ANY($4::int[]))`;
+      // Stored rows that the input states exactly as they are stay with the import that brought them.
+      const u = await tx.query<{ batch_id: number; conversation_id: number | null }>(
+        `DELETE FROM usage_records u WHERE ${inScope('u')}
+            AND NOT EXISTS (SELECT 1 FROM stg_usage s WHERE ${sameUsage('s', 'u')}) RETURNING u.batch_id, u.conversation_id`,
+        scope,
       );
       const c = await tx.query<{ batch_id: number }>(
-        `DELETE FROM reported_costs r WHERE r.source_id = $1 AND ${inside('r', '$2::timestamptz', '$3::timestamptz')}
+        `DELETE FROM reported_costs r WHERE ${inScope('r')}
             AND NOT EXISTS (SELECT 1 FROM stg_costs s WHERE ${sameCost('s', 'r')}) RETURNING r.batch_id`,
-        range,
+        scope,
       );
       replaced.usageRows = u.rows.length;
       replaced.costRows = c.rows.length;
       for (const row of [...u.rows, ...c.rows]) supersededBatches.set(row.batch_id, (supersededBatches.get(row.batch_id) ?? 0) + 1);
+      for (const row of u.rows) if (row.conversation_id !== null) emptied.add(row.conversation_id);
     }
 
     const conv = await tx.query<{ inserted: boolean }>(
@@ -587,7 +634,7 @@ export async function commitImport(
                                   'message', $6::text))
             WHERE id = $1 AND user_id = $7`,
           [earlier, left.n, left.first_at, left.last_at, lost,
-           'records of this import were replaced by a later import that states the same period differently. They are no longer stored under this import.', userId],
+           'records of this import were replaced by a later import: a report that states the same period differently, or the same file read with other settings. They are no longer stored under this import.', userId],
         );
       }
     }
@@ -600,7 +647,22 @@ export async function commitImport(
       await tx.query(`DELETE FROM import_batches WHERE id = $1`, [batchId]);
       if (dropSource) await tx.query(`DELETE FROM data_sources WHERE id = $1`, [sourceId]);
     } else {
-      await refreshConversationCounters(tx, userId, `c.dedup_key IN (SELECT dedup_key FROM stg_conversations)`);
+      // A conversation that only the replaced rows belonged to is gone with them; the others are counted afresh.
+      const touched = [...emptied].map((id) => Number(id));
+      if (touched.length > 0) {
+        await tx.query(
+          `DELETE FROM conversations c
+            WHERE c.user_id = $1 AND c.id = ANY($2::int[])
+              AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id)
+              AND NOT EXISTS (SELECT 1 FROM usage_records u WHERE u.conversation_id = c.id)`,
+          [userId, touched],
+        );
+      }
+      await refreshConversationCounters(
+        tx,
+        userId,
+        `(c.dedup_key IN (SELECT dedup_key FROM stg_conversations)${touched.length > 0 ? ` OR c.id IN (${touched.join(',')})` : ''})`,
+      );
       const replacedRows = replaced.usageRows + replaced.costRows;
       await tx.query(
         `UPDATE import_batches b SET
@@ -620,7 +682,7 @@ export async function commitImport(
           insertedMessages + insertedUsage + insertedCosts,
           stagedMessages.n - insertedMessages + (stagedUsage.n - insertedUsage) + (stagedCosts.n - insertedCosts) + (parsed.duplicateRequests ?? 0),
           replacedRows,
-          'records that an earlier import had stored for the same period were replaced by this one. Deleting this import does not bring them back.',
+          'records that an earlier import had stored were replaced by this one. Deleting this import does not bring them back.',
         ],
       );
     }

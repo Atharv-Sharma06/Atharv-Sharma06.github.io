@@ -30,12 +30,9 @@ export function noteHaikuLongContext(warnings: WarningList, rows: number): void 
   );
 }
 
-export function noteUsOnlyInference(warnings: WarningList, rows: number): void {
-  if (rows === 0) return;
-  warnings.add(
-    'us_inference_premium',
-    'Rows with inference_geo "us" are billed at 1.1 times the standard price on Claude 4.6 and later models. Their equivalent API value is calculated at the standard price and is up to 10% too low.',
-    undefined,
-    rows,
-  );
-}
+/** A count that is a whole number but does not fit the column it is stored in. */
+export const TOO_LARGE = {
+  code: 'number_too_large',
+  message:
+    'Rows with a count that is too large to store were skipped: token counts above 9,007,199,254,740,991, request and web search counts above 2,147,483,647.',
+};

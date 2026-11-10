@@ -42,12 +42,19 @@ const COST_REPORT: ReportKind = {
   // Text values of a legacy result that say how much, not what for.
   measurementFields: new Set(['amount', 'currency', 'list_amount']),
   phase: 'Reading cost report',
+  // Millionths of a cent, the finest unit either API states. A float is good enough to compare sums.
+  figures(metrics) {
+    const cents = typeof metrics.amount === 'string' || typeof metrics.amount === 'number' ? Number(metrics.amount) : NaN;
+    return [Number.isFinite(cents) ? Math.round(cents * 1e6) : 0];
+  },
+  // An itemised report rounds every row to that unit, so its sum can miss the total by a unit per row.
+  figureTolerance: 1,
 };
 
 /** A plain decimal number: optional sign, digits, optional fraction, optional exponent. */
 const DECIMAL_TEXT = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
 
-/** Amounts are stored as NUMERIC(18,6): twelve digits before the decimal point. */
+/** Amounts are stored as NUMERIC(20,8): twelve digits before the decimal point, and the eight after it that six decimals of a cent need. */
 const MAX_USD = Decimal.from('1000000000000');
 
 /**

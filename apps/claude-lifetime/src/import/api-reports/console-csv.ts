@@ -1,4 +1,4 @@
-import { MODELS } from '@/core/catalog';
+import { MODELS, tierForGeography } from '@/core/catalog';
 import { Decimal } from '@/core/decimal';
 import { ImportError, type ImportFile, type ImportParser, type ImportSink, type ParseContext, type ParsedImport } from '@/core/types';
 import { genericCsvParser } from '../generic/csv';
@@ -10,14 +10,16 @@ import { detectConsoleCsvFormat, type ConsoleCsvFormat } from './detect';
 import {
   API_REPORTS_PARSER_VERSION,
   bucketKey,
+  Coverage,
   GranularityGuard,
+  GroupingGuard,
   hasLongContextPremium,
   priceTierFor,
   RangeTracker,
   SERVICE_TIERS,
 } from './dimensions';
-import { looksLikeClaudeCode, noteClaudeCodeOverlap, noteHaikuLongContext, noteUsOnlyInference } from './notes';
-import { mixedGranularity } from './report';
+import { looksLikeClaudeCode, noteClaudeCodeOverlap, noteHaikuLongContext, TOO_LARGE } from './notes';
+import { mixedGranularity, mixedGrouping } from './report';
 
 /**
  * Importer for the CSV files the Claude Console exports from its Usage and Cost
@@ -77,6 +79,12 @@ import { mixedGranularity } from './report';
  * imported into the same two sources and restate them: an import replaces what
  * was imported before for the days it covers, whichever of the formats it came in.
  *
+ * An export lists only the days (or hours) that have usage. Each file therefore
+ * speaks for the stretch from its first row to its last, and a file with hourly rows
+ * for the whole UTC days it touches: the Console exports hours one day at a time, and
+ * a day that is stored as one daily total can only be replaced as a whole. Several
+ * files are several stretches; the time between them is not touched.
+ *
  * A CSV file with any other header is handed to the generic CSV importer.
  */
 const USAGE_FORMAT = 'anthropic/console-usage-csv';
@@ -100,8 +108,12 @@ class ConsoleImport {
   readonly meter: InputMeter;
   readonly warnings = new WarningList();
   readonly models: ModelRegistry;
-  readonly range = new RangeTracker();
+  readonly coverage = new Coverage();
   readonly granularity = new GranularityGuard();
+  readonly grouping: GroupingGuard;
+  /** First to last row of the file being read, and whether it has rows narrower than a day. */
+  private fileRange = new RangeTracker();
+  private fileHasHours = false;
   seen = 0;
   skipped = 0;
   emitted = 0;
@@ -113,9 +125,12 @@ class ConsoleImport {
     readonly sink: ImportSink,
     ctx: ParseContext,
     phase: string,
+    /** See GroupingGuard: 0 for token counts, 1 for amounts, which are rounded row by row. */
+    figureTolerance: number,
   ) {
     this.meter = new InputMeter(files, sink, ctx, phase);
     this.models = new ModelRegistry(sink);
+    this.grouping = new GroupingGuard(figureTolerance);
   }
 
   /**
@@ -126,6 +141,8 @@ class ConsoleImport {
     for (const file of this.files) {
       if (file.size === 0) continue;
       this.keysOfFile = new Map();
+      this.fileRange = new RangeTracker();
+      this.fileHasHours = false;
       let columns: Map<string, number> | null = null;
       for await (const record of readCsv(file.blob.stream() as ReadableStream<Uint8Array>, { onBytes: this.meter.onBytes })) {
         if (columns === null) {
@@ -147,6 +164,13 @@ class ConsoleImport {
         this.meter.records = this.seen;
         if ((this.seen & 1023) === 0) this.meter.checkCancelled();
       }
+      const stretch = this.fileRange.bounds();
+      if (stretch !== null) {
+        const [start, end] = stretch;
+        if (this.fileHasHours) this.coverage.add(Math.floor(start / DAY_MS) * DAY_MS, Math.ceil(end / DAY_MS) * DAY_MS);
+        else this.coverage.add(start, end);
+      }
+      this.grouping.endUnit();
     }
   }
 
@@ -172,10 +196,17 @@ class ConsoleImport {
    * figures (the exports do contain such rows: something the file does not show
    * tells them apart), so the second gets "#2". Across the files of one import the
    * same key means the same export was chosen twice, and the repeat is dropped.
-   * Returns null for a repeat.
+   * Returns null for a repeat. `figures` are what the row measures (see GroupingGuard).
    */
-  key(prefix: string, bucket: { startMs: number; startIso: string; seconds: number }, pairs: Array<[string, string]>, line: number): string | null {
+  key(
+    prefix: string,
+    bucket: { startMs: number; startIso: string; seconds: number },
+    pairs: Array<[string, string]>,
+    figures: number[],
+    line: number,
+  ): string | null {
     const dims = pairs.filter(([, value]) => value !== '').sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    this.grouping.add(bucket.startMs, bucket.seconds, dims.map(([name]) => name), figures);
     let key = bucketKey(prefix, bucket.startIso, bucket.seconds, { pairs: dims, structured: false });
     const nth = (this.keysOfFile.get(key) ?? 0) + 1;
     this.keysOfFile.set(key, nth);
@@ -185,7 +216,8 @@ class ConsoleImport {
       return null;
     }
     this.keys.add(key);
-    this.range.add(bucket.startMs, bucket.seconds > 0 ? bucket.startMs + bucket.seconds * 1000 : null);
+    this.fileRange.add(bucket.startMs, bucket.seconds > 0 ? bucket.startMs + bucket.seconds * 1000 : null);
+    if (bucket.seconds < 86400) this.fileHasHours = true;
     this.granularity.add(bucket.startMs, bucket.seconds);
     return key;
   }
@@ -202,7 +234,9 @@ class ConsoleImport {
     }
     const clash = this.granularity.conflict();
     if (clash !== null) throw mixedGranularity(clash, what);
-    const range = this.range.get();
+    const regrouped = this.grouping.conflict();
+    if (regrouped !== null) throw mixedGrouping(regrouped, what);
+    const ranges = this.coverage.ranges();
     return {
       ...parts,
       parserVersion: API_REPORTS_PARSER_VERSION,
@@ -211,11 +245,13 @@ class ConsoleImport {
       recordsSeen: this.seen,
       recordsSkipped: this.skipped,
       warnings: this.warnings.toArray(),
-      ...(range ? { replaceRange: range } : {}),
+      ...(ranges.length > 0 ? { replaceRanges: ranges } : {}),
       stats: { rows: this.emitted, bytesRead: this.meter.bytesRead, ...parts.stats },
     };
   }
 }
+
+const DAY_MS = 86_400_000;
 
 /** Columns that say what a row is about, as opposed to how much. */
 const USAGE_DIMENSIONS = ['model_version', 'api_key', 'workspace', 'usage_type', 'context_window', 'inference_geo', 'speed'];
@@ -232,13 +268,12 @@ const USAGE_COUNTS: Array<[column: string, max: number]> = [
 ];
 
 async function importUsage(files: ImportFile[], sink: ImportSink, ctx: ParseContext): Promise<ParsedImport> {
-  const run = new ConsoleImport(files, sink, ctx, 'Reading usage export');
+  const run = new ConsoleImport(files, sink, ctx, 'Reading usage export', 0);
   const absent = new Set<string>();
   let rowsWithModel = 0;
   let premiumModelRows = 0;
   let claudeCodeRows = 0;
   let haikuRows = 0;
-  let usOnlyRows = 0;
   let tokens = 0;
 
   await run.eachRow(async (cell, has, line) => {
@@ -249,7 +284,9 @@ async function importUsage(files: ImportFile[], sink: ImportSink, ctx: ParseCont
     for (const [column, max] of USAGE_COUNTS) {
       const count = parseCount(cell(column), max);
       if (!count.ok) {
-        return run.skip('invalid_number', 'Rows with a token count that is negative or not a whole number were skipped.', `${column}: ${sampleOf(cell(column))} (line ${line})`);
+        const sample = `${column}: ${sampleOf(cell(column))} (line ${line})`;
+        if (count.reason === 'too_large') return run.skip(TOO_LARGE.code, TOO_LARGE.message, sample);
+        return run.skip('invalid_number', 'Rows with a token count that is negative or not a whole number were skipped.', sample);
       }
       counts[column] = count.value ?? 0;
     }
@@ -268,6 +305,13 @@ async function importUsage(files: ImportFile[], sink: ImportSink, ctx: ParseCont
       'api-csv',
       bucket,
       USAGE_DIMENSIONS.map((column): [string, string] => [column, cell(column)]),
+      [
+        counts.usage_input_tokens_no_cache,
+        counts.usage_input_tokens_cache_read,
+        counts.usage_input_tokens_cache_write_5m + counts.usage_input_tokens_cache_write,
+        counts.usage_input_tokens_cache_write_1h,
+        counts.usage_output_tokens,
+      ],
       line,
     );
     if (dedupKey === null) return;
@@ -278,7 +322,10 @@ async function importUsage(files: ImportFile[], sink: ImportSink, ctx: ParseCont
       modelKey,
       occurredAt: bucket.startIso,
       bucketSeconds: bucket.seconds,
-      priceTier: priceTierFor({ modelKey, serviceTier: usageType, speed: cell('speed'), contextWindow: cell('context_window') }),
+      priceTier: tierForGeography(
+        priceTierFor({ modelKey, serviceTier: usageType, speed: cell('speed'), contextWindow: cell('context_window') }),
+        cell('inference_geo'),
+      ),
       inputTokens: counts.usage_input_tokens_no_cache,
       outputTokens: counts.usage_output_tokens,
       cacheReadTokens: counts.usage_input_tokens_cache_read,
@@ -299,7 +346,6 @@ async function importUsage(files: ImportFile[], sink: ImportSink, ctx: ParseCont
     if (modelKey === 'claude-haiku-5-5') haikuRows++;
     // Claude Code signs in to its own workspace and creates keys named claude_code_key_<user>_<suffix>.
     if (looksLikeClaudeCode(cell('workspace')) || cell('api_key').startsWith('claude_code_key_')) claudeCodeRows++;
-    if (cell('inference_geo').toLowerCase() === 'us') usOnlyRows++;
     tokens +=
       counts.usage_input_tokens_no_cache + counts.usage_output_tokens + counts.usage_input_tokens_cache_read +
       counts.usage_input_tokens_cache_write_5m + counts.usage_input_tokens_cache_write + counts.usage_input_tokens_cache_write_1h;
@@ -322,7 +368,6 @@ async function importUsage(files: ImportFile[], sink: ImportSink, ctx: ParseCont
   }
   noteClaudeCodeOverlap(run.warnings, claudeCodeRows);
   noteHaikuLongContext(run.warnings, haikuRows);
-  noteUsOnlyInference(run.warnings, usOnlyRows);
 
   return run.finish('usage', {
     format: USAGE_FORMAT,
@@ -334,7 +379,7 @@ async function importUsage(files: ImportFile[], sink: ImportSink, ctx: ParseCont
 }
 
 async function importCost(files: ImportFile[], sink: ImportSink, ctx: ParseContext): Promise<ParsedImport> {
-  const run = new ConsoleImport(files, sink, ctx, 'Reading cost export');
+  const run = new ConsoleImport(files, sink, ctx, 'Reading cost export', 1);
   let total = Decimal.zero;
 
   await run.eachRow(async (cell, _has, line) => {
@@ -348,6 +393,8 @@ async function importCost(files: ImportFile[], sink: ImportSink, ctx: ParseConte
       'cost-csv',
       bucket,
       COST_DIMENSIONS.map((column): [string, string] => [column, cell(column)]),
+      // hundred-millionths of a dollar, the unit amounts are stored in
+      [Math.round(Number(amountUsd) * 1e8)],
       line,
     );
     if (dedupKey === null) return;

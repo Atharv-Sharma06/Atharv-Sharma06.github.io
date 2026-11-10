@@ -162,7 +162,7 @@ describe('the preview says what kind of figures a file holds', () => {
 
   it('describes a cost report as money with models and dates, not as text to estimate from', async () => {
     await stage(t.db, { costs: [cost('c1'), cost('c2', { occurredAt: '2026-04-02T00:00:00.000Z' }), cost('c3', { occurredAt: '2026-04-03T00:00:00.000Z', modelKey: null, costType: 'web_search', tokenType: null })] });
-    const preview = await previewImport(t.db, t.userId, parsed({ source: API_COST, contentHash: 'cost', replaceRange: { start: '2026-04-01T00:00:00.000Z', end: '2026-04-04T00:00:00.000Z' } }));
+    const preview = await previewImport(t.db, t.userId, parsed({ source: API_COST, contentHash: 'cost', replaceRanges: [{ start: '2026-04-01T00:00:00.000Z', end: '2026-04-04T00:00:00.000Z' }] }));
     expect(preview.figures).toEqual({ exactTokens: false, statedTokens: false, textEstimates: false, costs: true });
     expect(preview.costRows).toMatchObject({ total: 3, new: 3, duplicate: 0 });
     expect(preview.coverage.hasModel).toBe(true);

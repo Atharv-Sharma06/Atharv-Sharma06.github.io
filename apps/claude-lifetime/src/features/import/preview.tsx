@@ -65,6 +65,18 @@ function notices(p: ImportPreview, timezone: string): ReactNode[] {
         and give it the same source name. Save only if this really is a different set of usage.
       </Notice>,
     );
+  } else if (p.previousImport && p.rereadsEarlierImport && p.replaced) {
+    // The same file, the same source, and yet its rows do not come out as they are stored: it is read differently now.
+    out.push(
+      <Notice key="previous" tone="warning">
+        <strong className="font-medium text-ink">
+          This exact file was imported before, on {formatInstant(p.previousImport.importedAt, timezone, 'datetime')}, and is read differently now
+        </strong>{' '}
+        (other columns, or other settings). {plural(p.replaced.usageRows + p.replaced.costRows, 'row')} that the earlier import stored will be replaced
+        by the rows as they are read now, so nothing is counted twice. Rows that read the same are left as they are. Cancel if the earlier reading
+        was the right one.
+      </Notice>,
+    );
   } else if (p.previousImport) {
     out.push(
       <Notice key="previous">
@@ -73,7 +85,7 @@ function notices(p: ImportPreview, timezone: string): ReactNode[] {
       </Notice>,
     );
   }
-  if (p.replaced && (p.replaced.usageRows > 0 || p.replaced.costRows > 0)) {
+  if (p.replaced && !p.rereadsEarlierImport && (p.replaced.usageRows > 0 || p.replaced.costRows > 0)) {
     out.push(
       <Notice key="replaced">
         This report restates a period that is already stored. {plural(p.replaced.usageRows + p.replaced.costRows, 'stored row')} that it states

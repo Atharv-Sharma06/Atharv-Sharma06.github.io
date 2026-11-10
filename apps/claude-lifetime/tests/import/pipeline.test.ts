@@ -125,12 +125,12 @@ describe('import pipeline', () => {
     const day = (d: number, tokens: number) =>
       usage(`api:${d}`, { occurredAt: `2025-03-0${d}T00:00:00.000Z`, bucketSeconds: 86400, inputTokens: tokens, outputTokens: 0, cacheReadTokens: 0, cacheWrite5mTokens: 0 });
     await importRecords(t.db, t.userId, { usage: [day(1, 100), day(2, 200), day(3, 300)] }, {
-      source, contentHash: 'r1', replaceRange: { start: '2025-03-01T00:00:00.000Z', end: '2025-03-04T00:00:00.000Z' },
+      source, contentHash: 'r1', replaceRanges: [{ start: '2025-03-01T00:00:00.000Z', end: '2025-03-04T00:00:00.000Z' }],
     });
     // a later, revised report for days 2-4 with hourly keys (different dedup keys)
     const revised = [2, 3, 4].map((d) => usage(`api-h:${d}`, { occurredAt: `2025-03-0${d}T00:00:00.000Z`, bucketSeconds: 3600, inputTokens: 1000 * d, outputTokens: 0, cacheReadTokens: 0, cacheWrite5mTokens: 0 }));
     await stage(t.db, { usage: revised });
-    const meta = parsed({ source, contentHash: 'r2', replaceRange: { start: '2025-03-02T00:00:00.000Z', end: '2025-03-05T00:00:00.000Z' } });
+    const meta = parsed({ source, contentHash: 'r2', replaceRanges: [{ start: '2025-03-02T00:00:00.000Z', end: '2025-03-05T00:00:00.000Z' }] });
     const preview = await previewImport(t.db, t.userId, meta);
     expect(preview.replaced).toEqual({ usageRows: 2, costRows: 0, tokens: 500 });
     const result = await commitImport(t.db, t.userId, meta);

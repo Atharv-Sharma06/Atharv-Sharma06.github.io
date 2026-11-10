@@ -41,7 +41,7 @@ CREATE TEMP TABLE IF NOT EXISTS stg_usage (
 );
 CREATE TEMP TABLE IF NOT EXISTS stg_costs (
   model_key text, occurred_at timestamptz NOT NULL, bucket_seconds int NOT NULL, cost_type text, token_type text,
-  description text, amount_usd numeric(18,6) NOT NULL, dedup_key text NOT NULL
+  description text, amount_usd numeric(20,8) NOT NULL, dedup_key text NOT NULL
 );
 CREATE TEMP TABLE IF NOT EXISTS stg_owner (token text NOT NULL);`;
 
