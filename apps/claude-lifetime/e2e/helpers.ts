@@ -33,6 +33,13 @@ export async function open(page: Page, path = '/') {
   await expect(page.locator('main [aria-busy="true"]')).toHaveCount(0, { timeout: 60_000 });
 }
 
+/**
+ * The exact lifetime total, as the overview's headline states it in its tooltip.
+ * Scoped to the headline: other cards carry token tooltips too and can render first.
+ */
+export const lifetimeTokens = (page: Page) =>
+  page.getByRole('group', { name: 'Lifetime tokens' }).locator('p[title$=" tokens"]').first().getAttribute('title');
+
 export async function loadDemo(page: Page) {
   await open(page, '/');
   await page.getByRole('button', { name: 'Explore with demo data' }).click();

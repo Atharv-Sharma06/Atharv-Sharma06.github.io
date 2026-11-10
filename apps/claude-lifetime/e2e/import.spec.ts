@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
-import { chooseFiles, fixture, importFiles, open, watch } from './helpers';
+import { chooseFiles, fixture, importFiles, lifetimeTokens, open, watch } from './helpers';
 
 const EXPORT_ZIP = fixture('claude-export/claude-export-sample.zip');
 
@@ -37,7 +37,7 @@ test('a claude.ai export is previewed, saved as estimated usage, and never count
   const hero = page.getByRole('group', { name: 'Lifetime tokens' });
   await expect(hero.getByText('Estimated', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('No source in this range meters tokens.')).toBeVisible();
-  const total = await page.locator('p[title$=" tokens"]').first().getAttribute('title');
+  const total = await lifetimeTokens(page);
   expect(total).toMatch(/^[\d,]+ tokens$/);
   // No subscription dates were entered, so the split is unavailable rather than zero.
   await expect(page.getByRole('link', { name: 'Add subscription history' }).first()).toBeVisible();
@@ -48,12 +48,12 @@ test('a claude.ai export is previewed, saved as estimated usage, and never count
   await expect(page.getByRole('button', { name: 'Save to my history' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Close' }).click();
   await open(page, '/');
-  expect(await page.locator('p[title$=" tokens"]').first().getAttribute('title')).toBe(total);
+  expect(await lifetimeTokens(page)).toBe(total);
 
   // The data is stored on the device: it is still there after a reload.
   await page.reload();
   await expect(page.locator('main [aria-busy="true"]')).toHaveCount(0, { timeout: 60_000 });
-  expect(await page.locator('p[title$=" tokens"]').first().getAttribute('title')).toBe(total);
+  expect(await lifetimeTokens(page)).toBe(total);
   expect(problems).toEqual([]);
 });
 

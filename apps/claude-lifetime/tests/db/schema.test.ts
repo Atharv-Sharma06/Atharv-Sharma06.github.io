@@ -1,7 +1,10 @@
+import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { METHODS, MODELS, PRICES } from '@/core/catalog';
 import { migrate } from '@/db/migrate';
 import { MIGRATIONS } from '@/db/migrations.generated';
+import { pgliteDriver } from '@/db/pglite-driver';
+import { ensureSeeded } from '@/db/seed';
 import { createTestDb, type TestDb } from '../helpers/db';
 
 let t: TestDb;
@@ -30,6 +33,29 @@ describe('migrations', () => {
     const again = await migrate(t.db);
     expect(again.applied).toEqual([]);
     expect(again.alreadyApplied).toEqual(MIGRATIONS.map((m) => m.name));
+  });
+
+  it('applies each migration once when two tabs start on an empty database together', async () => {
+    const pg = new PGlite();
+    const db = pgliteDriver(pg);
+    try {
+      const [first, second] = await Promise.all([migrate(db), migrate(db)]);
+      // Between them they applied everything, and nothing twice.
+      expect([...first.applied, ...second.applied].sort()).toEqual(MIGRATIONS.map((m) => m.name));
+      expect(first.applied.length + first.alreadyApplied.length).toBe(MIGRATIONS.length);
+      expect(second.applied.length + second.alreadyApplied.length).toBe(MIGRATIONS.length);
+      const { rows } = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM "_prisma_migrations"`);
+      expect(rows[0].n).toBe(MIGRATIONS.length);
+      // Seeding from both at once ends with one user and one copy of the catalog as well.
+      const [a, b] = await Promise.all([ensureSeeded(db), ensureSeeded(db)]);
+      expect(a).toBe(b);
+      const users = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM users`);
+      expect(users.rows[0].n).toBe(1);
+      const prices = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM pricing_history WHERE is_builtin`);
+      expect(prices.rows[0].n).toBe(PRICES.length);
+    } finally {
+      await db.close();
+    }
   });
 
   it('refuses to run when an applied migration was edited', async () => {

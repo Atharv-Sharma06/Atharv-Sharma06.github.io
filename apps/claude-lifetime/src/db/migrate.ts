@@ -7,7 +7,8 @@ import { MIGRATIONS, type Migration } from './migrations.generated';
  * Applied migrations are recorded in `_prisma_migrations`, the same bookkeeping table
  * Prisma Migrate uses, so a database created here looks like one managed by
  * `prisma migrate deploy`. Each migration runs in its own transaction: PostgreSQL DDL
- * is transactional, so a failing migration leaves the schema untouched.
+ * is transactional, so a failing migration leaves the schema untouched. Running this
+ * from several connections at once is safe: each migration is applied exactly once.
  */
 const BOOKKEEPING = `
 CREATE TABLE IF NOT EXISTS "_prisma_migrations" (
@@ -45,27 +46,38 @@ export async function migrate(db: SqlDriver, migrations: Migration[] = MIGRATION
   const done = new Map(rows.map((r) => [r.migration_name, r.checksum]));
   const report: MigrationReport = { applied: [], alreadyApplied: [] };
 
+  const edited = (name: string) =>
+    new MigrationError(
+      `Migration "${name}" was changed after it was applied to this database. Add a new migration instead of editing an applied one.`,
+      name,
+    );
+
   for (const m of migrations) {
     const previous = done.get(m.name);
     if (previous !== undefined) {
-      if (previous !== m.checksum) {
-        throw new MigrationError(
-          `Migration "${m.name}" was changed after it was applied to this database. ` +
-            'Add a new migration instead of editing an applied one.',
-          m.name,
-        );
-      }
+      if (previous !== m.checksum) throw edited(m.name);
       report.alreadyApplied.push(m.name);
       continue;
     }
+    let outcome: 'applied' | 'found' | 'found-edited';
     try {
-      await db.transaction(async (tx) => {
+      outcome = await db.transaction(async (tx) => {
+        // Two tabs of the app can start at the same moment and both find this migration missing. Whoever
+        // comes second waits here for the first, then sees its record and has nothing left to do.
+        await tx.exec(`LOCK TABLE "_prisma_migrations" IN SHARE ROW EXCLUSIVE MODE`);
+        const recorded = await tx.query<{ checksum: string }>(
+          `SELECT "checksum" FROM "_prisma_migrations"
+            WHERE "migration_name" = $1 AND "finished_at" IS NOT NULL AND "rolled_back_at" IS NULL`,
+          [m.name],
+        );
+        if (recorded.rows.length > 0) return recorded.rows[0].checksum === m.checksum ? 'found' : 'found-edited';
         await tx.exec(m.sql);
         await tx.query(
           `INSERT INTO "_prisma_migrations" ("id", "checksum", "migration_name", "finished_at", "applied_steps_count")
            VALUES (gen_random_uuid()::text, $1, $2, now(), 1)`,
           [m.checksum, m.name],
         );
+        return 'applied';
       });
     } catch (err) {
       throw new MigrationError(
@@ -73,7 +85,8 @@ export async function migrate(db: SqlDriver, migrations: Migration[] = MIGRATION
         m.name,
       );
     }
-    report.applied.push(m.name);
+    if (outcome === 'found-edited') throw edited(m.name);
+    (outcome === 'applied' ? report.applied : report.alreadyApplied).push(m.name);
   }
   return report;
 }

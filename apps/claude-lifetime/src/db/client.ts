@@ -83,6 +83,14 @@ function flushOverChannel(name: string): Promise<void> {
 interface Handle {
   pg: PGliteWorker;
   db: SqlDriver;
+  /**
+   * Stops the database worker at once, for a database this page is finished with (it is
+   * about to be erased or replaced, and the page reloads). Used instead of closing the
+   * client: closing tears down the channels the client reaches other tabs on, while a
+   * timer of its own still posts to them whenever the tab that hosts the database has
+   * just changed, and that ends in an uncaught error.
+   */
+  stop(): void;
 }
 
 /** How long opening the database may take before it counts as failed. Restoring unpacks the whole backup first. */
@@ -112,7 +120,18 @@ async function connect(name: string, loadDataDir?: Blob): Promise<Handle> {
   } finally {
     clearTimeout(timer);
   }
-  return { pg, db: pgliteDriver(pg as never, { flush: () => flushOverChannel(name) }) };
+  return { pg, db: pgliteDriver(pg as never, { flush: () => flushOverChannel(name) }), stop: () => worker.terminate() };
+}
+
+/**
+ * Runs `work` while no other tab of the app is setting the same database up. Tabs that
+ * start together (a restored browser session, or every tab reloading after an erase)
+ * would otherwise create the schema and the built-in catalog at the same time.
+ */
+async function exclusively<T>(name: string, work: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
+  if (!locks?.request) return work();
+  return (await locks.request(`claude-lifetime:setup:${name}`, work)) as T;
 }
 
 function deleteIndexedDb(name: string): Promise<void> {
@@ -165,20 +184,23 @@ async function clearDeviceState(): Promise<void> {
   });
 }
 
-let pending: Promise<Database & { name: string; pg: PGliteWorker }> | null = null;
+let pending: Promise<Database & { name: string; stop(): void }> | null = null;
 
 export function openDatabase(onPhase?: (phase: BootPhase) => void): Promise<Database> {
   if (pending) return pending;
   pending = (async () => {
     onPhase?.('starting');
     const name = activeName();
-    const { pg, db } = await connect(name);
+    const { pg, db, stop } = await connect(name);
 
     onPhase?.('migrating');
-    await migrate(db);
-    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-    const userId = await ensureSeeded(db, { timezone });
-    await ensureStatistics(db);
+    const userId = await exclusively(name, async () => {
+      await migrate(db);
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      const id = await ensureSeeded(db, { timezone });
+      await ensureStatistics(db);
+      return id;
+    });
     await db.flush();
 
     // Ask the browser not to evict this origin's storage under pressure. Best effort.
@@ -190,7 +212,7 @@ export function openDatabase(onPhase?: (phase: BootPhase) => void): Promise<Data
       db,
       userId,
       name,
-      pg,
+      stop,
       exportBackup: async () => (await pg.dumpDataDir('gzip')) as Blob,
     };
   })();
@@ -200,13 +222,18 @@ export function openDatabase(onPhase?: (phase: BootPhase) => void): Promise<Data
   return pending;
 }
 
-async function closeCurrent(): Promise<string> {
+/**
+ * Lets go of this tab's connection to the active database for good and returns the
+ * database's name. Only for a database that is about to be erased or replaced: nothing
+ * can be read through this page's connection afterwards, so the page has to reload.
+ */
+async function dropCurrent(): Promise<string> {
   const name = activeName();
   try {
     const current = pending ? await pending : null;
-    await current?.db.close();
+    current?.stop();
   } catch {
-    // closing is best effort; the database is replaced or deleted below either way
+    // it never opened, so there is nothing to let go of
   }
   pending = null;
   return name;
@@ -217,7 +244,7 @@ async function closeCurrent(): Promise<string> {
  * then waits to be told to reload.
  */
 export async function releaseDatabase(): Promise<void> {
-  await closeCurrent();
+  await dropCurrent();
 }
 
 /**
@@ -229,7 +256,7 @@ export async function destroyDatabase(): Promise<void> {
   // Other tabs hold the database open (one of them may host it). Ask them to let go first.
   announce('release');
   await pause(400);
-  const name = await closeCurrent();
+  const name = await dropCurrent();
   // Every database of the app goes, including one an interrupted restore may have left behind.
   const names = new Set([name, DEFAULT_NAME]);
   try {
@@ -293,6 +320,6 @@ export async function restoreDatabase(file: Blob, passphrase?: string): Promise<
   // From here on the restored database is the current one. Other tabs load it when they reload;
   // the previous database is deleted once nothing has it open any more.
   announce('reload');
-  const previous = await closeCurrent();
+  const previous = await dropCurrent();
   if (previous !== name) await deleteIndexedDb(previous).catch(() => undefined);
 }
