@@ -167,6 +167,10 @@ billed amounts, which are stored as actual spend, to the hundred-millionth of a 
   Import the earlier file again if you need them.
 - Group the report by model. Rows of an ungrouped report have no model and cannot be
   priced.
+- Ask for daily buckets or finer. A report row that adds up more than one day (an
+  analytics report requested without time buckets) is exact as a total and reaches to
+  its last day in every date the app shows, but the day-by-day views can only place it
+  on the day it starts: the report does not say how the usage fell on the days.
 - Usage in the `priority`, `flex` or long-context tiers of models with no published price
   for that tier is counted but left unpriced.
 - Whether a file is a usage or a cost report is read from its figures, wherever in the

@@ -143,7 +143,7 @@ export const GENERIC_FIELD_SPECS: Record<GenericField, FieldSpec> = {
   },
   bucket_seconds: {
     label: 'Bucket width (seconds)',
-    hint: 'Length of the period a row adds up, for example 3600 for an hour. Rows dated with a day only default to 86400.',
+    hint: 'Length of the period a row adds up, for example 3600 for an hour. Rows dated with a day only default to 86400. A row of more than a day is divided evenly over its days.',
     aliases: ['bucket_seconds', 'bucket_width_seconds', 'bucket_size_seconds', 'duration_seconds', 'interval_seconds'],
   },
 };
