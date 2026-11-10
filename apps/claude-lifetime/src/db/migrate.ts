@@ -9,6 +9,9 @@ import { MIGRATIONS, type Migration } from './migrations.generated';
  * `prisma migrate deploy`. Each migration runs in its own transaction: PostgreSQL DDL
  * is transactional, so a failing migration leaves the schema untouched. Running this
  * from several connections at once is safe: each migration is applied exactly once.
+ *
+ * A database that holds migrations this build does not know was written by a newer
+ * version of the app. It is refused with a NewerSchemaError before anything is applied.
  */
 const BOOKKEEPING = `
 CREATE TABLE IF NOT EXISTS "_prisma_migrations" (
@@ -32,9 +35,37 @@ export class MigrationError extends Error {
   }
 }
 
+/**
+ * The database holds finished migrations that this build does not know, so it was last
+ * written by a newer version of the app. This build's queries were written for an
+ * older schema and must not run against it. Raised before anything is applied.
+ */
+export class NewerSchemaError extends Error {
+  constructor(
+    /** The migrations found in the database that this build does not have, oldest first. */
+    readonly unknownMigrations: string[],
+  ) {
+    super(
+      `The database was last written by a newer version of the app. It holds ${
+        unknownMigrations.length === 1 ? 'a migration' : 'migrations'
+      } that this version does not know: ${unknownMigrations.join(', ')}.`,
+    );
+    this.name = 'NewerSchemaError';
+  }
+}
+
 export interface MigrationReport {
   applied: string[];
   alreadyApplied: string[];
+}
+
+/**
+ * The finished migrations of a database that are missing from `known`, oldest first.
+ * Migration names start with their timestamp, so sorting by name is sorting by age.
+ */
+export function unknownMigrations(finished: Iterable<string>, known: readonly Pick<Migration, 'name'>[]): string[] {
+  const names = new Set(known.map((m) => m.name));
+  return [...new Set(finished)].filter((name) => !names.has(name)).sort();
 }
 
 export async function migrate(db: SqlDriver, migrations: Migration[] = MIGRATIONS): Promise<MigrationReport> {
@@ -44,6 +75,9 @@ export async function migrate(db: SqlDriver, migrations: Migration[] = MIGRATION
       WHERE "finished_at" IS NOT NULL AND "rolled_back_at" IS NULL`,
   );
   const done = new Map(rows.map((r) => [r.migration_name, r.checksum]));
+  // Checked before anything else: a build that is older than the database must not add to it or run on it.
+  const unknown = unknownMigrations(done.keys(), migrations);
+  if (unknown.length > 0) throw new NewerSchemaError(unknown);
   const report: MigrationReport = { applied: [], alreadyApplied: [] };
 
   const edited = (name: string) =>

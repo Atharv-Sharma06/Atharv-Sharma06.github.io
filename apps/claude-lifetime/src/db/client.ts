@@ -6,9 +6,10 @@ import { looksLikeDatabaseDump } from '@/lib/backup-format';
 import { KV_DATABASE_NAME } from '@/lib/kv';
 import type { SqlDriver } from './driver';
 import { ensureStatistics } from './maintenance';
-import { migrate, MigrationError } from './migrate';
+import { migrate, MigrationError, NewerSchemaError } from './migrate';
 import { pgliteDriver } from './pglite-driver';
 import { ensureSeeded } from './seed';
+import type { FlushAnswer, FlushRequest, StartFailure, WorkerMeta } from './worker/pglite.worker';
 
 /**
  * Browser entry point to the database: one PostgreSQL instance (PGlite) per browser
@@ -16,8 +17,9 @@ import { ensureSeeded } from './seed';
  *
  * The database lives in an IndexedDB database named after a pointer kept in
  * localStorage. Restoring a backup builds and checks a complete new database under a
- * new name first and only then moves the pointer, so a backup that cannot be read
- * never costs the data that is already here.
+ * new name first, waits until the browser has confirmed that it is stored, and only
+ * then moves the pointer, so a backup that cannot be read or stored never costs the
+ * data that is already here.
  */
 const PGLITE_VERSION = '0.5.16';
 const DEFAULT_NAME = 'claude-lifetime';
@@ -58,27 +60,126 @@ function activeName(): string {
 
 const idbName = (name: string) => `/pglite/${name}`;
 const controlChannel = (name: string) => `claude-lifetime:db-control:${name}`;
+/** The Web Lock a restore holds on the database it is building. */
+const restoreLock = (name: string) => `claude-lifetime:restore:${name}`;
 
-function flushOverChannel(name: string): Promise<void> {
+/** The app's name for one of its databases, given the name IndexedDB lists it under, or null for anything else. */
+function appDatabaseName(listed: string | undefined): string | null {
+  return listed?.match(/^\/pglite\/(claude-lifetime(?:-[a-z0-9]{1,24})?)$/)?.[1] ?? null;
+}
+
+// ── Saving to this device's storage ─────────────────────────────────────────────
+
+/** What became of a request to copy the database to this device's storage. */
+export type FlushOutcome =
+  | { status: 'confirmed' }
+  /** The copy was tried and did not work. `reason` is the browser's own error text. */
+  | { status: 'failed'; reason: string }
+  /** Nobody answered in time, so it is not known whether the copy was made. */
+  | { status: 'unanswered' };
+
+/** What was written could not be copied to this device's storage. The message is written for the person using the app. */
+export class StorageWriteError extends Error {
+  constructor(
+    message: string,
+    /** The browser's own error text, when it gave one. */
+    readonly reason: string | null,
+  ) {
+    super(message);
+    this.name = 'StorageWriteError';
+  }
+}
+
+/** How long a page waits for the answer to a flush after an ordinary write. */
+const FLUSH_TIMEOUT_MS = 15_000;
+/** How long a restore waits for the whole restored database to reach storage. No answer by then counts as a failure. */
+const RESTORE_FLUSH_TIMEOUT_MS = 300_000;
+
+/**
+ * Reads what the database worker answered to the flush request `id`. Null for any
+ * other message: the channel is shared by every tab, so it also carries their requests
+ * and the answers to them.
+ */
+export function readFlushAnswer(message: unknown, id: string): FlushOutcome | null {
+  if (typeof message !== 'object' || message === null) return null;
+  const answer = message as Partial<FlushAnswer> & { error?: unknown };
+  if (answer.op !== 'flushed' || answer.id !== id) return null;
+  // Only an explicit yes means the copy was made. Anything else is the worker saying that it was not.
+  if (answer.ok === true) return { status: 'confirmed' };
+  return { status: 'failed', reason: typeof answer.error === 'string' && answer.error !== '' ? answer.error : 'no reason was given' };
+}
+
+/**
+ * Asks the worker that hosts database `name` to copy everything committed so far to
+ * this device's storage, and reports what came of it.
+ */
+export function requestFlush(name: string, timeoutMs: number): Promise<FlushOutcome> {
   return new Promise((resolve) => {
     const channel = new BroadcastChannel(controlChannel(name));
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    // Flushing is best effort from the page's point of view: the write is already committed
-    // in the database, and it is synced in the background even if nobody answers in time.
-    const timer = setTimeout(() => {
+    const finish = (outcome: FlushOutcome) => {
+      clearTimeout(timer);
       channel.close();
-      resolve();
-    }, 15_000);
-    channel.onmessage = (event: MessageEvent<{ op: string; id: string }>) => {
-      if (event.data?.op === 'flushed' && event.data.id === id) {
-        clearTimeout(timer);
-        channel.close();
-        resolve();
-      }
+      resolve(outcome);
     };
-    channel.postMessage({ op: 'flush', id });
+    const timer = setTimeout(() => finish({ status: 'unanswered' }), timeoutMs);
+    channel.onmessage = (event: MessageEvent<unknown>) => {
+      const outcome = readFlushAnswer(event.data, id);
+      if (outcome) finish(outcome);
+    };
+    channel.postMessage({ op: 'flush', id } satisfies FlushRequest);
   });
 }
+
+/**
+ * `SqlDriver.flush()` for database `name`, called after every change the app makes.
+ * Throws a StorageWriteError when the browser refused to store the change.
+ */
+async function saveWrites(name: string): Promise<void> {
+  const outcome = await requestFlush(name, FLUSH_TIMEOUT_MS);
+  if (outcome.status === 'failed') {
+    throw new StorageWriteError(
+      `The change could not be saved to this device's storage and may be lost when the app is closed. The storage is probably full: free up space on this device, then try again. (${outcome.reason})`,
+      outcome.reason,
+    );
+  }
+  // No answer in time is deliberately not an error. The change is already committed in the database,
+  // which copies itself to storage in the background after every statement whether or not anyone asks.
+  // A large database can simply take longer to copy than this wait. And when the tab that hosted the
+  // database has just been closed, the tab taking over is still starting and cannot answer yet. In none
+  // of these cases is it known that anything was lost, so telling the person that their change could
+  // not be saved would be wrong more often than right.
+}
+
+/** Why a restored database that did not reach storage was dropped again, in words for the person restoring. */
+function restoreNotSaved(outcome: Exclude<FlushOutcome, { status: 'confirmed' }>): StorageWriteError {
+  if (outcome.status === 'failed') {
+    return new StorageWriteError(
+      `The backup could not be saved to this device's storage, so nothing was changed. The storage is probably full: a restore needs room for the backup's data next to the data stored now. Free up space on this device, then restore the backup again. (${outcome.reason})`,
+      outcome.reason,
+    );
+  }
+  return new StorageWriteError(
+    `The browser did not confirm within ${RESTORE_FLUSH_TIMEOUT_MS / 60_000} minutes that the backup was saved to this device's storage, so nothing was changed. Restore the backup again. If that keeps failing, free up space on this device first.`,
+    null,
+  );
+}
+
+/** What to tell the person when a restore stopped before the backup became the stored data. */
+export function restoreFailureMessage(error: unknown): string {
+  // Already written for the person: the backup was fine, storing it was the problem.
+  if (error instanceof StorageWriteError) return error.message;
+  if (error instanceof NewerSchemaError) {
+    return 'This backup was made by a newer version of Claude Lifetime than the one running here. Reload the page to update, then restore it again.';
+  }
+  if (error instanceof MigrationError) {
+    return `This backup could not be updated to work with this version of Claude Lifetime, so nothing was changed. (${error.message})`;
+  }
+  const detail = error instanceof Error ? error.message : String(error);
+  return `The backup could not be read, so nothing was changed. (${detail})`;
+}
+
+// ── Connecting ──────────────────────────────────────────────────────────────────
 
 interface Handle {
   pg: PGliteWorker;
@@ -97,19 +198,35 @@ interface Handle {
 const OPEN_TIMEOUT_MS = 90_000;
 const RESTORE_TIMEOUT_MS = 240_000;
 
+/** The reason a database worker gave for not starting, or null when the message is about something else. */
+export function readStartFailure(message: unknown): string | null {
+  if (typeof message !== 'object' || message === null) return null;
+  const failure = message as Partial<StartFailure> & { error?: unknown };
+  if (failure.type !== ('claude-lifetime:start-failed' satisfies StartFailure['type'])) return null;
+  return typeof failure.error === 'string' && failure.error !== '' ? failure.error : 'The database could not be started.';
+}
+
 async function connect(name: string, loadDataDir?: Blob): Promise<Handle> {
   const worker = new Worker(new URL('./worker/pglite.worker.ts', import.meta.url), { type: 'module' });
   const pg = new PGliteWorker(worker, {
     dataDir: `idb://${name}`,
     ...(loadDataDir ? { loadDataDir } : {}),
-    meta: { assetBase: `${BASE_PATH}/pglite/${PGLITE_VERSION}/`, controlChannel: controlChannel(name) },
+    meta: { assetBase: `${BASE_PATH}/pglite/${PGLITE_VERSION}/`, controlChannel: controlChannel(name) } satisfies WorkerMeta,
   });
-  // The engine does not always reject `waitReady` when it cannot start (a data directory it cannot
-  // read keeps failing inside the worker instead). An error in the worker, or no answer in time,
-  // therefore ends the attempt here, and the worker is stopped so it cannot keep running.
+  // The engine never rejects `waitReady` when it cannot start: the failure stays inside the worker.
+  // The worker therefore says so itself (see pglite.worker.ts), and that message, an error in the
+  // worker or no answer in time ends the attempt here. The worker is stopped so it cannot keep running.
   let timer: ReturnType<typeof setTimeout> | undefined;
   const failure = new Promise<never>((_, reject) => {
-    worker.addEventListener('error', (event) => reject(new Error(event.message || 'The database worker failed to start.')), { once: true });
+    worker.addEventListener('error', (event) => reject(new Error(event.message || 'The database could not be started.')), { once: true });
+    worker.addEventListener('message', (event: MessageEvent<unknown>) => {
+      const reason = readStartFailure(event.data);
+      if (reason === null) return;
+      reject(new Error(reason));
+      // Also for a worker that fails long after this page connected: it was chosen to host the database
+      // when the tab that did so closed, and could not open it. Stopping it hands that role to the next tab.
+      worker.terminate();
+    });
     timer = setTimeout(() => reject(new Error('The database did not open in time.')), loadDataDir ? RESTORE_TIMEOUT_MS : OPEN_TIMEOUT_MS);
   });
   try {
@@ -120,7 +237,7 @@ async function connect(name: string, loadDataDir?: Blob): Promise<Handle> {
   } finally {
     clearTimeout(timer);
   }
-  return { pg, db: pgliteDriver(pg as never, { flush: () => flushOverChannel(name) }), stop: () => worker.terminate() };
+  return { pg, db: pgliteDriver(pg as never, { flush: () => saveWrites(name) }), stop: () => worker.terminate() };
 }
 
 /**
@@ -134,6 +251,35 @@ async function exclusively<T>(name: string, work: () => Promise<T>): Promise<T> 
   return (await locks.request(`claude-lifetime:setup:${name}`, work)) as T;
 }
 
+/**
+ * Runs `work` while this tab is marked as restoring into database `name`, so that no
+ * other tab clears that database away as a leftover before it has become the active
+ * one. The mark is a Web Lock: the browser drops it when this tab goes away, and a
+ * database whose restore never finished then counts as a leftover again.
+ */
+async function whileRestoring<T>(name: string, work: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
+  // Without Web Locks no tab removes leftovers (see orphanedDatabases), so there is nothing to guard against.
+  if (!locks?.request) return work();
+  return (await locks.request(restoreLock(name), work)) as T;
+}
+
+/** Names of the Web Locks that are held or waited for in any tab of the app, or null where the browser cannot tell. */
+async function locksInUse(): Promise<Set<string> | null> {
+  const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
+  if (!locks?.query) return null;
+  try {
+    const snapshot = await locks.query();
+    const names = new Set<string>();
+    for (const lock of [...(snapshot.held ?? []), ...(snapshot.pending ?? [])]) {
+      if (lock.name) names.add(lock.name);
+    }
+    return names;
+  } catch {
+    return null;
+  }
+}
+
 function deleteIndexedDb(name: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.deleteDatabase(idbName(name));
@@ -144,14 +290,38 @@ function deleteIndexedDb(name: string): Promise<void> {
   });
 }
 
-/** Removes databases left behind by a restore that was interrupted. Best effort. */
-async function removeOrphans(active: string): Promise<void> {
+/**
+ * Which of the app's databases are leftovers that can be deleted: everything except
+ * the databases in `keep` and those a restore is still building.
+ *
+ * `listed` are the names IndexedDB reports, `locks` the names of the Web Locks in use
+ * in this browser profile, or null when the browser cannot tell. A database that
+ * another tab is restoring into is not the active one yet and looks exactly like a
+ * leftover; the lock that restore holds is the only thing that tells the two apart.
+ * So when the locks cannot be read, nothing is called a leftover: an unused database
+ * left behind costs some disk space, a restore deleted halfway costs the data.
+ */
+export function orphanedDatabases(listed: readonly (string | undefined)[], keep: readonly string[], locks: ReadonlySet<string> | null): string[] {
+  if (locks === null) return [];
+  const orphans: string[] = [];
+  for (const entry of listed) {
+    const name = appDatabaseName(entry);
+    if (name !== null && !keep.includes(name) && !locks.has(restoreLock(name)) && !orphans.includes(name)) orphans.push(name);
+  }
+  return orphans;
+}
+
+/** Removes databases left behind by a restore that was interrupted, or replaced by one that finished. Best effort. */
+async function removeOrphans(own: string): Promise<void> {
   try {
-    const all = (await indexedDB.databases?.()) ?? [];
-    for (const entry of all) {
-      const match = entry.name?.match(/^\/pglite\/(claude-lifetime(?:-[a-z0-9]{1,24})?)$/);
-      if (match && match[1] !== active) void deleteIndexedDb(match[1]).catch(() => undefined);
-    }
+    const listed = ((await indexedDB.databases?.()) ?? []).map((entry) => entry.name);
+    // In this order on purpose. A restore takes its lock before it creates its database, so every listed
+    // database that is still being built has its lock in this snapshot. And it makes its database the
+    // active one before it lets the lock go, so a restore that finished in between is caught by reading
+    // the pointer last.
+    const locks = await locksInUse();
+    const keep = [own, activeName()];
+    for (const name of orphanedDatabases(listed, keep, locks)) void deleteIndexedDb(name).catch(() => undefined);
   } catch {
     // listing databases is not supported everywhere; orphans are then left alone
   }
@@ -186,6 +356,11 @@ async function clearDeviceState(): Promise<void> {
 
 let pending: Promise<Database & { name: string; stop(): void }> | null = null;
 
+/**
+ * Opens the active database and brings it up to date. Rejects with a NewerSchemaError
+ * when a newer version of the app has already upgraded the stored data: this page then
+ * runs code that is too old for it and has to be reloaded.
+ */
 export function openDatabase(onPhase?: (phase: BootPhase) => void): Promise<Database> {
   if (pending) return pending;
   pending = (async () => {
@@ -201,7 +376,11 @@ export function openDatabase(onPhase?: (phase: BootPhase) => void): Promise<Data
       await ensureStatistics(db);
       return id;
     });
-    await db.flush();
+    // Waits for the set-up to reach storage, but does not insist on it. Nothing the person did is at
+    // stake yet: the schema and the built-in catalog are set up again at the next start if they were not
+    // stored. And a device whose storage is full must still be able to open the app, to read what is
+    // there and to download a backup. The first real change reports the problem (see saveWrites).
+    await requestFlush(name, FLUSH_TIMEOUT_MS);
 
     // Ask the browser not to evict this origin's storage under pressure. Best effort.
     void navigator.storage?.persist?.().catch(() => false);
@@ -223,12 +402,11 @@ export function openDatabase(onPhase?: (phase: BootPhase) => void): Promise<Data
 }
 
 /**
- * Lets go of this tab's connection to the active database for good and returns the
- * database's name. Only for a database that is about to be erased or replaced: nothing
- * can be read through this page's connection afterwards, so the page has to reload.
+ * Lets go of this tab's connection to the database it has open, for good. Only for a
+ * database that is about to be erased or replaced: nothing can be read through this
+ * page's connection afterwards, so the page has to reload.
  */
-async function dropCurrent(): Promise<string> {
-  const name = activeName();
+async function dropCurrent(): Promise<void> {
   try {
     const current = pending ? await pending : null;
     current?.stop();
@@ -236,7 +414,6 @@ async function dropCurrent(): Promise<string> {
     // it never opened, so there is nothing to let go of
   }
   pending = null;
-  return name;
 }
 
 /**
@@ -256,13 +433,13 @@ export async function destroyDatabase(): Promise<void> {
   // Other tabs hold the database open (one of them may host it). Ask them to let go first.
   announce('release');
   await pause(400);
-  const name = await dropCurrent();
+  await dropCurrent();
   // Every database of the app goes, including one an interrupted restore may have left behind.
-  const names = new Set([name, DEFAULT_NAME]);
+  const names = new Set([activeName(), DEFAULT_NAME]);
   try {
     for (const entry of (await indexedDB.databases?.()) ?? []) {
-      const match = entry.name?.match(/^\/pglite\/(claude-lifetime(?:-[a-z0-9]{1,24})?)$/);
-      if (match) names.add(match[1]);
+      const name = appDatabaseName(entry.name);
+      if (name !== null) names.add(name);
     }
   } catch {
     // listing is not supported everywhere; the active and the default database are deleted either way
@@ -275,8 +452,9 @@ export async function destroyDatabase(): Promise<void> {
 /**
  * Replaces everything stored on this device with the contents of a backup made by
  * "Download backup" (plain, or protected with a passphrase). The backup is unpacked
- * into a separate database and checked first; the current data is only removed once
- * that has succeeded. The page must be reloaded afterwards.
+ * into a separate database, checked and copied to this device's storage first; the
+ * current data is only removed once the browser has confirmed that copy. The page
+ * must be reloaded afterwards.
  */
 export async function restoreDatabase(file: Blob, passphrase?: string): Promise<void> {
   if (file.size === 0) throw new Error('The file is empty.');
@@ -288,38 +466,43 @@ export async function restoreDatabase(file: Blob, passphrase?: string): Promise<
   }
 
   const name = `${DEFAULT_NAME}-${Date.now().toString(36)}`;
-  let restored: Handle | null = null;
-  try {
-    restored = await connect(name, backup);
-    await migrate(restored.db);
-    const users = await restored.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM users`);
-    if (users.rows[0].n === 0) throw new Error('The backup contains no Claude Lifetime data.');
-    await ensureStatistics(restored.db);
-    await restored.db.flush();
-    await restored.db.close();
-  } catch (error) {
+  // Marked from before the new database exists until it is the active one, or gone again.
+  await whileRestoring(name, async () => {
+    let restored: Handle | null = null;
     try {
-      await restored?.db.close();
-    } catch {
-      // already closed or never opened
+      restored = await connect(name, backup);
+      await migrate(restored.db);
+      const users = await restored.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM users`);
+      if (users.rows[0].n === 0) throw new Error('The backup contains no Claude Lifetime data.');
+      await ensureStatistics(restored.db);
+      // Closing the connection stops the worker at once, and whatever it has not copied to storage by
+      // then is gone. So the restore goes on only when the worker has confirmed the copy; a refusal
+      // (typically a full disk) or no answer leaves everything as it was.
+      const saved = await requestFlush(name, RESTORE_FLUSH_TIMEOUT_MS);
+      if (saved.status !== 'confirmed') throw restoreNotSaved(saved);
+      await restored.db.close();
+    } catch (error) {
+      try {
+        await restored?.db.close();
+      } catch {
+        // already closed or never opened
+      }
+      await deleteIndexedDb(name).catch(() => undefined);
+      throw new Error(restoreFailureMessage(error));
     }
-    await deleteIndexedDb(name).catch(() => undefined);
-    if (error instanceof MigrationError) {
-      throw new Error('This backup was made by a newer version of Claude Lifetime than the one running here. Reload the page to update, then restore it again.');
-    }
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`The backup could not be read, so nothing was changed. (${detail})`);
-  }
 
-  try {
-    window.localStorage.setItem(POINTER_KEY, name);
-  } catch {
-    await deleteIndexedDb(name).catch(() => undefined);
-    throw new Error('This browser does not allow the site to save settings, so the backup cannot be activated. Nothing was changed.');
-  }
-  // From here on the restored database is the current one. Other tabs load it when they reload;
-  // the previous database is deleted once nothing has it open any more.
-  announce('reload');
-  const previous = await dropCurrent();
-  if (previous !== name) await deleteIndexedDb(previous).catch(() => undefined);
+    // The database this restore replaces. Read now, because the pointer names the new one from the next step on.
+    const previous = activeName();
+    try {
+      window.localStorage.setItem(POINTER_KEY, name);
+    } catch {
+      await deleteIndexedDb(name).catch(() => undefined);
+      throw new Error('This browser does not allow the site to save settings, so the backup cannot be activated. Nothing was changed.');
+    }
+    // From here on the restored database is the current one. Other tabs load it when they reload;
+    // the previous database is deleted once nothing has it open any more.
+    announce('reload');
+    await dropCurrent();
+    if (previous !== name) await deleteIndexedDb(previous).catch(() => undefined);
+  });
 }

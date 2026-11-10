@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { PGlite } from '@electric-sql/pglite';
-import { worker } from '@electric-sql/pglite/worker';
+import { worker, type PGliteWorkerOptions } from '@electric-sql/pglite/worker';
 
 /**
  * Hosts PostgreSQL (PGlite) for every tab of the app.
@@ -12,7 +12,10 @@ import { worker } from '@electric-sql/pglite/worker';
  * Durability: PGlite runs with relaxed durability (it does not wait for IndexedDB
  * after every query, which would cost ~80 ms each). After a write that must not be
  * lost, the page asks for an explicit flush over the control channel below and waits
- * for it.
+ * for the answer, which says whether the copy to IndexedDB worked.
+ *
+ * The messages this worker exchanges with pages are declared here. The other side is
+ * src/db/client.ts, which imports these types.
  */
 export interface WorkerMeta {
   /** Base URL of the gzip-compressed PGlite assets, with a trailing slash. */
@@ -21,8 +24,50 @@ export interface WorkerMeta {
   controlChannel: string;
 }
 
+/** A page asks, on the control channel, for everything committed so far to be copied to IndexedDB. */
+export interface FlushRequest {
+  op: 'flush';
+  /** Chosen by the page; the answer carries it back. */
+  id: string;
+}
+
+/**
+ * The answer to a flush request. `ok` is true only when the copy completed. Otherwise
+ * `error` is the browser's own description of what went wrong, for example
+ * "QuotaExceededError: The quota has been exceeded."
+ */
+export type FlushAnswer = { op: 'flushed'; id: string; ok: true } | { op: 'flushed'; id: string; ok: false; error: string };
+
+/**
+ * Posted to the worker's own page when the database could not be started. PGlite's
+ * worker library keeps a failed start to itself, so without this message the page
+ * could only give up after a long wait, without knowing the reason.
+ */
+export interface StartFailure {
+  type: 'claude-lifetime:start-failed';
+  error: string;
+}
+
+/** An error in the browser's own words, with the kind of error in front when it has one. */
+function describeError(error: unknown): string {
+  if (typeof error === 'object' && error !== null) {
+    const { name, message } = error as { name?: unknown; message?: unknown };
+    const text = typeof message === 'string' ? message : '';
+    // "Error" says nothing; a name such as QuotaExceededError tells the page what happened.
+    if (typeof name === 'string' && name !== '' && name !== 'Error') return text ? `${name}: ${text}` : name;
+    if (text) return text;
+  }
+  return String(error);
+}
+
 async function fetchAsset(url: string): Promise<ArrayBuffer> {
-  const res = await fetch(url);
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (error) {
+    // No connection, typically. The browser's own error does not say which file it was about.
+    throw new Error(`Could not load ${url} (${describeError(error)})`);
+  }
   if (!res.ok) throw new Error(`Could not load ${url} (HTTP ${res.status})`);
   const buf = await res.arrayBuffer();
   const head = new Uint8Array(buf, 0, 2);
@@ -35,13 +80,31 @@ async function fetchAsset(url: string): Promise<ArrayBuffer> {
 }
 
 let db: PGlite | null = null;
+/** Whether the database is up. Until then, anything that stops this worker is a failed start. */
+let started = false;
+/** What stopped the start, once that has been reported to the page. */
+let startFailure: { reason: unknown } | null = null;
 
 /**
- * With relaxed durability PGlite starts some syncs without awaiting them. One of those
- * can fail harmlessly while the data directory is being created (a file it was about
- * to copy is renamed by PostgreSQL). Swallow that rejection and sync again.
+ * Tells the page why the database did not start. The page shows the reason and stops
+ * this worker, which also lets the worker of another tab try.
  */
+function reportStartFailure(reason: unknown): void {
+  if (started || startFailure) return;
+  startFailure = { reason };
+  self.postMessage({ type: 'claude-lifetime:start-failed', error: describeError(reason) } satisfies StartFailure);
+}
+
 self.addEventListener('unhandledrejection', (event) => {
+  // After a failed start the library rejects once more for every tab that asks for the database.
+  // The page already has the reason, so these repeats are kept out of the console.
+  if (startFailure && event.reason === startFailure.reason) {
+    event.preventDefault();
+    return;
+  }
+  // With relaxed durability PGlite starts some syncs without awaiting them. One of those can fail
+  // harmlessly while the data directory is being created (a file it was about to copy is renamed by
+  // PostgreSQL). Swallow that rejection and sync again.
   const reason = event.reason as { name?: string } | undefined;
   if (reason?.name === 'ErrnoError') {
     event.preventDefault();
@@ -51,45 +114,66 @@ self.addEventListener('unhandledrejection', (event) => {
 
 async function flush(): Promise<void> {
   const instance = db;
-  if (!instance) return;
+  const fs = instance?.fs;
+  // A flush that copied nothing must not be answered as done.
+  if (!instance || !fs) throw new Error('The database is not open.');
   // No query may run while the files are copied, so the snapshot is consistent.
-  await instance.runExclusive(async () => {
-    const fs = (instance as unknown as { fs?: { syncToFs(relaxed?: boolean): Promise<void> } }).fs;
-    await fs?.syncToFs(false);
+  await instance.runExclusive(() => fs.syncToFs(false));
+}
+
+async function start(options: PGliteWorkerOptions): Promise<PGlite> {
+  const meta = options.meta as WorkerMeta;
+  const [wasm, initdb, data] = await Promise.all([
+    fetchAsset(`${meta.assetBase}pglite.wasm.gz`),
+    fetchAsset(`${meta.assetBase}initdb.wasm.gz`),
+    fetchAsset(`${meta.assetBase}pglite.data.gz`),
+  ]);
+  const [pgliteWasmModule, initdbWasmModule] = await Promise.all([WebAssembly.compile(wasm), WebAssembly.compile(initdb)]);
+  const instance = new PGlite({
+    dataDir: options.dataDir,
+    // Set when a backup is being restored: the data directory starts from that tarball.
+    loadDataDir: options.loadDataDir,
+    relaxedDurability: true,
+    pgliteWasmModule,
+    initdbWasmModule,
+    fsBundle: new Blob([data]),
   });
+  db = instance;
+  await instance.waitReady;
+
+  // Only the leader (this worker) answers flush requests; follower tabs hold no database.
+  const control = new BroadcastChannel(meta.controlChannel);
+  control.onmessage = async (event: MessageEvent<Partial<FlushRequest> | undefined>) => {
+    const request = event.data;
+    if (request?.op !== 'flush' || typeof request.id !== 'string') return;
+    let answer: FlushAnswer;
+    try {
+      await flush();
+      answer = { op: 'flushed', id: request.id, ok: true };
+    } catch (error) {
+      answer = { op: 'flushed', id: request.id, ok: false, error: describeError(error) };
+    }
+    control.postMessage(answer);
+  };
+  started = true;
+  return instance;
 }
 
 worker({
   async init(options) {
-    const meta = options.meta as WorkerMeta;
-    const [wasm, initdb, data] = await Promise.all([
-      fetchAsset(`${meta.assetBase}pglite.wasm.gz`),
-      fetchAsset(`${meta.assetBase}initdb.wasm.gz`),
-      fetchAsset(`${meta.assetBase}pglite.data.gz`),
-    ]);
-    const [pgliteWasmModule, initdbWasmModule] = await Promise.all([WebAssembly.compile(wasm), WebAssembly.compile(initdb)]);
-    db = new PGlite({
-      dataDir: options.dataDir,
-      // Set when a backup is being restored: the data directory starts from that tarball.
-      loadDataDir: options.loadDataDir,
-      relaxedDurability: true,
-      pgliteWasmModule,
-      initdbWasmModule,
-      fsBundle: new Blob([data]),
-    });
-    await db.waitReady;
-
-    // Only the leader (this worker) answers flush requests; follower tabs hold no database.
-    const control = new BroadcastChannel(meta.controlChannel);
-    control.onmessage = async (event: MessageEvent<{ op: string; id: string }>) => {
-      if (event.data?.op !== 'flush') return;
-      try {
-        await flush();
-        control.postMessage({ op: 'flushed', id: event.data.id, ok: true });
-      } catch (err) {
-        control.postMessage({ op: 'flushed', id: event.data.id, ok: false, error: err instanceof Error ? err.message : String(err) });
-      }
-    };
-    return db;
+    try {
+      return await start(options);
+    } catch (error) {
+      // There is no database to sync or flush after this, whatever state the engine was left in.
+      db = null;
+      reportStartFailure(error);
+      throw error;
+    }
   },
+}).catch((error: unknown) => {
+  // Nothing is expected to fail once the database is up; if something does, it stays visible in the console.
+  if (started) throw error;
+  // A failed `init` was reported above. Whatever else stops the library before the database is up
+  // (a browser without Web Locks, for one) leaves the page waiting just the same, so it is reported too.
+  reportStartFailure(error);
 });
