@@ -56,11 +56,16 @@ the other tabs must not pay for that:
   worker: the driver (`src/db/pglite-driver.ts`) fails it at once with a message that
   says what happened, and a transaction that was under way sends nothing more. Reads are
   run again by themselves. A change is not repeated, because it is not known whether it
-  was stored: the person is told to check. An import that was being saved is not stored
-  in part, and can be imported again.
-- **A tab starts while the database is busy.** It waits for its turn, says after a few
-  seconds what it is probably waiting for (another tab's import or backup), and after
-  two minutes stops with a screen that says so and lets the next tab try.
+  was stored: the person is told to check. The same goes for a change that the old worker
+  had made but not yet confirmed as copied to storage. The one exception is the
+  automatic reading of the Claude Code folder, which adds nothing twice and is simply
+  done again. An import that was being saved is not stored in part, and can be imported
+  again.
+- **A tab starts while the database is busy.** The worker that holds the database does
+  one thing at a time, so the tab waits: first to be connected, then for its turn. It
+  says after a few seconds what it is probably waiting for (another tab's import or
+  backup). When either wait lasts two minutes it stops with a screen that says so, and
+  lets the next tab try.
 - **No tab can open the database after the one that held it went away.** Opening it
   needs the files of the database engine, which a device that is offline by then cannot
   load. What a tab then asks of the database waits for a while (twenty seconds once the

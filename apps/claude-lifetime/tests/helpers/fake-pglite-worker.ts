@@ -70,6 +70,8 @@ export const fakeDatabases = {
    * statement waiting until it settles, as a database does that is busy or whose tab has just gone.
    */
   beforeStatement: null as null | ((sql: string, connection: number) => void | Promise<void>),
+  /** Whether the page's own worker is the one that opens the database, as the real class reports once its worker was chosen. */
+  leads: false,
   /** The listeners of every open connection for "the database moved to another tab's worker". */
   moveListeners: new Set<() => void>(),
   /** Tells every open connection that the database moved, as PGlite's page class does when the tab that held it goes away. */
@@ -84,14 +86,16 @@ export const fakeDatabases = {
     this.backupBeatMs = null;
     this.becomeReady = true;
     this.beforeStatement = null;
+    this.leads = false;
     this.moveListeners.clear();
   },
 };
 
 export class FakePGliteWorker {
   readonly waitReady: Promise<void>;
-  /** This stand-in's worker never holds the database for other tabs. */
-  readonly isLeader = false;
+  get isLeader() {
+    return fakeDatabases.leads;
+  }
   private readonly connection: number;
   private pg: PGlite | null = null;
   private control: BroadcastChannel | null = null;

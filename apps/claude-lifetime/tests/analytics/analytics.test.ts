@@ -368,9 +368,14 @@ describe('settings and manual entries', () => {
     // A count nobody can have used in a day is a slip of the keyboard. Before the fix the first of these was
     // stored rounded, and the second was refused by the database: 'value "1e+20" is out of range for type bigint'.
     await expect(addManualUsage(t.db, t.userId, { date: '2024-11-05', confidence: 'exact', inputTokens: 9007199254740993 })).rejects.toThrow(
-      'Input tokens is more than one day can hold: enter at most 1,000,000,000,000 tokens.',
+      'Enter at most 1,000,000,000,000 input tokens. That is already far more than a day of use.',
     );
-    await expect(addManualUsage(t.db, t.userId, { date: '2024-11-05', confidence: 'exact', outputTokens: 1e20 })).rejects.toThrow(/Output tokens is more than one day can hold/);
+    await expect(addManualUsage(t.db, t.userId, { date: '2024-11-05', confidence: 'exact', outputTokens: 1e20 })).rejects.toThrow(/Enter at most 1,000,000,000,000 output tokens/);
+    // A key held down: so many digits that the number is beyond what a number can be. It is too many, not "no whole number".
+    await expect(addManualUsage(t.db, t.userId, { date: '2024-11-05', confidence: 'exact', cacheReadTokens: Number('9'.repeat(400)) })).rejects.toThrow(
+      /Enter at most 1,000,000,000,000 cache read tokens/,
+    );
+    await expect(addManualUsage(t.db, t.userId, { date: '2024-11-05', confidence: 'exact', inputTokens: Number.NaN })).rejects.toThrow(/whole number/);
     await deleteBatch(t.db, t.userId, batchId!);
     expect((await getOverview(t.db, filter())).tokens).toEqual(before);
   });

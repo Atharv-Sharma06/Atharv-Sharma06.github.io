@@ -284,10 +284,13 @@ export async function addManualUsage(db: SqlDriver, userId: number, input: Manua
   if (input.date > manualEntryLastDay(timezone, now)) throw new SettingsError('Enter a day that is not in the future.');
   const n = (v: number | undefined, name: string) => {
     const x = v ?? 0;
-    if (!Number.isFinite(x) || x < 0 || !Number.isInteger(x)) throw new SettingsError(`${name} must be a whole number of tokens, zero or more.`);
+    // First: a run of digits too long for a number at all arrives here as Infinity, and is too many, not "no whole number".
     if (x > MANUAL_ENTRY_MAX_TOKENS) {
-      throw new SettingsError(`${name} is more than one day can hold: enter at most ${MANUAL_ENTRY_MAX_TOKENS.toLocaleString('en-US')} tokens.`);
+      throw new SettingsError(
+        `Enter at most ${MANUAL_ENTRY_MAX_TOKENS.toLocaleString('en-US')} ${name.toLowerCase()}. That is already far more than a day of use.`,
+      );
     }
+    if (!Number.isFinite(x) || x < 0 || !Number.isInteger(x)) throw new SettingsError(`${name} must be a whole number of tokens, zero or more.`);
     return x;
   };
   const tokens = {

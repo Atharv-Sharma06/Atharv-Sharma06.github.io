@@ -28,9 +28,10 @@ const DATA_DIRECTORY_FILE = /^(?:base|global|pg_[a-z_]+)\//;
  * PostgreSQL data directory has.
  *
  * With `whole`, the archive is read to its end, which also checks it: a file that was
- * cut off or damaged fails there (gzip ends with a checksum), and is called 'cut_short'
- * when what could be read are the files of a data directory. Without `whole`, reading
- * stops at PG_VERSION, and a file that is cut off after it passes as a backup.
+ * cut off or damaged fails there (gzip ends with a checksum) or turns into something
+ * that is no archive any more, and is called 'cut_short' when what could be read before
+ * that are the files of a data directory. Without `whole`, reading stops at PG_VERSION,
+ * and a file that is cut off after it passes as a backup.
  */
 async function readArchive(file: Blob, whole: boolean): Promise<BackupFileKind> {
   if (!(await looksLikeGzip(file))) return 'other';
@@ -47,10 +48,12 @@ async function readArchive(file: Blob, whole: boolean): Promise<BackupFileKind> 
   /** True once the archive's end, or something that is no tar header, was reached: the rest is only read through. */
   let parsed = false;
   let isTar = true;
+  /** What a file is that began as the files of a data directory and then stopped being an archive, or stopped. */
+  const broken = (): BackupFileKind => (hasVersion || hasDataFiles ? 'cut_short' : 'other');
   try {
     for (;;) {
       const { value, done } = await reader.read();
-      if (done) return hasVersion && isTar ? 'backup' : 'other';
+      if (done) return isTar ? (hasVersion ? 'backup' : 'other') : broken();
       if (parsed) continue;
       if (skip >= value.length) {
         skip -= value.length;
@@ -69,7 +72,9 @@ async function readArchive(file: Blob, whole: boolean): Promise<BackupFileKind> 
         const ended = header.every((byte) => byte === 0);
         if (ended || !/^[0-7]*$/.test(size)) {
           if (!ended) isTar = false;
-          if (!whole || !isTar) return hasVersion && isTar ? 'backup' : 'other';
+          if (!whole) return 'other';
+          // Damage in the middle of a backup can read as a header that makes no sense. That is not a file that
+          // never was a backup: the rest is read through, and what was seen before decides.
           parsed = true;
           break;
         }
@@ -92,7 +97,7 @@ async function readArchive(file: Blob, whole: boolean): Promise<BackupFileKind> 
     }
   } catch {
     // Not a complete gzip stream. What could be read of it says whether it was on its way to being a backup.
-    return isTar && (hasVersion || hasDataFiles) ? 'cut_short' : 'other';
+    return broken();
   } finally {
     void reader.cancel().catch(() => undefined);
   }

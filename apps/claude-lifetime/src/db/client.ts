@@ -309,6 +309,21 @@ interface Handle {
   giveUp(): void;
 }
 
+/**
+ * The database did not answer while this tab was starting. It is shared by the tabs of
+ * the app and does one thing at a time, so a tab that starts while another one is in
+ * the middle of a long import or a backup waits for that; this is what the tab says
+ * when the wait went on for longer than any of those should take.
+ */
+export class DatabaseBusyError extends Error {
+  constructor(waitedMs: number) {
+    super(`The database did not answer within ${Math.round(waitedMs / 60_000)} minutes.`);
+    this.name = 'DatabaseBusyError';
+  }
+}
+
+/** How long a starting tab waits for its turn at the database and for the set-up below. */
+export const SETUP_TIMEOUT_MS = 120_000;
 /** How long opening the database may take before it counts as failed. Restoring unpacks the whole backup first. */
 const OPEN_TIMEOUT_MS = 90_000;
 const RESTORE_TIMEOUT_MS = 240_000;
@@ -332,6 +347,7 @@ async function connect(name: string, loadDataDir?: Blob): Promise<Handle> {
   // The worker therefore says so itself (see pglite.worker.ts), and that message, an error in the
   // worker or no answer in time ends the attempt here. The worker is stopped so it cannot keep running.
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopWatchingWhoHoldsIt = () => undefined as void;
   /** Why this tab's own worker could not open the database, once it has tried and failed. */
   let startFailure: string | null = null;
   const failure = new Promise<never>((_, reject) => {
@@ -345,7 +361,21 @@ async function connect(name: string, loadDataDir?: Blob): Promise<Handle> {
       // when the tab that did so closed, and could not open it. Stopping it hands that role to the next tab.
       worker.terminate();
     });
-    timer = setTimeout(() => reject(new Error('The database did not open in time.')), loadDataDir ? RESTORE_TIMEOUT_MS : OPEN_TIMEOUT_MS);
+    // No answer in time means one of two things. While this tab's own worker is opening the database, the
+    // database does not open. While the tab waits for the worker of another tab, which holds the database,
+    // that worker is busy (it does one thing at a time, and saving a large import takes a while) or has gone
+    // quiet, and nothing is wrong with this tab's storage: a different error, with a limit of its own.
+    const wait = () => {
+      clearTimeout(timer);
+      const opensItself = loadDataDir !== undefined || pg.isLeader;
+      timer = setTimeout(
+        () => reject(opensItself ? new Error('The database did not open in time.') : new DatabaseBusyError(SETUP_TIMEOUT_MS)),
+        opensItself ? (loadDataDir ? RESTORE_TIMEOUT_MS : OPEN_TIMEOUT_MS) : SETUP_TIMEOUT_MS,
+      );
+    };
+    wait();
+    // Whenever it changes who opens the database (this tab's worker is chosen, or another tab takes over), the wait starts anew.
+    stopWatchingWhoHoldsIt = pg.onLeaderChange(wait);
   });
   try {
     await Promise.race([pg.waitReady, failure]);
@@ -354,6 +384,7 @@ async function connect(name: string, loadDataDir?: Blob): Promise<Handle> {
     throw error;
   } finally {
     clearTimeout(timer);
+    stopWatchingWhoHoldsIt();
   }
   let over = false;
   return {
@@ -491,21 +522,6 @@ async function clearDeviceState(): Promise<void> {
   });
 }
 
-/**
- * The database did not answer while this tab was starting. It is shared by the tabs of
- * the app and does one thing at a time, so a tab that starts while another one is in
- * the middle of a long import or a backup waits for that; this is what the tab says
- * when the wait went on for longer than any of those should take.
- */
-export class DatabaseBusyError extends Error {
-  constructor(waitedMs: number) {
-    super(`The database did not answer within ${Math.round(waitedMs / 60_000)} minutes.`);
-    this.name = 'DatabaseBusyError';
-  }
-}
-
-/** How long a starting tab waits for its turn at the database and for the set-up below. */
-export const SETUP_TIMEOUT_MS = 120_000;
 /** How often the set-up is started over when the tab that held the database went away in the middle of it. */
 const SETUP_ATTEMPTS = 4;
 

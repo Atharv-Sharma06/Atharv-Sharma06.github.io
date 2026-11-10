@@ -348,10 +348,17 @@ describe('backup files', () => {
     const nearlyAll = blob(dump.subarray(0, dump.length - 60));
     expect(await looksLikeDatabaseDump(nearlyAll)).toBe(true);
     expect(await inspectBackupFile(nearlyAll)).toBe('cut_short');
-    // All of it, with one byte changed on the way: gzip's checksum at the end does not match.
-    const damaged = Buffer.from(dump);
-    damaged[Math.floor(damaged.length / 2)] ^= 0xff;
-    expect(await inspectBackupFile(blob(damaged))).not.toBe('backup');
+    // All of it, with one bit changed on the way. Wherever that is, the file is a damaged backup: either gzip's
+    // checksum at the end does not match, or what follows the damage is no archive any more. Before the fix
+    // the second kind (about one position in six) was still called "not a Claude Lifetime backup".
+    const kinds = new Map<string, number>();
+    for (let n = 1; n <= 60; n++) {
+      const damaged = Buffer.from(dump);
+      damaged[Math.floor((damaged.length * n) / 61)] ^= 1 << (n % 8);
+      const kind = await inspectBackupFile(blob(damaged));
+      kinds.set(kind, (kinds.get(kind) ?? 0) + 1);
+    }
+    expect(Object.fromEntries(kinds)).toEqual({ cut_short: 60 });
 
     // Files that never were a backup stay "not a backup", whole or cut off.
     const photos = gzipSync(tarOf([{ name: 'photos/a.jpg', content: randomBytes(60_000).toString('latin1') }, { name: 'notes.md', content: 'hello' }]));

@@ -129,6 +129,58 @@ describe('a tab that is starting while the database does not answer', () => {
   });
 });
 
+describe('a tab that gets no answer while it connects', () => {
+  const timers = () => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+
+  it('says that the database is busy when it was waiting for another tab’s worker, which is saving that tab’s import', async () => {
+    timers();
+    // The worker that holds the database does not get round to answering: it is in the middle of something long.
+    fakeDatabases.becomeReady = false;
+    const opening = outcomeOf(openDatabase());
+    await waitFor(() => WorkerStub.created.length === 1);
+
+    // Before the fix the tab gave up after 90 seconds with "The local database could not be opened" and advice
+    // about private windows and disk space, while its own hint still said it would go on when the other tab was done.
+    await vi.advanceTimersByTimeAsync(119_000);
+    expect(WorkerStub.created[0].terminated).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    const failure = await opening;
+    expect(failure).toBeInstanceOf(DatabaseBusyError);
+    expect(failure?.message).toBe('The database did not answer within 2 minutes.');
+    expect(WorkerStub.created[0].terminated).toBe(true);
+  });
+
+  it('says that the database did not open when its own worker was the one opening it', async () => {
+    timers();
+    fakeDatabases.becomeReady = false;
+    fakeDatabases.leads = true;
+    const opening = outcomeOf(openDatabase());
+    await waitFor(() => WorkerStub.created.length === 1);
+    await vi.advanceTimersByTimeAsync(90_500);
+
+    const failure = await opening;
+    expect(failure).not.toBeInstanceOf(DatabaseBusyError);
+    expect(failure?.message).toBe('The database did not open in time.');
+  });
+
+  it('starts the wait anew when its own worker is chosen to open the database after all', async () => {
+    timers();
+    fakeDatabases.becomeReady = false;
+    const opening = outcomeOf(openDatabase());
+    await waitFor(() => WorkerStub.created.length === 1);
+    await vi.advanceTimersByTimeAsync(100_000);
+    // The tab that held the database is closed, and this tab's worker begins to open it.
+    fakeDatabases.leads = true;
+    fakeDatabases.move();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(WorkerStub.created[0].terminated).toBe(false);
+    await vi.advanceTimersByTimeAsync(30_500);
+
+    expect((await opening)?.message).toBe('The database did not open in time.');
+  });
+});
+
 describe('a change that is under way when the tab that held the database goes away', () => {
   it('fails with a message for the person instead of waiting for good, and the next change goes through', async () => {
     const { db, userId } = await openDatabase();
