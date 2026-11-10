@@ -10,6 +10,7 @@ import { todayInZone } from '@/lib/format';
 import { useApp } from '@/state/app';
 import { useCatalogModels, useCoverage } from '@/state/queries';
 import { Notice } from './preview';
+import { outcomeUnknown } from '@/db/driver';
 
 const tokens = (text: string): number | undefined => {
   const clean = text.replace(/[,\s_]/g, '');
@@ -153,7 +154,7 @@ function ManualEntryForm({
         </div>
       ) : null}
       {error ? (
-        <ErrorNote title="The entry was not saved" className="mt-4">
+        <ErrorNote title={outcomeUnknown(error) ? 'The entry may not have been saved' : 'The entry was not saved'} className="mt-4">
           {error}
         </ErrorNote>
       ) : null}

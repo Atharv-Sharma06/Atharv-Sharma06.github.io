@@ -11,6 +11,7 @@ import { useApp } from '@/state/app';
 import {
   emptyPeriodForm, endDateResolvingOverlap, formToInput, periodToForm, periodToInput, validatePeriodForm, type PeriodFormField, type PeriodFormValues,
 } from './logic';
+import { outcomeUnknown } from '@/db/driver';
 
 export type EditorTarget =
   | { kind: 'add'; dates?: { startDate: string; lastDate: string | null } }
@@ -195,7 +196,7 @@ export function PeriodEditor({
 
         {failure ? (
           <div ref={failureNote} className="sm:col-span-2">
-            <ErrorNote title="The period was not saved">
+            <ErrorNote title={outcomeUnknown(failure.message) ? 'The period may not have been saved' : 'The period was not saved'}>
               <p>{failure.message}</p>
               {conflict && endConflictOn ? (
                 <Button size="sm" className="mt-3" loading={busy} onClick={() => void save(true)}>

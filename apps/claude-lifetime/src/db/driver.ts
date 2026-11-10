@@ -34,12 +34,20 @@ export interface SqlDriver extends SqlExecutor {
  */
 export class DatabaseMovedError extends Error {
   constructor() {
-    super(
-      'The tab that held the database was closed or reloaded at that moment, and another tab has taken over. It is not known whether your change was stored: check, and make it again if it is missing.',
-    );
+    super(DATABASE_MOVED_MESSAGE);
     this.name = 'DatabaseMovedError';
   }
 }
+
+const DATABASE_MOVED_MESSAGE =
+  'The tab that held the database was closed or reloaded at that moment, and another tab has taken over. It is not known whether your change was stored: check, and make it again if it is missing.';
+
+/**
+ * Whether the message of a failed change is the one for a database that moved. The
+ * change may then have been stored all the same, so what stands above the message must
+ * not say that it was not. (The places that show a failure keep its message, not the error.)
+ */
+export const outcomeUnknown = (message: string | null | undefined): boolean => message === DATABASE_MOVED_MESSAGE;
 
 /**
  * The database has had no tab to hold it for too long: the tab that held it went away,

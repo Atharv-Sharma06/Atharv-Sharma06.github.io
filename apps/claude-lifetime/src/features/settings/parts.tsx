@@ -5,6 +5,7 @@ import { Checkbox as RCheckbox, RadioGroup } from 'radix-ui';
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Spinner } from '@/components/ui/feedback';
 import { cn } from '@/lib/cn';
+import { outcomeUnknown } from '@/db/driver';
 
 /** Space the sticky top bar and the section list take, so an anchor target is not hidden under them. */
 const ANCHOR_OFFSET = 'scroll-mt-28';
@@ -160,7 +161,7 @@ export function SaveError({ state, prefix = 'This could not be saved.', classNam
   if (state.status !== 'error') return null;
   return (
     <p role="alert" className={cn('text-[13px] text-critical', className)}>
-      {prefix} {state.message}
+      {outcomeUnknown(state.message) ? 'This may not have been saved.' : prefix} {state.message}
     </p>
   );
 }

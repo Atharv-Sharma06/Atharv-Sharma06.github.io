@@ -320,7 +320,9 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
                 ? 'Saving'
                 : stage.name === 'done'
                   ? 'Saved'
-                  : 'This import did not work';
+                  : stage.unknownOutcome
+                    ? 'This import may not have been saved'
+                    : 'This import did not work';
 
   return (
     <Card aria-live="polite">

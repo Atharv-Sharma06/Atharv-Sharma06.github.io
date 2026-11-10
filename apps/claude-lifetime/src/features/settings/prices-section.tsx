@@ -32,6 +32,7 @@ import {
 } from './logic';
 import { SaveNote, SettingsSection, Tag, useSaveState } from './parts';
 import { usePrices } from './queries';
+import { outcomeUnknown } from '@/db/driver';
 
 const EXTERNAL_LINK = 'inline-flex items-center gap-0.5 text-accent-soft underline-offset-4 hover:underline';
 
@@ -217,7 +218,7 @@ function AddPriceDialog({
         </Field>
       </form>
       {failure ? (
-        <ErrorNote title="The price was not saved" className="mt-4">
+        <ErrorNote title={outcomeUnknown(failure) ? 'The price may not have been saved' : 'The price was not saved'} className="mt-4">
           {failure}
         </ErrorNote>
       ) : null}

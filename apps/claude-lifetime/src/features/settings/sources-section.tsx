@@ -20,6 +20,7 @@ import { formatDay, formatInstant, formatInt, formatTokens, formatUsd, plural } 
 import { useApp } from '@/state/app';
 import { useCoverage } from '@/state/queries';
 import { SaveError, SaveNote, SettingsSection, Tag, useFocusReturn, useSaveState } from './parts';
+import { outcomeUnknown } from '@/db/driver';
 
 function Fact({ label, children, title, className }: { label: string; children: ReactNode; title?: string; className?: string }) {
   return (
@@ -112,7 +113,7 @@ function ExcludeDialog({
         </Field>
       </form>
       {error ? (
-        <ErrorNote title="The change could not be saved" className="mt-4">
+        <ErrorNote title={outcomeUnknown(error) ? 'The change may not have been saved' : 'The change could not be saved'} className="mt-4">
           {error}
         </ErrorNote>
       ) : null}

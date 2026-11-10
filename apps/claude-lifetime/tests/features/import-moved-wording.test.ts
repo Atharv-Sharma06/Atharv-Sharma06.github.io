@@ -42,3 +42,25 @@ describe('an import during which the database moves to another tab', () => {
     expect(failureStage('boom', 'reading')).toEqual({ name: 'error', message: 'boom', code: 'unexpected' });
   });
 });
+
+describe('what stands above a change that may have been stored all the same', () => {
+  it('is told apart by the message of a database that moved, and by nothing else', async () => {
+    const { outcomeUnknown } = await import('@/db/driver');
+    expect(outcomeUnknown(new DatabaseMovedError().message)).toBe(true);
+    expect(outcomeUnknown('Enter a day that is not in the future.')).toBe(false);
+    expect(outcomeUnknown(null)).toBe(false);
+  });
+
+  it('says "may not have been saved" in a settings row, where it said "could not be saved" before', async () => {
+    const { createElement } = await import('react');
+    const { renderToStaticMarkup } = await import('react-dom/server');
+    const { SaveError } = await import('@/features/settings/parts');
+    const row = (message: string) => renderToStaticMarkup(createElement(SaveError, { state: { status: 'error', message } }));
+
+    const moved = row(new DatabaseMovedError().message);
+    // Before the fix: "This could not be saved. … It is not known whether your change was stored".
+    expect(moved).toContain('This may not have been saved. The tab that held the database was closed or reloaded at that moment');
+    expect(moved).not.toContain('could not be saved');
+    expect(row('The quota has been exceeded.')).toContain('This could not be saved. The quota has been exceeded.');
+  });
+});

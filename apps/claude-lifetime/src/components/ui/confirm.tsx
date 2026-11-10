@@ -5,6 +5,7 @@ import { Button } from './button';
 import { Input } from './controls';
 import { ErrorNote } from './feedback';
 import { Dialog } from './overlay';
+import { outcomeUnknown } from '@/db/driver';
 
 interface ConfirmProps {
   open: boolean;
@@ -73,7 +74,7 @@ function ConfirmBody({
         </label>
       ) : null}
       {error ? (
-        <ErrorNote title="That did not work" className="mt-4">
+        <ErrorNote title={outcomeUnknown(error) ? 'That may not have worked' : 'That did not work'} className="mt-4">
           {error}
         </ErrorNote>
       ) : null}
