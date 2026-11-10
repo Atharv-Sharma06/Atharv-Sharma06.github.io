@@ -1,0 +1,48 @@
+Useful links for the migration (all hosts are placeholders):
+
+https://docs.example.com/guides/getting-started/installation?lang=en&version=4.2#prerequisites
+https://api.example.com/v2/organizations/acme-industries/projects/7731/deployments?status=failed&limit=50&sort=-created_at
+https://cdn.example.net/assets/images/2025/03/hero-banner@2x.webp
+http://localhost:5173/dashboard/settings/billing?tab=invoices
+https://status.example.org/incidents/2025-03-14-elevated-error-rates-eu-west
+ftp://files.example.com/pub/releases/v1.18.3/tool-1.18.3-linux-amd64.tar.gz
+https://example.com/search?q=how+to+rotate+api+keys&utm_source=newsletter&utm_medium=email&utm_campaign=march_digest
+https://user:p%40ssw0rd@registry.example.io:8443/v2/team/backend/manifests/latest
+mailto:support@example.com?subject=Invoice%20question&body=Hello%2C%20I%20have%20a%20question
+git@git.example.com:platform/infrastructure-modules.git
+s3://acme-data-lake/raw/events/year=2025/month=03/day=14/part-00017.snappy.parquet
+postgres://reporting_ro@db-replica-2.internal.example.com:5432/analytics?sslmode=require
+
+Paths that changed in the last release:
+
+/usr/local/lib/node_modules/@acme/cli/dist/commands/deploy/index.js
+/etc/systemd/system/acme-worker@.service
+/var/log/acme/worker-03/2025-03-14/stderr.log.gz
+/home/deploy/.config/acme/credentials.json
+/opt/acme/releases/20250314T091500Z/bin/acme-server
+/srv/www/static/css/main.3f9a1c.min.css
+~/Library/Application Support/Acme/Cache/index-v5/00/3a/content-v2.bin
+./packages/ui-components/src/components/DataTable/DataTable.stories.tsx
+../shared/proto/billing/v1/invoice_service.proto
+src/main/java/com/example/billing/invoice/InvoiceController.java
+tests/integration/fixtures/customers/large_import_2024-12.csv
+C:\Users\Marta\AppData\Local\Programs\Acme\resources\app.asar
+C:\Program Files (x86)\Acme Tools\bin\acme-sync.exe
+D:\Backups\2025\Q1\database_full_2025-03-01.bak
+\\fileserver01\projects\Bridge-Renovation\Drawings\Rev_C\A-101 Ground Floor Plan.pdf
+
+Endpoints:
+
+GET    /api/v1/users/{userId}/notifications?unread=true
+POST   /api/v1/teams/{teamId}/invitations
+PATCH  /api/v1/projects/{projectId}/settings/webhooks/{webhookId}
+DELETE /api/v1/sessions/current
+GET    /internal/metrics/prometheus
+
+Import statements seen in the diff:
+
+import { formatCurrency } from '@/lib/formatting/currency';
+import type { InvoiceLine } from '../../types/billing';
+from acme.billing.invoices.models import Invoice, InvoiceLine
+require_relative '../../lib/acme/exporters/csv_exporter'
+#include "third_party/zlib/contrib/minizip/unzip.h"

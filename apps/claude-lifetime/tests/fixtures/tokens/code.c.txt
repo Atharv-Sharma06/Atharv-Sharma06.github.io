@@ -1,0 +1,124 @@
+/*
+ * ringbuf.c - a fixed-size ring buffer of bytes.
+ *
+ * Fixture for the token estimator tests: plain C with a header-style
+ * section, macros, pointer arithmetic and a small self-test.
+ */
+#include <assert.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define RINGBUF_MIN_CAPACITY 16u
+#define RINGBUF_OK            0
+#define RINGBUF_ERR_NOMEM    (-1)
+#define RINGBUF_ERR_FULL     (-2)
+
+typedef struct ringbuf {
+    uint8_t *data;
+    size_t   capacity;   /* always a power of two */
+    size_t   head;       /* next position to write */
+    size_t   tail;       /* next position to read  */
+} ringbuf_t;
+
+static size_t round_up_pow2(size_t n)
+{
+    size_t p = RINGBUF_MIN_CAPACITY;
+    while (p < n) {
+        p <<= 1;
+    }
+    return p;
+}
+
+int ringbuf_init(ringbuf_t *rb, size_t capacity)
+{
+    assert(rb != NULL);
+    rb->capacity = round_up_pow2(capacity);
+    rb->data = (uint8_t *)malloc(rb->capacity);
+    if (rb->data == NULL) {
+        rb->capacity = 0;
+        return RINGBUF_ERR_NOMEM;
+    }
+    rb->head = rb->tail = 0;
+    return RINGBUF_OK;
+}
+
+void ringbuf_free(ringbuf_t *rb)
+{
+    if (rb == NULL) {
+        return;
+    }
+    free(rb->data);
+    memset(rb, 0, sizeof(*rb));
+}
+
+static inline size_t ringbuf_used(const ringbuf_t *rb)
+{
+    return rb->head - rb->tail;
+}
+
+static inline size_t ringbuf_avail(const ringbuf_t *rb)
+{
+    return rb->capacity - ringbuf_used(rb);
+}
+
+int ringbuf_write(ringbuf_t *rb, const void *src, size_t len)
+{
+    const uint8_t *bytes = (const uint8_t *)src;
+    size_t mask = rb->capacity - 1;
+    size_t i;
+
+    if (len > ringbuf_avail(rb)) {
+        return RINGBUF_ERR_FULL;
+    }
+    for (i = 0; i < len; i++) {
+        rb->data[(rb->head + i) & mask] = bytes[i];
+    }
+    rb->head += len;
+    return RINGBUF_OK;
+}
+
+size_t ringbuf_read(ringbuf_t *rb, void *dst, size_t len)
+{
+    uint8_t *out = (uint8_t *)dst;
+    size_t mask = rb->capacity - 1;
+    size_t n = ringbuf_used(rb);
+    size_t i;
+
+    if (len < n) {
+        n = len;
+    }
+    for (i = 0; i < n; i++) {
+        out[i] = rb->data[(rb->tail + i) & mask];
+    }
+    rb->tail += n;
+    return n;
+}
+
+#ifdef RINGBUF_SELFTEST
+int main(void)
+{
+    ringbuf_t rb;
+    char scratch[64];
+    size_t got;
+
+    if (ringbuf_init(&rb, 20) != RINGBUF_OK) {
+        fprintf(stderr, "out of memory\n");
+        return EXIT_FAILURE;
+    }
+    assert(rb.capacity == 32);
+    assert(ringbuf_write(&rb, "hello, ", 7) == RINGBUF_OK);
+    assert(ringbuf_write(&rb, "world", 5) == RINGBUF_OK);
+    assert(ringbuf_write(&rb, scratch, sizeof scratch) == RINGBUF_ERR_FULL);
+
+    got = ringbuf_read(&rb, scratch, sizeof scratch - 1);
+    scratch[got] = '\0';
+    printf("read %zu bytes: \"%s\" (0x%02x..0x%02x)\n", got, scratch,
+           (unsigned)scratch[0], (unsigned)scratch[got - 1]);
+
+    ringbuf_free(&rb);
+    return EXIT_SUCCESS;
+}
+#endif /* RINGBUF_SELFTEST */

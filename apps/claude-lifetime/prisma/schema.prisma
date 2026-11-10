@@ -1,0 +1,462 @@
+// Claude Lifetime — database schema (source of truth).
+//
+// Prisma is used to describe the schema and to generate the SQL migrations in
+// prisma/migrations. The app applies those migrations to a PostgreSQL database
+// that runs inside the browser (PGlite, PostgreSQL compiled to WebAssembly), so
+// all data stays on the user's device. The same migrations apply unchanged to a
+// server-side PostgreSQL if the app is ever deployed with a backend.
+//
+// Conventions
+//  - Every timestamp is `timestamptz` and stored in UTC. Presentation converts to
+//    the user's IANA timezone (users.timezone) at query time.
+//  - Exact usage (reported by a trusted source) lives in usage_records.
+//    Estimated usage (derived from message text) lives in token_estimates.
+//    They are never mixed in one table; the usage_facts view (0002 migration)
+//    unions them with an explicit confidence column.
+//  - Subscription plans are NOT stored on usage rows. A row's plan is derived at
+//    query time from its timestamp and subscription_periods.
+//  - Prices are NUMERIC and all money math happens in SQL NUMERIC (decimal-safe).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Where a batch of records came from.
+enum SourceKind {
+  claude_export /// official claude.ai account export (conversations.json)
+  claude_code /// Claude Code local session transcripts (JSONL)
+  api_usage_report /// Anthropic usage reports (Admin API / Console export)
+  api_cost_report /// Anthropic cost reports (actual spend)
+  generic_json /// user-provided JSON in the documented generic shape
+  generic_csv /// user-provided CSV with mapped columns
+  manual /// records typed in by the user
+
+  @@map("source_kind")
+}
+
+enum ConversationKind {
+  chat /// a claude.ai conversation
+  code_session /// a Claude Code session
+  usage_bucket /// container for aggregate usage that has no conversation
+  manual
+
+  @@map("conversation_kind")
+}
+
+enum MessageRole {
+  user
+  assistant
+  other
+
+  @@map("message_role")
+}
+
+/// How much a number can be trusted. "Unavailable" is not a stored value: it is
+/// what the UI shows when no row exists for a quantity.
+enum Confidence {
+  exact /// directly reported by a trusted usage source
+  estimated /// calculated from message text or incomplete metadata
+
+  @@map("confidence")
+}
+
+model User {
+  id          Int      @id @default(autoincrement())
+  displayName String?  @map("display_name")
+  /// IANA timezone used for presentation (day/week/month boundaries).
+  timezone    String   @default("UTC")
+  /// UI preferences and accounting assumptions (token basis, pricing assumptions, ...).
+  settings    Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  dataSources         DataSource[]
+  importBatches       ImportBatch[]
+  conversations       Conversation[]
+  usageRecords        UsageRecord[]
+  tokenEstimates      TokenEstimate[]
+  reportedCosts       ReportedCost[]
+  subscriptionPeriods SubscriptionPeriod[]
+
+  @@map("users")
+}
+
+/// A logical origin of data, e.g. "claude.ai export for account X" or
+/// "Claude Code on this computer". Deleting a source deletes everything imported from it.
+model DataSource {
+  id              Int        @id @default(autoincrement())
+  userId          Int        @map("user_id")
+  kind            SourceKind
+  label           String
+  /// Stable identity of the origin (account uuid, organisation id, machine label). '' when unknown.
+  externalRef     String     @default("") @map("external_ref")
+  /// True for the built-in demo dataset. Synthetic data is always labelled in the UI.
+  isSynthetic     Boolean    @default(false) @map("is_synthetic")
+  /// False when the source overlaps another one (e.g. Claude Code billed through the
+  /// API and also present in an API usage report) and must not count twice.
+  includeInTotals Boolean    @default(true) @map("include_in_totals")
+  exclusionReason String?    @map("exclusion_reason")
+  notes           String?
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime   @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  importBatches  ImportBatch[]
+  conversations  Conversation[]
+  usageRecords   UsageRecord[]
+  tokenEstimates TokenEstimate[]
+  reportedCosts  ReportedCost[]
+  syncedFiles    SyncedFile[]
+
+  @@unique([userId, kind, externalRef])
+  @@map("data_sources")
+}
+
+/// One committed import. Every imported row points at the batch that contributed it,
+/// so any number in the dashboard can be traced back to a file and reverted.
+model ImportBatch {
+  id               Int       @id @default(autoincrement())
+  userId           Int       @map("user_id")
+  sourceId         Int       @map("source_id")
+  fileName         String    @map("file_name")
+  fileSize         BigInt    @default(0) @map("file_size")
+  /// SHA-256 of the file contents (hex). Used to recognise a file that was imported before.
+  contentHash      String?   @map("content_hash")
+  /// Detected format, e.g. "claude-export/conversations", "claude-code/jsonl".
+  format           String
+  parserVersion    String    @map("parser_version")
+  coverageStart    DateTime? @map("coverage_start") @db.Timestamptz(3)
+  coverageEnd      DateTime? @map("coverage_end") @db.Timestamptz(3)
+  recordsSeen      Int       @default(0) @map("records_seen")
+  recordsInserted  Int       @default(0) @map("records_inserted")
+  recordsDuplicate Int       @default(0) @map("records_duplicate")
+  recordsSkipped   Int       @default(0) @map("records_skipped")
+  /// Fields the parser expected but the file did not contain.
+  missingFields    String[]  @default([]) @map("missing_fields")
+  warnings         Json      @default("[]")
+  stats            Json      @default("{}")
+  /// 64-bit hashes of the API requests this batch contributed (Claude Code). A request
+  /// whose hash is already present in any batch is never counted again.
+  requestKeys      BigInt[]  @default([]) @map("request_keys")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source         DataSource      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  messages       Message[]
+  usageRecords   UsageRecord[]
+  tokenEstimates TokenEstimate[]
+  reportedCosts  ReportedCost[]
+
+  @@index([sourceId])
+  @@index([userId, contentHash])
+  @@map("import_batches")
+}
+
+model Conversation {
+  id                    Int              @id @default(autoincrement())
+  userId                Int              @map("user_id")
+  sourceId              Int              @map("source_id")
+  kind                  ConversationKind
+  /// Identifier in the source system (conversation uuid, Claude Code session id).
+  externalId            String           @map("external_id")
+  /// Source-aware deduplication identifier, unique per user, e.g. "claude_ai:<uuid>".
+  dedupKey              String           @map("dedup_key")
+  title                 String?
+  /// claude.ai project name or Claude Code project directory.
+  projectLabel          String?          @map("project_label")
+  /// Model named by the source. NULL when the source does not identify one.
+  modelId               Int?             @map("model_id")
+  createdAt             DateTime?        @map("created_at") @db.Timestamptz(3)
+  /// Last activity.
+  updatedAt             DateTime?        @map("updated_at") @db.Timestamptz(3)
+  messageCount          Int              @default(0) @map("message_count")
+  userMessageCount      Int              @default(0) @map("user_message_count")
+  assistantMessageCount Int              @default(0) @map("assistant_message_count")
+  metadata              Json             @default("{}")
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source         DataSource      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  model          ModelCatalog?   @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  messages       Message[]
+  usageRecords   UsageRecord[]
+  tokenEstimates TokenEstimate[]
+
+  @@unique([userId, dedupKey])
+  @@index([userId, createdAt])
+  @@index([userId, updatedAt])
+  @@index([sourceId])
+  @@map("conversations")
+}
+
+/// Message metadata. Message text is never stored in this database.
+model Message {
+  id               Int         @id @default(autoincrement())
+  conversationId   Int         @map("conversation_id")
+  batchId          Int         @map("batch_id")
+  /// Message identifier in the source (uuid), or a content-derived key when the source has none.
+  externalId       String      @map("external_id")
+  parentExternalId String?     @map("parent_external_id")
+  role             MessageRole
+  createdAt        DateTime?   @map("created_at") @db.Timestamptz(3)
+  /// Position in the conversation as listed by the source.
+  ordinal          Int
+  modelId          Int?        @map("model_id")
+  /// Content lengths in characters (metadata only).
+  textChars        Int         @default(0) @map("text_chars")
+  thinkingChars    Int         @default(0) @map("thinking_chars")
+  toolChars        Int         @default(0) @map("tool_chars")
+  attachmentChars  Int         @default(0) @map("attachment_chars")
+  attachmentCount  Int         @default(0) @map("attachment_count") @db.SmallInt
+  /// Binary files (images, PDFs) referenced by the message whose content is not in the source.
+  fileCount        Int         @default(0) @map("file_count") @db.SmallInt
+
+  conversation  Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  batch         ImportBatch    @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  model         ModelCatalog?  @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  tokenEstimate TokenEstimate?
+
+  @@unique([conversationId, externalId])
+  @@index([batchId])
+  @@map("messages")
+}
+
+/// EXACT usage: token counts reported by a trusted source, aggregated into time buckets
+/// (15 minutes for Claude Code sessions; the report's own bucket for API reports).
+/// Aggregating exact counts keeps them exact while keeping the in-browser database small.
+model UsageRecord {
+  id                    Int        @id @default(autoincrement())
+  userId                Int        @map("user_id")
+  sourceId              Int        @map("source_id")
+  batchId               Int        @map("batch_id")
+  conversationId        Int?       @map("conversation_id")
+  modelId               Int?       @map("model_id")
+  /// Start of the bucket (UTC).
+  occurredAt            DateTime   @map("occurred_at") @db.Timestamptz(3)
+  bucketSeconds         Int        @default(900) @map("bucket_seconds")
+  /// Pricing modifier that applied: standard | batch | fast | long_context | priority | flex | ...
+  priceTier             String     @default("standard") @map("price_tier")
+  /// Uncached input tokens.
+  inputTokens           BigInt     @default(0) @map("input_tokens")
+  outputTokens          BigInt     @default(0) @map("output_tokens")
+  cacheReadTokens       BigInt     @default(0) @map("cache_read_tokens")
+  cacheWrite5mTokens    BigInt     @default(0) @map("cache_write_5m_tokens")
+  cacheWrite1hTokens    BigInt     @default(0) @map("cache_write_1h_tokens")
+  requestCount          Int        @default(0) @map("request_count")
+  userMessageCount      Int        @default(0) @map("user_message_count")
+  assistantMessageCount Int        @default(0) @map("assistant_message_count")
+  webSearchRequests     Int        @default(0) @map("web_search_requests")
+  /// `exact` for trusted sources. Manual and generic imports may declare `estimated`.
+  confidence            Confidence @default(exact)
+  /// Deduplication identifier, unique per user.
+  dedupKey              String     @map("dedup_key")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source       DataSource    @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  batch        ImportBatch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  model        ModelCatalog? @relation(fields: [modelId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, dedupKey])
+  @@index([userId, occurredAt])
+  @@index([conversationId])
+  @@index([batchId])
+  @@index([sourceId, occurredAt])
+  @@map("usage_records")
+}
+
+/// ESTIMATED usage: one row per message whose tokens were estimated from its text.
+///
+/// The *_base columns are counted in "base units": tokens as Anthropic's published
+/// legacy tokenizer would count the text. The method row holds the factor that converts
+/// base units to tokens for the tokenizer generation that applies, plus the uncertainty
+/// band. The usage_facts view applies the factor, so re-calibrating a method updates
+/// every number without re-importing anything.
+model TokenEstimate {
+  messageId        Int         @id @map("message_id")
+  userId           Int         @map("user_id")
+  sourceId         Int         @map("source_id")
+  batchId          Int         @map("batch_id")
+  conversationId   Int         @map("conversation_id")
+  modelId          Int?        @map("model_id")
+  occurredAt       DateTime    @map("occurred_at") @db.Timestamptz(3)
+  role             MessageRole
+  /// New input content: the user's text and attachments, or tool results fed back to the model.
+  inputBase        Int         @default(0) @map("input_base")
+  /// Content the model generated: reply text, visible thinking, tool calls.
+  outputBase       Int         @default(0) @map("output_base")
+  /// Earlier conversation context re-sent to the model with each request (modelled).
+  replayBase       BigInt      @default(0) @map("replay_base")
+  /// Part of replayBase that prompt caching could have served (previous request < 5 minutes earlier).
+  replayCachedBase BigInt      @default(0) @map("replay_cached_base")
+  /// Number of model requests this message needed (1 + tool round trips).
+  requestCount     Int         @default(0) @map("request_count") @db.SmallInt
+  methodId         Int         @map("method_id")
+  /// Bitmask of known limitations of this estimate (see src/core/limitations.ts).
+  limitationFlags  Int         @default(0) @map("limitation_flags")
+
+  message      Message          @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source       DataSource       @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  batch        ImportBatch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  conversation Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  model        ModelCatalog?    @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  method       EstimationMethod @relation(fields: [methodId], references: [id])
+
+  @@index([userId, occurredAt])
+  @@index([conversationId])
+  @@index([batchId])
+  @@map("token_estimates")
+}
+
+/// How an estimate was produced and how far off it may be. Estimates are never
+/// presented as official Anthropic accounting figures.
+model EstimationMethod {
+  id              Int       @id @default(autoincrement())
+  /// e.g. "heuristic-v1/claude3"
+  methodKey       String    @unique @map("method_key")
+  /// Which tokenizer generation the estimate assumes: claude2 | claude3 | claude47 | mixed
+  tokenizerBasis  String    @map("tokenizer_basis")
+  /// Tokens per base unit (central estimate).
+  centralFactor   Decimal   @map("central_factor") @db.Decimal(8, 4)
+  /// Low and high ends of the uncertainty band, relative to the central estimate.
+  lowFactor       Decimal   @map("low_factor") @db.Decimal(6, 4)
+  highFactor      Decimal   @map("high_factor") @db.Decimal(6, 4)
+  description     String
+  sourceUrl       String?   @map("source_url")
+  /// Set when the factor was measured against the official token counting API.
+  calibratedAt    DateTime? @map("calibrated_at") @db.Timestamptz(3)
+  calibrationNote String?   @map("calibration_note")
+
+  tokenEstimates TokenEstimate[]
+
+  @@map("estimation_methods")
+}
+
+/// Actual money billed by Anthropic, from cost reports. Kept apart from
+/// "equivalent API value", which is hypothetical.
+model ReportedCost {
+  id            Int      @id @default(autoincrement())
+  userId        Int      @map("user_id")
+  sourceId      Int      @map("source_id")
+  batchId       Int      @map("batch_id")
+  modelId       Int?     @map("model_id")
+  occurredAt    DateTime @map("occurred_at") @db.Timestamptz(3)
+  bucketSeconds Int      @default(86400) @map("bucket_seconds")
+  costType      String?  @map("cost_type")
+  tokenType     String?  @map("token_type")
+  description   String?
+  amountUsd     Decimal  @map("amount_usd") @db.Decimal(18, 6)
+  dedupKey      String   @map("dedup_key")
+
+  user   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source DataSource    @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  batch  ImportBatch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  model  ModelCatalog? @relation(fields: [modelId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, dedupKey])
+  @@index([userId, occurredAt])
+  @@map("reported_costs")
+}
+
+/// A stretch of time on one plan. Entered by the user; never inferred.
+/// Overlaps are rejected by the application and by an exclusion constraint (0002 migration).
+model SubscriptionPeriod {
+  id           Int       @id @default(autoincrement())
+  userId       Int       @map("user_id")
+  /// free | pro | max_5x | max_20x | max | team | enterprise | other ...
+  planKey      String    @map("plan_key")
+  label        String?
+  startedAt    DateTime  @map("started_at") @db.Timestamptz(3)
+  /// NULL while the plan is still active.
+  endedAt      DateTime? @map("ended_at") @db.Timestamptz(3)
+  /// What the user actually paid per month, if they choose to record it.
+  monthlyPrice Decimal?  @map("monthly_price") @db.Decimal(10, 2)
+  currency     String    @default("USD")
+  notes        String?
+  /// True for periods created by the synthetic demo dataset.
+  isSynthetic  Boolean   @default(false) @map("is_synthetic")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startedAt])
+  @@map("subscription_periods")
+}
+
+model ModelCatalog {
+  id              Int       @id @default(autoincrement())
+  /// Canonical identifier, e.g. "claude-opus-4-5". Unknown identifiers found in
+  /// imported data are added verbatim; a missing identifier stays NULL ("Unknown model").
+  modelKey        String    @unique @map("model_key")
+  displayName     String    @map("display_name")
+  /// opus | sonnet | haiku | fable | mythos | claude-2 | claude-instant | other
+  family          String
+  /// claude2 | claude3 | claude47 | unknown — models do not all share a tokenizer.
+  tokenizerFamily String    @default("unknown") @map("tokenizer_family")
+  releasedOn      DateTime? @map("released_on") @db.Date
+  retiredOn       DateTime? @map("retired_on") @db.Date
+  contextWindow   Int?      @map("context_window")
+  /// Other spellings that resolve to this model (dated ids, cloud-provider ids).
+  aliases         String[]  @default([])
+  isBuiltin       Boolean   @default(true) @map("is_builtin")
+  sourceUrl       String?   @map("source_url")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  pricing        PricingHistory[]
+  conversations  Conversation[]
+  messages       Message[]
+  usageRecords   UsageRecord[]
+  tokenEstimates TokenEstimate[]
+  reportedCosts  ReportedCost[]
+
+  @@map("model_catalog")
+}
+
+/// Published API prices in USD per million tokens, with where and when each was read.
+model PricingHistory {
+  id                     Int       @id @default(autoincrement())
+  modelId                Int       @map("model_id")
+  priceTier              String    @default("standard") @map("price_tier")
+  /// First day the price applies. NULL = since the model launched.
+  effectiveFrom          DateTime? @map("effective_from") @db.Date
+  /// First day the price no longer applies. NULL = still current.
+  effectiveTo            DateTime? @map("effective_to") @db.Date
+  inputUsdPerMtok        Decimal   @map("input_usd_per_mtok") @db.Decimal(12, 6)
+  outputUsdPerMtok       Decimal   @map("output_usd_per_mtok") @db.Decimal(12, 6)
+  cacheReadUsdPerMtok    Decimal?  @map("cache_read_usd_per_mtok") @db.Decimal(12, 6)
+  cacheWrite5mUsdPerMtok Decimal?  @map("cache_write_5m_usd_per_mtok") @db.Decimal(12, 6)
+  cacheWrite1hUsdPerMtok Decimal?  @map("cache_write_1h_usd_per_mtok") @db.Decimal(12, 6)
+  sourceUrl              String    @map("source_url")
+  sourceRetrievedOn      DateTime  @map("source_retrieved_on") @db.Date
+  sourceNote             String?   @map("source_note")
+  /// False for rows the user added or edited; those take precedence over built-in rows.
+  isBuiltin              Boolean   @default(true) @map("is_builtin")
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  model ModelCatalog @relation(fields: [modelId], references: [id], onDelete: Cascade)
+
+  @@index([modelId, priceTier, effectiveFrom])
+  @@map("pricing_history")
+}
+
+/// Files already read from a user-authorised Claude Code directory, so a re-sync
+/// only parses files that are new or have changed.
+model SyncedFile {
+  id           Int      @id @default(autoincrement())
+  sourceId     Int      @map("source_id")
+  path         String
+  size         BigInt
+  lastModified DateTime @map("last_modified") @db.Timestamptz(3)
+  syncedAt     DateTime @default(now()) @map("synced_at") @db.Timestamptz(3)
+
+  source DataSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, path])
+  @@map("synced_files")
+}

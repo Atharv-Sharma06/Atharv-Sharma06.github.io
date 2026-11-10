@@ -1,0 +1,5 @@
+timestamp,model,input_tokens,output_tokens,cache_read_tokens,cache_write_5m_tokens,cache_write_1h_tokens,requests,conversation_id,conversation_title,id,price_tier,bucket_seconds
+2026-03-01T09:15:00Z,claude-sonnet-4-6,1200,350,8000,0,0,1,conv-1,Refactoring notes,req-0001,standard,
+2026-03-01T10:20:30+01:00,claude-sonnet-4-6,2200,410,9100,500,0,1,conv-1,Refactoring notes,req-0002,standard,
+2026-03-02,claude-opus-4-6,50000,12000,0,0,0,40,,,day-2026-03-02,batch,
+1772532000,claude-haiku-4-5-20251001,900,100,0,0,250,1,conv-2,"Quoted, title",req-0003,,60

@@ -1,0 +1,85 @@
+# tidewatch
+
+> A tiny command-line tool that tells you when the tide will be high enough to launch a boat.
+
+[![build](https://img.shields.io/badge/build-passing-brightgreen)](#) [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+`tidewatch` reads tide predictions for a harbour, compares them with the draft of your boat, and prints the windows in which you can safely leave or return. It has no account system, no telemetry and one dependency.
+
+## Table of contents
+
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [FAQ](#faq)
+- [Contributing](#contributing)
+
+## Installation
+
+```bash
+# with npm
+npm install --global tidewatch
+
+# or run it once without installing
+npx tidewatch --harbour "St Ives" --draft 1.2
+```
+
+Node.js **18 or newer** is required. On Windows, use PowerShell or WSL; the classic `cmd.exe` prompt does not render the table correctly.
+
+## Quick start
+
+```bash
+tidewatch --harbour "St Ives" --draft 1.2 --days 3
+```
+
+Example output:
+
+| Day       | Window        | Min depth | Notes            |
+|-----------|---------------|-----------|------------------|
+| Fri 14    | 05:10 – 08:45 | 1.9 m     |                  |
+| Fri 14    | 17:30 – 21:05 | 2.1 m     | sunset at 20:41  |
+| Sat 15    | 06:00 – 09:30 | 1.8 m     | spring tide      |
+
+Times are local to the harbour. A window is only shown when the predicted depth stays above `draft + margin` for at least 30 minutes.
+
+## Configuration
+
+Settings can be passed as flags or stored in `~/.config/tidewatch/config.toml`:
+
+```toml
+harbour = "St Ives"
+draft   = 1.2      # metres
+margin  = 0.4      # extra water under the keel
+units   = "metric" # or "imperial"
+```
+
+| Flag         | Default  | Description                                   |
+|--------------|----------|-----------------------------------------------|
+| `--harbour`  | *(none)* | Harbour name or station id                    |
+| `--draft`    | `1.0`    | Draft of the boat in metres                   |
+| `--margin`   | `0.3`    | Safety margin added to the draft              |
+| `--days`     | `2`      | How many days to look ahead (max 14)          |
+| `--json`     | `false`  | Print machine-readable output instead         |
+
+## FAQ
+
+**Is this safe to rely on?**
+No. Predictions ignore wind, pressure and river flow, all of which can move the real water level by half a metre or more. Treat the output as a starting point and *always* check the official tables and the sky.
+
+**Why is my harbour missing?**
+The bundled list covers about 400 stations. You can add your own with `tidewatch stations add <file.csv>`; see [docs/stations.md](docs/stations.md) for the format.
+
+**Can it send me a reminder?**
+Not directly, but `--json` output is easy to pipe into `cron`, `ntfy` or a home-automation system.
+
+## Contributing
+
+1. Fork the repository and create a branch: `git checkout -b fix/my-change`
+2. Run the tests with `npm test`
+3. Open a pull request and describe *why* the change is needed
+
+Bug reports are welcome. Please include the command you ran, the output, and your operating system.
+
+## License
+
+MIT © the tidewatch contributors

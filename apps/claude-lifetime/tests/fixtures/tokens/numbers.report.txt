@@ -1,0 +1,17 @@
+Quarterly operations report — figures as of 31 March 2025
+
+Revenue for the quarter was 4,812,650.75 EUR, up 12.4% from 4,281,717.00 EUR in Q4 2024 and up 31.8% year over year. Recurring revenue made up 3,906,112.40 EUR (81.2% of the total). The average contract value rose from 18,450 to 19,975, while the median stayed flat at 12,000. We closed 241 new contracts out of 1,387 qualified leads, a conversion rate of 17.4%; the previous four quarters were 14.9%, 15.6%, 16.1% and 16.8%.
+
+Costs came to 3,655,904.18 EUR: 2,104,300.00 for salaries (57.6%), 612,480.55 for infrastructure (16.8%), 498,022.10 for marketing (13.6%) and 441,101.53 for everything else. The operating margin was therefore 24.0%, against a target of 22.5%. Cash at the end of the period stood at 9,340,118.92 EUR, enough for roughly 30.6 months at the current burn of 305,000 per month.
+
+Usage. The platform served 1,284,907,332 requests (about 165.2 per second on average, 2,410 at peak on 11 March at 14:05:32 UTC). Median latency was 38 ms, p95 was 212 ms and p99 was 1,045 ms. Availability was 99.982%, which corresponds to 23 minutes 20 seconds of downtime across 90 days; the two incidents lasted 14 min 05 s and 9 min 15 s. Storage grew from 412.6 TB to 468.9 TB (+13.6%), and the largest single tenant now holds 31.4 TB.
+
+Support. 8,416 tickets were opened and 8,502 were closed, so the backlog fell from 391 to 305. First response time improved from 3 h 42 min to 2 h 17 min. Satisfaction was 4.62 out of 5 (n = 2,933), compared with 4.55, 4.49 and 4.58 in the three quarters before. Refunds totalled 27,380.00 EUR over 96 cases, i.e. 285.21 on average.
+
+Headcount went from 148 to 157: 13 hires, 4 departures. Engineering is 71 people (45.2%), sales 29, support 24, operations 18 and finance and administration 15. The ratio of managers to individual contributors is 1 : 7.3.
+
+Key dates: board meeting on 2025-04-17 at 09:30; audit fieldwork from 2025-05-05 to 2025-05-16; the price change takes effect on 01/07/2025. Invoice numbers for the quarter run from INV-2025-000913 to INV-2025-002207. The reference exchange rates used were 1 EUR = 1.0842 USD, 0.8391 GBP and 161.37 JPY.
+
+Measurements from the hardware lab, for the record: the new enclosure weighs 2.35 kg (old: 2.81 kg), measures 310 × 215 × 44 mm, draws 18.5 W idle and 64.0 W under load at 230 V, and stays below 41.5 °C at an ambient temperature of 25 °C. Out of 500 units tested, 3 failed the drop test (0.6%) and 1 failed the 72-hour burn-in (0.2%). Serial numbers 00417, 00418 and 00433 were returned to the supplier. Call +44 20 7946 0958 or +1 (415) 555-0132 with questions.
+
+Forecast for Q2: revenue between 5.0 and 5.3 million, costs near 3.8 million, and headcount of 165 ± 3.

@@ -1,0 +1,102 @@
+package com.example.library;
+
+import java.time.Duration;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
+
+/**
+ * Keeps track of which member has borrowed which book.
+ *
+ * <p>Fixture for the token estimator tests: conventional Java with
+ * generics, streams, records, checked exceptions and Javadoc.
+ */
+public final class LoanService {
+
+    private static final int MAX_LOANS_PER_MEMBER = 5;
+    private static final Duration LOAN_PERIOD = Duration.ofDays(21);
+
+    public record Loan(String isbn, String memberId, LocalDate borrowedOn, LocalDate dueOn) {
+        public boolean isOverdue(LocalDate today) {
+            return today.isAfter(dueOn);
+        }
+    }
+
+    public static class LoanLimitExceededException extends Exception {
+        public LoanLimitExceededException(String memberId, int limit) {
+            super("Member " + memberId + " already has " + limit + " books on loan");
+        }
+    }
+
+    private final Map<String, Loan> loansByIsbn = new ConcurrentHashMap<>();
+    private final BookCatalog catalog;
+
+    public LoanService(BookCatalog catalog) {
+        this.catalog = Objects.requireNonNull(catalog, "catalog must not be null");
+    }
+
+    /**
+     * Lends a book to a member.
+     *
+     * @param isbn     the book to lend
+     * @param memberId the borrowing member
+     * @param today    the current date, injected to keep the method testable
+     * @return the created loan
+     * @throws LoanLimitExceededException if the member has too many books
+     * @throws IllegalStateException      if the book is unknown or already on loan
+     */
+    public Loan lend(String isbn, String memberId, LocalDate today) throws LoanLimitExceededException {
+        if (!catalog.contains(isbn)) {
+            throw new IllegalStateException("Unknown book: " + isbn);
+        }
+        long current = loansByIsbn.values().stream()
+                .filter(loan -> loan.memberId().equals(memberId))
+                .count();
+        if (current >= MAX_LOANS_PER_MEMBER) {
+            throw new LoanLimitExceededException(memberId, MAX_LOANS_PER_MEMBER);
+        }
+        Loan loan = new Loan(isbn, memberId, today, today.plusDays(LOAN_PERIOD.toDays()));
+        Loan previous = loansByIsbn.putIfAbsent(isbn, loan);
+        if (previous != null) {
+            throw new IllegalStateException("Book " + isbn + " is already on loan until " + previous.dueOn());
+        }
+        return loan;
+    }
+
+    public Optional<Loan> giveBack(String isbn) {
+        return Optional.ofNullable(loansByIsbn.remove(isbn));
+    }
+
+    public List<Loan> overdue(LocalDate today) {
+        List<Loan> result = new ArrayList<>();
+        for (Loan loan : loansByIsbn.values()) {
+            if (loan.isOverdue(today)) {
+                result.add(loan);
+            }
+        }
+        result.sort(Comparator.comparing(Loan::dueOn).thenComparing(Loan::isbn));
+        return Collections.unmodifiableList(result);
+    }
+
+    public Map<String, Long> loansPerMember() {
+        return loansByIsbn.values().stream()
+                .collect(Collectors.groupingBy(Loan::memberId, Collectors.counting()));
+    }
+
+    @Override
+    public String toString() {
+        return "LoanService{activeLoans=" + loansByIsbn.size() + '}';
+    }
+
+    /** Minimal view of the catalogue that this service depends on. */
+    public interface BookCatalog {
+        boolean contains(String isbn);
+    }
+}

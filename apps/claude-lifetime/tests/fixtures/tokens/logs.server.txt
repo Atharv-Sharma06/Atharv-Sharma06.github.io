@@ -1,0 +1,34 @@
+2025-04-08T02:14:07.112Z INFO  [http] server listening on 0.0.0.0:8080 (pid=4127, workers=4)
+2025-04-08T02:14:07.118Z INFO  [db] pool ready: host=db-primary.internal port=5432 max=20 idle_timeout=30s
+2025-04-08T02:14:09.530Z INFO  [http] GET /healthz 200 1ms ip=10.0.3.17 ua="kube-probe/1.29"
+2025-04-08T02:14:12.004Z INFO  [http] POST /api/v1/sessions 201 84ms ip=203.0.113.54 req_id=7f3c2a91 user=u_10482
+2025-04-08T02:14:12.871Z DEBUG [cache] miss key=profile:u_10482 ttl=300
+2025-04-08T02:14:12.902Z INFO  [http] GET /api/v1/users/u_10482/profile 200 31ms ip=203.0.113.54 req_id=a09e11d4
+2025-04-08T02:14:15.440Z WARN  [ratelimit] ip=198.51.100.23 exceeded 100 req/min on /api/v1/search (count=137), throttling for 60s
+2025-04-08T02:14:15.441Z INFO  [http] GET /api/v1/search?q=blue+kettle&page=3 429 0ms ip=198.51.100.23 req_id=c41b77e0
+2025-04-08T02:14:19.530Z INFO  [http] GET /healthz 200 0ms ip=10.0.3.17 ua="kube-probe/1.29"
+2025-04-08T02:14:21.266Z INFO  [jobs] started job=nightly-report id=job_5521 queue=default attempt=1
+2025-04-08T02:14:23.901Z ERROR [db] query failed after 2503ms: canceling statement due to statement timeout
+    sql="SELECT o.id, o.total FROM orders o WHERE o.created_at >= $1 ORDER BY o.created_at" params=["2025-04-07"]
+2025-04-08T02:14:23.902Z ERROR [jobs] job=nightly-report id=job_5521 failed: DatabaseTimeoutError (attempt 1/3), retrying in 15s
+2025-04-08T02:14:29.530Z INFO  [http] GET /healthz 200 1ms ip=10.0.3.17 ua="kube-probe/1.29"
+2025-04-08T02:14:31.775Z INFO  [http] PUT /api/v1/cart/items/8841 200 46ms ip=192.0.2.200 req_id=11d0fe52 user=u_22017
+2025-04-08T02:14:33.019Z WARN  [http] slow request: GET /api/v1/reports/sales?from=2024-01-01&to=2024-12-31 took 1874ms req_id=5be9a3c7
+2025-04-08T02:14:38.905Z INFO  [jobs] started job=nightly-report id=job_5521 queue=default attempt=2
+2025-04-08T02:14:39.530Z INFO  [http] GET /healthz 200 0ms ip=10.0.3.17 ua="kube-probe/1.29"
+2025-04-08T02:14:44.312Z INFO  [jobs] job=nightly-report id=job_5521 finished in 5407ms rows=18234 bytes=2411507
+2025-04-08T02:14:44.398Z INFO  [mail] queued message to=finance@example.com subject="Nightly report 2025-04-07" size=2.3MB
+2025-04-08T02:14:47.660Z ERROR [http] POST /api/v1/payments 502 3004ms ip=203.0.113.9 req_id=e7720b6a upstream=payments-gw:8443 err="upstream timed out"
+2025-04-08T02:14:47.661Z WARN  [circuit] payments-gw failures=3/5 window=30s state=closed
+2025-04-08T02:14:49.530Z INFO  [http] GET /healthz 200 1ms ip=10.0.3.17 ua="kube-probe/1.29"
+2025-04-08T02:14:52.118Z ERROR [http] POST /api/v1/payments 502 3001ms ip=198.51.100.77 req_id=0c5d9e13 upstream=payments-gw:8443 err="upstream timed out"
+2025-04-08T02:14:53.420Z ERROR [http] POST /api/v1/payments 502 3002ms ip=192.0.2.31 req_id=9a1f4b08 upstream=payments-gw:8443 err="connection reset by peer"
+2025-04-08T02:14:53.421Z ERROR [circuit] payments-gw failures=5/5 window=30s state=open, rejecting calls for 20s
+2025-04-08T02:14:55.007Z INFO  [http] POST /api/v1/payments 503 0ms ip=203.0.113.120 req_id=4410aa7e reason=circuit_open
+2025-04-08T02:14:59.530Z INFO  [http] GET /healthz 200 0ms ip=10.0.3.17 ua="kube-probe/1.29"
+2025-04-08T02:15:13.425Z INFO  [circuit] payments-gw state=half-open, allowing 1 probe
+2025-04-08T02:15:13.611Z INFO  [http] POST /api/v1/payments 201 186ms ip=192.0.2.31 req_id=b2e6c4f9 user=u_30911
+2025-04-08T02:15:13.612Z INFO  [circuit] payments-gw state=closed
+2025-04-08T02:15:20.004Z INFO  [gc] heap_used=412MB heap_total=640MB rss=803MB pause=12ms
+2025-04-08T02:15:31.870Z WARN  [disk] /var/lib/app/uploads at 87% (41.6G of 48G), threshold 85%
+2025-04-08T02:16:00.000Z INFO  [metrics] rps=42.7 p50=28ms p95=310ms p99=2890ms errors=0.9% open_conns=57

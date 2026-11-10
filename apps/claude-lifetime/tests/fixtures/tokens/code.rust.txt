@@ -1,0 +1,121 @@
+//! A tiny word-frequency counter.
+//!
+//! Fixture for the token estimator tests: Rust with generics, traits,
+//! lifetimes, error handling, iterators and unit tests.
+
+use std::collections::HashMap;
+use std::fmt;
+use std::fs::File;
+use std::io::{self, BufRead, BufReader};
+use std::path::Path;
+
+#[derive(Debug)]
+pub enum CountError {
+    Io(io::Error),
+    Empty,
+}
+
+impl fmt::Display for CountError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CountError::Io(err) => write!(f, "could not read input: {err}"),
+            CountError::Empty => write!(f, "the input contained no words"),
+        }
+    }
+}
+
+impl std::error::Error for CountError {}
+
+impl From<io::Error> for CountError {
+    fn from(err: io::Error) -> Self {
+        CountError::Io(err)
+    }
+}
+
+/// Counts of each word, plus the total number of words seen.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct WordCounts {
+    counts: HashMap<String, usize>,
+    total: usize,
+}
+
+impl WordCounts {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds every word of `line`, lower-cased and stripped of punctuation.
+    pub fn add_line(&mut self, line: &str) {
+        for word in line
+            .split(|c: char| !c.is_alphanumeric() && c != '\'')
+            .filter(|w| !w.is_empty())
+        {
+            *self.counts.entry(word.to_lowercase()).or_insert(0) += 1;
+            self.total += 1;
+        }
+    }
+
+    /// Returns the `n` most frequent words, ties broken alphabetically.
+    pub fn top(&self, n: usize) -> Vec<(&str, usize)> {
+        let mut entries: Vec<(&str, usize)> =
+            self.counts.iter().map(|(w, c)| (w.as_str(), *c)).collect();
+        entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+        entries.truncate(n);
+        entries
+    }
+
+    pub fn total(&self) -> usize {
+        self.total
+    }
+
+    pub fn distinct(&self) -> usize {
+        self.counts.len()
+    }
+}
+
+pub fn count_reader<R: BufRead>(reader: R) -> Result<WordCounts, CountError> {
+    let mut counts = WordCounts::new();
+    for line in reader.lines() {
+        counts.add_line(&line?);
+    }
+    if counts.total() == 0 {
+        return Err(CountError::Empty);
+    }
+    Ok(counts)
+}
+
+pub fn count_file<P: AsRef<Path>>(path: P) -> Result<WordCounts, CountError> {
+    let file = File::open(path)?;
+    count_reader(BufReader::new(file))
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let path = std::env::args().nth(1).unwrap_or_else(|| "input.txt".to_string());
+    let counts = count_file(&path)?;
+    println!("{} words, {} distinct", counts.total(), counts.distinct());
+    for (rank, (word, n)) in counts.top(10).into_iter().enumerate() {
+        let share = n as f64 / counts.total() as f64 * 100.0;
+        println!("{:>2}. {:<15} {:>6}  {:>5.1}%", rank + 1, word, n, share);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn counts_words_case_insensitively() {
+        let input = Cursor::new("The cat saw the other cat.\nIt wasn't the dog's cat!\n");
+        let counts = count_reader(input).expect("input is not empty");
+        assert_eq!(counts.total(), 11);
+        assert_eq!(counts.top(2), vec![("cat", 3), ("the", 3)]);
+    }
+
+    #[test]
+    fn empty_input_is_an_error() {
+        let result = count_reader(Cursor::new("  \n\n ... \n"));
+        assert!(matches!(result, Err(CountError::Empty)));
+    }
+}

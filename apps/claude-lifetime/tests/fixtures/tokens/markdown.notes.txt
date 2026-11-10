@@ -1,0 +1,53 @@
+# Weekly sync — platform team
+
+**Date:** Thursday, 9 October
+**Attendees:** Priya, Tomasz, Lena, Okonkwo, Rui (notes)
+**Absent:** Dana (on leave until the 20th)
+
+---
+
+## 1. Incident review: checkout latency on Monday
+
+*Summary.* Between 14:05 and 14:52 UTC the p95 latency of `POST /checkout` rose from roughly 180 ms to 2.4 s. No orders were lost, but about 3% of requests timed out on the client.
+
+*What we know:*
+
+- The trigger was a schema migration that added an index to `orders` while traffic was at its daily peak.
+- The migration tool took a lock we did not expect. The staging run did not show this because the staging table has ~40k rows instead of 90 million.
+- Alerting worked: the page fired after 4 minutes. Rollback took longer than it should have (31 minutes) because the runbook pointed at the old dashboard.
+
+*Actions:*
+
+- [ ] **Tomasz** — rewrite the migration to use `CREATE INDEX CONCURRENTLY`; re-run on Tuesday night
+- [ ] **Lena** — fix the runbook link and add a "how to cancel a running migration" section
+- [x] **Priya** — post the customer-facing summary (done Tuesday)
+
+## 2. Moving CI to the new runners
+
+Okonkwo shared numbers from the two-week trial:
+
+| Metric                     | Old runners | New runners | Change  |
+|----------------------------|-------------|-------------|---------|
+| Median build time          | 11 min 20 s | 6 min 45 s  | −40%    |
+| Queue time at 10:00        | 3 min 10 s  | 25 s        | −87%    |
+| Flaky test reruns per day  | 14          | 9           | −36%    |
+| Cost per 1,000 builds      | $212        | $187        | −12%    |
+
+Discussion: everyone is in favour. Lena raised one concern: the new images do not include the legacy Java 11 toolchain that the `billing-export` job still needs. Options are (a) add it to the image, (b) pin that one job to the old runners until it is migrated.
+
+> **Decision:** go with (b). We switch the default on 20 October and keep the old pool alive for one job until the end of the quarter.
+
+## 3. Quick updates
+
+- **Docs:** the API reference now builds from the OpenAPI file, so please stop editing the HTML by hand.
+- **Hiring:** two onsite interviews next week; feedback forms are due within 24 hours.
+- **On-call:** Rui swaps with Priya for the week of the 27th.
+
+## Open questions
+
+1. Do we need a second review for *every* migration, or only for tables above a certain size? Tomasz suggests a threshold of 5 million rows.
+2. Who owns the cost dashboard now that the finance team has moved to a different tool?
+
+## Next meeting
+
+Thursday, 16 October, 10:30. Agenda items go in the usual doc: <https://example.com/wiki/platform/weekly>.

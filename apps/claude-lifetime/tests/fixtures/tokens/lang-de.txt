@@ -1,0 +1,15 @@
+Der Umzug in die neue Wohnung
+
+Letzten Monat sind wir endlich umgezogen. Die neue Wohnung liegt im dritten Stock eines Altbaus, hat hohe Decken, knarrende Holzdielen und leider keinen Aufzug. Unsere Freunde haben trotzdem geholfen, obwohl wir ihnen vorher nicht gesagt hatten, wie viele Bücherkisten auf sie warten würden. Am Ende des Tages saßen wir alle erschöpft auf dem Boden, aßen Pizza aus dem Karton und stellten fest, dass niemand wusste, in welcher Kiste das Besteck war.
+
+Die ersten Wochen in einer fremden Umgebung sind immer ein wenig seltsam. Man kennt die Geräusche des Hauses noch nicht, findet den Lichtschalter im Flur nie auf Anhieb und muss jeden Morgen überlegen, wo eigentlich die Kaffeetassen stehen. Inzwischen haben wir uns eingelebt. Die Nachbarin von gegenüber hat uns einen selbstgebackenen Apfelkuchen gebracht, und der Bäcker an der Ecke weiß bereits, dass ich jeden Samstag vier Brötchen und eine Zeitung kaufe.
+
+Besonders gefällt mir der kleine Balkon. Er ist kaum größer als ein Handtuch, aber abends scheint dort die Sonne, und man kann den Kindern im Hinterhof beim Fußballspielen zusehen. Wir haben Tomaten, Basilikum und eine ziemlich ehrgeizige Sonnenblume gepflanzt.
+
+Warum sichere Passwörter wichtig sind
+
+Beim Einrichten des neuen Internetanschlusses fiel mir auf, wie viele Zugangsdaten sich im Laufe der Jahre angesammelt haben. Für jedes Benutzerkonto ein eigenes, langes Kennwort zu verwenden, klingt zunächst mühsam. Es ist jedoch die wirksamste Maßnahme gegen den Diebstahl persönlicher Daten, denn Angreifer probieren gestohlene Kombinationen automatisch bei Hunderten von Diensten aus.
+
+Ein Passwortmanager nimmt einem den größten Teil der Arbeit ab. Das Programm erzeugt zufällige Zeichenfolgen, speichert sie verschlüsselt und füllt die Anmeldeformulare selbstständig aus. Man muss sich nur noch ein einziges Hauptkennwort merken, das allerdings wirklich gut sein sollte: mindestens sechzehn Zeichen, am besten ein ganzer Satz, den außer einem selbst niemand erraten kann.
+
+Zusätzlich empfiehlt sich die Zwei-Faktor-Authentifizierung. Dabei wird neben dem Kennwort ein zweiter Nachweis verlangt, zum Beispiel ein Zahlencode aus einer App oder ein kleiner Sicherheitsschlüssel. Selbst wenn ein Passwort in falsche Hände gerät, bleibt das Konto dadurch geschützt. Die Einrichtung dauert selten länger als fünf Minuten, und danach hat man deutlich weniger Grund zur Sorge.
