@@ -89,24 +89,42 @@ export function useSaveState() {
     setState({ status: 'idle' });
   }, []);
 
-  return { state, run, reset };
+  /** For a change that was saved from a dialog, which reports its own failures. */
+  const markSaved = useCallback(() => {
+    latest.current++;
+    setState({ status: 'saved' });
+  }, []);
+
+  return { state, run, reset, markSaved };
 }
 
 /** The quiet confirmation next to a control. Errors are shown separately, where the user can act on them. */
-export function SaveNote({ state, savedText = 'Saved', className }: { state: SaveState; savedText?: string; className?: string }) {
+export function SaveNote({
+  state,
+  savedText = 'Saved',
+  compact = false,
+  className,
+}: {
+  state: SaveState;
+  savedText?: string;
+  /** On narrow screens only the mark is shown, for places with no room for the word. */
+  compact?: boolean;
+  className?: string;
+}) {
+  const word = compact ? 'max-sm:sr-only' : undefined;
   return (
-    <span aria-live="polite" className={cn('inline-flex min-h-5 items-center gap-1.5 text-[13px]', className)}>
+    <span aria-live="polite" className={cn('inline-flex min-h-5 shrink-0 items-center gap-1.5 text-[13px] font-normal', className)}>
       {state.status === 'saving' ? (
         // Most saves finish before anyone could read "Saving"; it only appears when one takes a while.
         <span className="inline-flex animate-[fade-in_150ms_ease-out_350ms_both] items-center gap-1.5 text-ink-3">
           <Spinner className="size-3.5" />
-          Saving…
+          <span className={word}>Saving…</span>
         </span>
       ) : null}
       {state.status === 'saved' ? (
         <span className="inline-flex animate-[fade-in_150ms_ease-out] items-center gap-1 text-ink-2">
           <Check className="size-3.5 text-good" strokeWidth={2.5} aria-hidden="true" />
-          {savedText}
+          <span className={word}>{savedText}</span>
         </span>
       ) : null}
     </span>
@@ -130,12 +148,15 @@ export function ChoiceCards<T extends string>({
   onChange,
   options,
   labelledBy,
+  state,
 }: {
   value: T;
   onChange: (value: T) => void;
   options: Array<{ value: T; title: string; description: ReactNode }>;
   /** id of the element that names the group. */
   labelledBy: string;
+  /** Shown in the corner of the chosen card, where the user has just clicked. */
+  state?: SaveState;
 }) {
   const base = useId();
   return (
@@ -157,9 +178,12 @@ export function ChoiceCards<T extends string>({
           >
             <span className="size-2 rounded-full bg-accent opacity-0 group-data-[state=checked]:opacity-100" />
           </span>
-          <span className="min-w-0">
-            <span id={`${base}-${option.value}-title`} className="block text-sm font-medium text-ink">
-              {option.title}
+          <span className="min-w-0 flex-1">
+            <span className="flex items-start justify-between gap-3">
+              <span id={`${base}-${option.value}-title`} className="min-w-0 text-sm font-medium text-ink">
+                {option.title}
+              </span>
+              {state && option.value === value ? <SaveNote state={state} compact /> : null}
             </span>
             <span id={`${base}-${option.value}-text`} className="mt-0.5 block text-[13px] text-ink-2">
               {option.description}

@@ -1,6 +1,7 @@
 'use client';
 
 import { PGliteWorker } from '@electric-sql/pglite/worker';
+import { decryptBackup, isEncryptedBackup } from '@/lib/backup-crypto';
 import type { SqlDriver } from './driver';
 import { migrate, MigrationError } from './migrate';
 import { pgliteDriver } from './pglite-driver';
@@ -174,15 +175,17 @@ export async function destroyDatabase(): Promise<void> {
 
 /**
  * Replaces everything stored on this device with the contents of a backup made by
- * "Download backup". The backup is unpacked into a separate database and checked
- * first; the current data is only removed once that has succeeded. The page must be
- * reloaded afterwards.
+ * "Download backup" (plain, or protected with a passphrase). The backup is unpacked
+ * into a separate database and checked first; the current data is only removed once
+ * that has succeeded. The page must be reloaded afterwards.
  */
-export async function restoreDatabase(backup: Blob): Promise<void> {
-  if (backup.size === 0) throw new Error('The file is empty.');
+export async function restoreDatabase(file: Blob, passphrase?: string): Promise<void> {
+  if (file.size === 0) throw new Error('The file is empty.');
+  // A passphrase-protected backup is decrypted first; a wrong passphrase stops here, before anything changes.
+  const backup = (await isEncryptedBackup(file)) ? await decryptBackup(file, passphrase) : file;
   const head = new Uint8Array(await backup.slice(0, 2).arrayBuffer());
   if (head[0] !== 0x1f || head[1] !== 0x8b) {
-    throw new Error('This is not a Claude Lifetime backup. Choose the .tar.gz file that "Download backup" saved.');
+    throw new Error('This is not a Claude Lifetime backup. Choose the file that "Download backup" saved.');
   }
 
   const name = `${DEFAULT_NAME}-${Date.now().toString(36)}`;

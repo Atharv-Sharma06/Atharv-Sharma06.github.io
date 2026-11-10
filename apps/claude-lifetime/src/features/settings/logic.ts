@@ -122,6 +122,26 @@ export function effectiveLabel(from: string | null, to: string | null): string {
   return from ? `${formatDay(from)} – ${last}` : `Until ${last}`;
 }
 
+/**
+ * The catalog's model order (newest first) with each model's tiers in a fixed order,
+ * standard first. Rows of the same model and tier keep the order they came in, oldest price first.
+ */
+export function sortPrices<T extends Pick<PriceRow, 'modelKey' | 'priceTier'>>(rows: T[]): T[] {
+  const modelRank = new Map<string, number>();
+  for (const row of rows) if (!modelRank.has(row.modelKey)) modelRank.set(row.modelKey, modelRank.size);
+  const tierRank = (tier: string) => {
+    const index = PRICE_TIERS.findIndex((t) => t.value === tier);
+    return index === -1 ? PRICE_TIERS.length : index;
+  };
+  return rows
+    .map((row, index) => ({ row, index }))
+    .sort(
+      (a, b) =>
+        modelRank.get(a.row.modelKey)! - modelRank.get(b.row.modelKey)! || tierRank(a.row.priceTier) - tierRank(b.row.priceTier) || a.index - b.index,
+    )
+    .map((entry) => entry.row);
+}
+
 /** Rows whose model name or identifier contains every word of the query. */
 export function filterPrices<T extends Pick<PriceRow, 'displayName' | 'modelKey'>>(rows: T[], query: string): T[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -263,17 +283,41 @@ export function checkPriceForm(values: PriceFormValues): { errors: PriceFormErro
 
 // ── Backup ──────────────────────────────────────────────────────────────────────
 
-/** `claude-lifetime-backup-2026-11-10.tar.gz`, dated by this device's calendar. */
-export function backupFileName(now: Date = new Date()): string {
+/**
+ * `claude-lifetime-backup-2026-11-10.tar.gz`, dated by this device's calendar. A
+ * passphrase-protected backup is no longer a tarball anyone can open, so it gets its
+ * own extension: `.clbackup`.
+ */
+export function backupFileName(now: Date = new Date(), encrypted = false): string {
   const two = (n: number) => String(n).padStart(2, '0');
-  return `claude-lifetime-backup-${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}.tar.gz`;
+  return `claude-lifetime-backup-${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}.${encrypted ? 'clbackup' : 'tar.gz'}`;
 }
 
-/** A backup is a gzip stream; anything else is turned away before the user is asked to confirm a restore. */
+/** A plain backup is a gzip stream; anything else is turned away before the user is asked to confirm a restore. */
 export async function looksLikeGzip(file: Blob): Promise<boolean> {
   if (file.size < 18) return false;
   const head = new Uint8Array(await file.slice(0, 2).arrayBuffer());
   return head[0] === 0x1f && head[1] === 0x8b;
+}
+
+export type PassphraseCheck =
+  | { ok: true; passphrase: string | null }
+  | { ok: false; field: 'passphrase' | 'repeat'; message: string };
+
+/**
+ * The two passphrase fields of "Download backup". Both empty means a plain backup
+ * (`passphrase: null`). A passphrase is taken exactly as typed, spaces included: it is
+ * the key to the file, and the user will have to type the same thing again to restore.
+ */
+export function checkPassphrase(passphrase: string, repeat: string, minLength: number): PassphraseCheck {
+  if (passphrase === '' && repeat === '') return { ok: true, passphrase: null };
+  if (passphrase === '') return { ok: false, field: 'passphrase', message: 'Enter the passphrase here as well, or clear both fields for a backup without one.' };
+  if (passphrase.length < minLength) {
+    return { ok: false, field: 'passphrase', message: `Use at least ${minLength} characters, or clear both fields for a backup without a passphrase.` };
+  }
+  if (repeat === '') return { ok: false, field: 'repeat', message: 'Type the passphrase a second time, so a typing mistake cannot lock you out of the backup.' };
+  if (repeat !== passphrase) return { ok: false, field: 'repeat', message: 'The two passphrases are not the same.' };
+  return { ok: true, passphrase };
 }
 
 // ── About ───────────────────────────────────────────────────────────────────────

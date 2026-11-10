@@ -4,7 +4,7 @@ import { ArrowUpRight, FlaskConical, HardDrive, Menu, Upload, X } from 'lucide-r
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Dialog as RDialog } from 'radix-ui';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button, buttonClass } from '@/components/ui/button';
 import { Segmented } from '@/components/ui/controls';
 import { Tooltip, TooltipProvider } from '@/components/ui/overlay';
@@ -17,6 +17,31 @@ import { CoverageIndicator } from './coverage-indicator';
 import { DateRangePicker } from './date-range';
 import { isActive, NAV, NAV_SECONDARY, type NavItem } from './nav';
 import { RefreshStatus } from './refresh-status';
+
+/** Pages whose figures follow the date range. The others always cover the whole history. */
+const RANGE_ROUTES = ['/', '/usage/', '/conversations/', '/models/'];
+
+/**
+ * Opt-in background sync of the remembered Claude Code folder, once per page load.
+ * It only runs when the user switched it on and the browser already allows reading
+ * the folder, and it never opens a permission prompt.
+ */
+function AutoSync() {
+  const app = useApp();
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    void (async () => {
+      const { autoSyncEnabled } = await import('@/features/import/local-files');
+      if (!(await autoSyncEnabled())) return;
+      const { syncClaudeCodeFolder } = await import('@/features/import/background-sync');
+      const outcome = await syncClaudeCodeFolder(app.db, app.userId, false);
+      if (outcome && !outcome.problem && outcome.added > 0) app.notifyDataChanged();
+    })();
+  }, [app]);
+  return null;
+}
 
 function Mark({ className }: { className?: string }) {
   // Three strata that grow: usage accumulating over a lifetime.
@@ -204,7 +229,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {ready ? (
               <>
                 <div className="min-w-0 shrink">
-                  <DateRangePicker />
+                  <DateRangePicker applies={RANGE_ROUTES.some((href) => isActive(pathname, href))} />
                 </div>
                 <div className="hidden md:block">
                   <BasisToggle />
@@ -225,6 +250,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
 
         {ready ? <DemoBanner /> : null}
+        {ready ? <AutoSync /> : null}
 
         <main id="main" tabIndex={-1} className="mx-auto w-full max-w-[1280px] flex-1 px-4 pb-20 pt-7 outline-none sm:px-6 lg:px-8">
           {state.status === 'ready' ? children : state.status === 'error' ? <BootError error={state.error} retry={state.retry} /> : <BootScreen phase={state.phase} />}

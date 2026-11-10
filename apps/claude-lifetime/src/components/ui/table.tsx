@@ -10,7 +10,9 @@ import { cn } from '@/lib/cn';
  */
 export function TableFrame({ className, children, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn('scrollbar-thin overflow-x-auto rounded-[var(--radius-control)] border border-line', className)} {...props}>
+    // `relative` matters: visually hidden labels inside the table are absolutely positioned, and
+    // without a positioned ancestor here they would escape the frame and widen the whole page.
+    <div className={cn('scrollbar-thin relative overflow-x-auto rounded-[var(--radius-control)] border border-line', className)} {...props}>
       {children}
     </div>
   );

@@ -10,7 +10,7 @@ import { useApp } from '@/state/app';
 
 /** Shows when the figures were last read from the database, and re-reads them on demand. */
 export function RefreshStatus() {
-  const { lastRefreshedAt, notifyDataChanged } = useApp();
+  const { lastRefreshedAt, notifyDataChanged, db, userId } = useApp();
   const fetching = useIsFetching() > 0;
   const [now, setNow] = useState(() => Date.now());
 
@@ -20,16 +20,30 @@ export function RefreshStatus() {
   }, []);
   useEffect(() => setNow(Date.now()), [lastRefreshedAt]);
 
-  const text = fetching ? 'Refreshing…' : `Updated ${formatRelative(lastRefreshedAt, now)}`;
+  const [syncing, setSyncing] = useState(false);
+  const refresh = async () => {
+    notifyDataChanged();
+    // A remembered Claude Code folder is re-read too, but only if the browser already allows it: no prompt from here.
+    setSyncing(true);
+    try {
+      const { syncClaudeCodeFolder } = await import('@/features/import/background-sync');
+      const outcome = await syncClaudeCodeFolder(db, userId, false);
+      if (outcome && !outcome.problem && outcome.added > 0) notifyDataChanged();
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const text = fetching || syncing ? 'Refreshing…' : `Updated ${formatRelative(lastRefreshedAt, now)}`;
   return (
-    <Tooltip content="Read every figure again from the database on this device">
+    <Tooltip content="Read every figure again from the database on this device, and check a remembered Claude Code folder for new sessions">
       <button
         type="button"
-        onClick={notifyDataChanged}
+        onClick={() => void refresh()}
         aria-label={`${text}. Refresh now`}
         className="inline-flex h-9 items-center gap-2 rounded-[var(--radius-control)] px-2.5 text-[13px] text-ink-2 hover:bg-raised hover:text-ink"
       >
-        <RefreshCw className={cn('size-4', fetching && 'animate-[spin-slow_0.9s_linear_infinite]')} aria-hidden="true" />
+        <RefreshCw className={cn('size-4', (fetching || syncing) && 'animate-[spin-slow_0.9s_linear_infinite]')} aria-hidden="true" />
         <span className="hidden xl:inline" aria-live="polite">
           {text}
         </span>

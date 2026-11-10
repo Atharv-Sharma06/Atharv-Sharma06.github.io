@@ -2,15 +2,15 @@
 
 import { Calendar, Check, ChevronDown } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { Button, buttonClass } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/controls';
-import { Popover } from '@/components/ui/overlay';
+import { Popover, Tooltip } from '@/components/ui/overlay';
 import { cn } from '@/lib/cn';
 import { formatDayRange } from '@/lib/format';
 import { RANGE_PRESETS, useApp } from '@/state/app';
 
 /** The date range every chart and table on the page follows. */
-export function DateRangePicker() {
+export function DateRangePicker({ applies = true }: { applies?: boolean }) {
   const { range, setRange, resolved } = useApp();
   const [open, setOpen] = useState(false);
   const [from, setFrom] = useState(resolved.from ?? '');
@@ -39,6 +39,18 @@ export function DateRangePicker() {
     setRange({ preset: 'custom', from: from || null, to: to || null });
     setOpen(false);
   };
+
+  // Some pages always cover the whole history; there the control says so instead of pretending to filter.
+  if (!applies) {
+    return (
+      <Tooltip content="This page always covers your whole history. The date range applies to Overview, Lifetime Usage, Conversations and Model Breakdown." side="bottom">
+        <span tabIndex={0} className={buttonClass('secondary', 'md', 'max-w-full cursor-default justify-start opacity-60')} aria-label="Date range: not used on this page">
+          <Calendar className="size-4 shrink-0 text-ink-3" aria-hidden="true" />
+          <span className="truncate">Whole history</span>
+        </span>
+      </Tooltip>
+    );
+  }
 
   return (
     <Popover

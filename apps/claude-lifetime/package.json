@@ -8,14 +8,16 @@
     "dev": "next dev",
     "prebuild": "npm run prepare:assets",
     "build": "next build",
-    "preview": "node scripts/serve-static.mjs out 4173 /claude-lifetime",
+    "preview": "node scripts/serve-static.mjs ../.. 4173",
     "lint": "eslint",
     "typecheck": "tsc --noEmit -p .",
     "pretest": "node scripts/build-migrations.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "db:migration": "prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma --script",
-    "build:collector": "node scripts/build-collector.mjs"
+    "build:collector": "node scripts/build-collector.mjs",
+    "publish:site": "npm run build && node scripts/publish-site.mjs",
+    "test:e2e": "playwright test --trace off"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16",

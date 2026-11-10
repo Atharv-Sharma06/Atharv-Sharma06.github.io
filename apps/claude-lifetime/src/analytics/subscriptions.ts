@@ -364,3 +364,50 @@ export async function getBeforeAfter(db: SqlExecutor, filter: AnalyticsFilter, o
     after: side(2),
   };
 }
+
+// ── Usage that belongs to conversations, before vs. after ───────────────────────
+
+export interface ConversationUsage {
+  /** Chats and Claude Code sessions with usage on this side. */
+  conversations: number;
+  /** Tokens of those conversations on this side, under the filter's basis. */
+  tokens: number;
+  exact: number;
+  estimated: number;
+}
+
+/**
+ * The usage on each side of the first paid period that belongs to a chat or a Claude
+ * Code session: the basis of "tokens per conversation". Aggregate usage that has no
+ * conversation behind it (API usage reports, generic imports, manual entries) is left
+ * out, because divided by a number of conversations it would describe conversations
+ * that never took place. Returns null when no paid period has been entered.
+ */
+export async function getBeforeAfterConversationUsage(
+  db: SqlExecutor,
+  filter: AnalyticsFilter,
+): Promise<{ before: ConversationUsage; after: ConversationUsage } | null> {
+  const periods = await listPeriods(db, filter.userId, filter.timezone);
+  const firstPaid = periods.find((p) => isPaidPlan(p.planKey));
+  if (!firstPaid) return null;
+
+  const tok = tokenExpr(filter.basis);
+  const p = new Params();
+  const f = factsFrom(filter, p);
+  const { rows } = await db.query<Record<string, unknown>>(
+    `SELECT (f.occurred_at >= ${p.add(firstPaid.startedAt)}::timestamptz) AS is_after,
+            count(DISTINCT f.conversation_id)::int AS conversations,
+            COALESCE(sum(${tok}), 0)::bigint AS tokens,
+            COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'exact'), 0)::bigint AS exact,
+            COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'estimated'), 0)::bigint AS estimated
+       FROM ${f.from} JOIN conversations c ON c.id = f.conversation_id
+      WHERE ${f.where} AND c.kind IN ('chat', 'code_session')
+      GROUP BY 1`,
+    p.values,
+  );
+  const side = (after: boolean): ConversationUsage => {
+    const r = rows.find((row) => row.is_after === after);
+    return { conversations: toNumber(r?.conversations), tokens: toNumber(r?.tokens), exact: toNumber(r?.exact), estimated: toNumber(r?.estimated) };
+  };
+  return { before: side(false), after: side(true) };
+}
