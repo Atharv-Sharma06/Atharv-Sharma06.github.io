@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo } from 'react';
+import { useId, useMemo } from 'react';
 import { getOverview, getTimeSeries, type Overview, type TokenTotals } from '@/analytics/overview';
 import { getBeforeAfter, type BeforeAfter, type SideStats } from '@/analytics/subscriptions';
 import { getApiValue, type ApiValue } from '@/analytics/value';
@@ -117,11 +117,14 @@ function Hero({
   const t = overview.tokens;
   const shown = useCountUp(t.total);
   const level = confidenceOf(t.exact, t.estimated);
+  const headingId = useId();
   return (
-    <Card className={cn('grid gap-x-8 gap-y-7 px-6 py-5 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]', className)}>
+    <Card role="group" aria-labelledby={headingId} className={cn('grid gap-x-8 gap-y-7 px-6 py-5 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]', className)}>
       <div className="min-w-0">
         <div className="flex items-start justify-between gap-3">
-          <h2 className="text-[13px] text-ink-2">{scoped ? `Tokens, ${rangeLabel}` : 'Lifetime tokens'}</h2>
+          <h2 id={headingId} className="text-[13px] text-ink-2">
+            {scoped ? `Tokens, ${rangeLabel}` : 'Lifetime tokens'}
+          </h2>
           <ConfidenceBadge
             level={level}
             hint={
@@ -262,7 +265,9 @@ function ApiValueCard({ value, scenario }: { value: ApiValue; scenario: 'standar
       <p>What this usage would cost at API list prices. It is not money you paid.</p>
       {value.unpricedTokens > 0 ? (
         <p>
-          <span className="tabular text-ink">{formatTokens(value.unpricedTokens)}</span> tokens are not priced: their source does not name a model.{' '}
+          {/* priced and unpriced amounts are always in processed tokens, whichever basis the page shows */}
+          <span className="tabular text-ink">{formatTokens(value.unpricedTokens)}</span> processed tokens are not priced: their source does not
+          name a model.{' '}
           <Link href="/models/" className="text-accent-soft underline-offset-4 hover:underline">
             Details
           </Link>

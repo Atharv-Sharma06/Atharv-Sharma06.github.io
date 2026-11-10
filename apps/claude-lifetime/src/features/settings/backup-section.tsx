@@ -407,6 +407,7 @@ function RestoreRow() {
         ref={input}
         type="file"
         accept=".gz,.tgz,.clbackup,application/gzip,application/x-gzip"
+        aria-label="Backup file"
         className="sr-only"
         tabIndex={-1}
         aria-hidden="true"

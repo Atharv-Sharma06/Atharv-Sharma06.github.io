@@ -2,7 +2,7 @@
 
 import { Info, X } from 'lucide-react';
 import { Dialog as RDialog, Popover as RPopover, Tooltip as RTooltip } from 'radix-ui';
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 
 export function Dialog({
@@ -22,28 +22,40 @@ export function Dialog({
   footer?: ReactNode;
   size?: 'md' | 'lg';
 }) {
+  // The dialog is opened by state, not by a Radix trigger, so Radix does not know where focus came
+  // from. Remember the element that had it and hand it back on close, as a trigger would.
+  const opener = useRef<HTMLElement | null>(null);
   return (
     <RDialog.Root open={open} onOpenChange={onOpenChange}>
       <RDialog.Portal>
         <RDialog.Overlay className="fixed inset-0 z-40 animate-[fade-in_120ms_ease-out] bg-black/60 backdrop-blur-[2px]" />
         <RDialog.Content
+          onOpenAutoFocus={() => {
+            opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          }}
+          onCloseAutoFocus={(event) => {
+            if (opener.current?.isConnected) {
+              event.preventDefault();
+              opener.current.focus();
+            }
+            opener.current = null;
+          }}
           className={cn(
             'fixed left-1/2 top-1/2 z-50 flex max-h-[min(88dvh,46rem)] w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col',
             'animate-[fade-in_140ms_ease-out] rounded-[var(--radius-card)] border border-line-strong bg-surface shadow-[0_24px_80px_rgb(0_0_0/0.6)]',
             size === 'lg' ? 'max-w-2xl' : 'max-w-lg',
           )}
         >
-          <div className="flex items-start justify-between gap-4 px-5 pt-4">
-            <div className="min-w-0">
-              <RDialog.Title className="text-[15px] font-medium text-ink">{title}</RDialog.Title>
-              {description ? <RDialog.Description className="mt-1 text-[13px] text-ink-2">{description}</RDialog.Description> : null}
-            </div>
-            <RDialog.Close className="-mr-1.5 -mt-0.5 rounded-md p-1.5 text-ink-3 hover:bg-raised hover:text-ink" aria-label="Close">
-              <X className="size-4" aria-hidden="true" />
-            </RDialog.Close>
+          <div className="min-w-0 pl-5 pr-12 pt-4">
+            <RDialog.Title className="text-[15px] font-medium text-ink">{title}</RDialog.Title>
+            {description ? <RDialog.Description className="mt-1 text-[13px] text-ink-2">{description}</RDialog.Description> : null}
           </div>
           <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
           {footer ? <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-5 py-3">{footer}</div> : null}
+          {/* Last in the document on purpose: focus starts on the first field or action of the content, not on "Close". */}
+          <RDialog.Close className="absolute right-3.5 top-3 rounded-md p-1.5 text-ink-3 hover:bg-raised hover:text-ink" aria-label="Close">
+            <X className="size-4" aria-hidden="true" />
+          </RDialog.Close>
         </RDialog.Content>
       </RDialog.Portal>
     </RDialog.Root>
@@ -89,7 +101,9 @@ export const PopoverClose = RPopover.Close;
 
 export function TooltipProvider({ children }: { children: ReactNode }) {
   return (
-    <RTooltip.Provider delayDuration={250} skipDelayDuration={150}>
+    // Tooltips here never hold interactive content, so the pointer need not be able to travel into
+    // one. Leaving that on would suppress the tooltip of a neighbouring trigger on the way there.
+    <RTooltip.Provider delayDuration={250} skipDelayDuration={150} disableHoverableContent>
       {children}
     </RTooltip.Provider>
   );

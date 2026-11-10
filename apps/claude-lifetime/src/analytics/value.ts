@@ -258,7 +258,7 @@ export interface ActualSpend {
   subscriptions: Array<{ currency: string; amount: string; cycles: number }> | null;
 }
 
-export async function getActualSpend(db: SqlExecutor, userId: number): Promise<ActualSpend> {
+export async function getActualSpend(db: SqlExecutor, userId: number, now: Date = new Date()): Promise<ActualSpend> {
   const reported = (
     await db.query<{ total: string | null; first_at: string | null; last_at: string | null }>(
       `SELECT sum(rc.amount_usd)::text AS total, min(rc.occurred_at)::date::text AS first_at, max(rc.occurred_at)::date::text AS last_at
@@ -275,18 +275,18 @@ export async function getActualSpend(db: SqlExecutor, userId: number): Promise<A
            SELECT sp.currency, sp.monthly_price,
                   -- whole months elapsed, plus one for a cycle that has started but not finished
                   GREATEST(1,
-                    (EXTRACT(YEAR FROM age(LEAST(COALESCE(sp.ended_at, now()), now()), sp.started_at)) * 12
-                     + EXTRACT(MONTH FROM age(LEAST(COALESCE(sp.ended_at, now()), now()), sp.started_at)))::int
-                    + CASE WHEN LEAST(COALESCE(sp.ended_at, now()), now())
+                    (EXTRACT(YEAR FROM age(LEAST(COALESCE(sp.ended_at, $2::timestamptz), $2::timestamptz), sp.started_at)) * 12
+                     + EXTRACT(MONTH FROM age(LEAST(COALESCE(sp.ended_at, $2::timestamptz), $2::timestamptz), sp.started_at)))::int
+                    + CASE WHEN LEAST(COALESCE(sp.ended_at, $2::timestamptz), $2::timestamptz)
                                 > sp.started_at + make_interval(months =>
-                                    (EXTRACT(YEAR FROM age(LEAST(COALESCE(sp.ended_at, now()), now()), sp.started_at)) * 12
-                                     + EXTRACT(MONTH FROM age(LEAST(COALESCE(sp.ended_at, now()), now()), sp.started_at)))::int)
+                                    (EXTRACT(YEAR FROM age(LEAST(COALESCE(sp.ended_at, $2::timestamptz), $2::timestamptz), sp.started_at)) * 12
+                                     + EXTRACT(MONTH FROM age(LEAST(COALESCE(sp.ended_at, $2::timestamptz), $2::timestamptz), sp.started_at)))::int)
                            THEN 1 ELSE 0 END) AS cycles
              FROM subscription_periods sp
-            WHERE sp.user_id = $1 AND sp.monthly_price IS NOT NULL AND sp.monthly_price > 0 AND sp.started_at <= now()
+            WHERE sp.user_id = $1 AND sp.monthly_price IS NOT NULL AND sp.monthly_price > 0 AND sp.started_at <= $2::timestamptz
          ) x
         GROUP BY currency ORDER BY currency`,
-      [userId],
+      [userId, now.toISOString()],
     )
   ).rows;
 

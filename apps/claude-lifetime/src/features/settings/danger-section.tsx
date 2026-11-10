@@ -25,11 +25,13 @@ function Ledger({ title, children }: { title: string; children: ReactNode }) {
  * What the app keeps outside the SQL database: the selected date range in localStorage
  * and the import page's small IndexedDB store (src/lib/kv.ts) with the folder it
  * remembers. Erasing must take these along, or the "first visit" would still know them.
+ * The one entry left alone is the pointer to the database itself, which
+ * destroyDatabase needs to find the database and removes on its own.
  */
 async function clearDeviceState(): Promise<void> {
   try {
     for (const key of Object.keys(window.localStorage)) {
-      if (key.startsWith('claude-lifetime:')) window.localStorage.removeItem(key);
+      if (key.startsWith('claude-lifetime:') && key !== 'claude-lifetime:database') window.localStorage.removeItem(key);
     }
   } catch {
     // storage is blocked, so nothing was kept there either
@@ -168,11 +170,22 @@ function EraseRow() {
         confirmLabel="Erase everything"
         typeToConfirm="ERASE"
         onConfirm={async () => {
-          await destroyDatabase();
+          const start = `${BASE_PATH}/`;
+          const here = window.location.href;
+          // destroyDatabase tells every open tab of the app to reload, and that message reaches this tab too:
+          // the reload can overtake the rest of this handler. So the other clean-up comes first, and the
+          // address already is the start page when a reload arrives, whichever one it is.
           await clearDeviceState();
+          window.history.replaceState(null, '', start);
+          try {
+            await destroyDatabase();
+          } catch (error) {
+            window.history.replaceState(null, '', here);
+            throw error;
+          }
           // A full page load on purpose: this page's database connection no longer exists, so a client-side navigation would keep a dead app running.
           // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-          window.location.assign(`${BASE_PATH}/`);
+          window.location.assign(start);
           // The page is on its way out; the dialog stays busy until it is.
           await new Promise<never>(() => undefined);
         }}

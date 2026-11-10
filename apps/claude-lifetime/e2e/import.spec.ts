@@ -34,7 +34,7 @@ test('a claude.ai export is previewed, saved as estimated usage, and never count
 
   // The dashboard now shows the import, labelled as an estimate with no exact part.
   await page.getByRole('link', { name: 'Open the overview' }).click();
-  const hero = page.locator('div', { has: page.getByRole('heading', { name: 'Lifetime tokens' }) }).first();
+  const hero = page.getByRole('group', { name: 'Lifetime tokens' });
   await expect(hero.getByText('Estimated', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('No source in this range meters tokens.')).toBeVisible();
   const total = await page.locator('p[title$=" tokens"]').first().getAttribute('title');
@@ -64,12 +64,13 @@ test('Claude Code transcripts are imported as exact usage', async ({ page }) => 
     fixture('claude-code/research-example/projects/-home-alex-demo/11111111-1111-4111-8111-111111111111/subagents/agent-a0000000000000001.jsonl'),
   ]);
   await page.getByRole('link', { name: 'Open the overview' }).click();
-  const hero = page.locator('div', { has: page.getByRole('heading', { name: 'Lifetime tokens' }) }).first();
+  const hero = page.getByRole('group', { name: 'Lifetime tokens' });
   await expect(hero.getByText('Exact', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Nothing in this range is estimated.')).toBeVisible();
   // Exact usage names its model, so it can be priced.
-  const value = page.locator('div', { has: page.getByRole('heading', { name: 'Equivalent API value' }) }).last();
-  await expect(value.getByText(/^\$|^<\$/).first()).toBeVisible();
+  const value = page.getByRole('group', { name: 'Equivalent API value' });
+  await expect(value.getByText('Exact', { exact: true })).toBeVisible();
+  await expect(value.getByText(/^(\$\d|<\$0\.01)/).first()).toBeVisible();
   expect(problems).toEqual([]);
 });
 
@@ -121,9 +122,9 @@ test('an import can be deleted again, which removes exactly what it added', asyn
   const problems = watch(page);
   await importFiles(page, EXPORT_ZIP);
   await open(page, '/import/');
-  const history = page.locator('div', { has: page.getByRole('heading', { name: 'Import history' }) }).last();
-  await expect(history.getByText('claude-export-sample.zip')).toBeVisible();
-  await history.getByRole('button', { name: 'Delete' }).click();
+  const row = page.getByRole('row', { name: /claude-export-sample\.zip/ });
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: 'Delete' }).click();
   await page.getByRole('button', { name: 'Delete import' }).click();
   await expect(page.getByText('No imports yet')).toBeVisible();
   await open(page, '/');

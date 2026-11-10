@@ -89,7 +89,11 @@ export function SubscriptionsPage() {
   const lastDates = segments.length > 0 ? segmentDates(segments[segments.length - 1], settings.timezone) : null;
   const lastDay = lastDates ? (lastDates.lastDate ?? lastDates.startDate) : null;
   const timelineEnd = today && lastDay && lastDay > today ? formatDay(lastDay) : 'today';
-  const describe = (period: SubscriptionPeriod) => `${planLabel(period.planKey, period.label)}, ${describeDates(period, today ?? period.startDate)}`;
+  // "Pro, Jan 10 – Dec 10, 2025" or "Max 5x, since Dec 11, 2025", for sentences about one period.
+  const describe = (period: SubscriptionPeriod) => {
+    const dates = describeDates(period, today ?? period.startDate);
+    return `${planLabel(period.planKey, period.label)}, ${period.lastDate ? dates : dates.charAt(0).toLowerCase() + dates.slice(1)}`;
+  };
 
   const addButton = (
     <Button variant="primary" onClick={() => addPeriod()}>

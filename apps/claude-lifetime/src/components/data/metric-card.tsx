@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/cn';
 import { ConfidenceBadge, type ConfidenceLevel } from './confidence';
@@ -30,10 +30,14 @@ export function MetricCard({
   className?: string;
 }) {
   const unavailable = confidence === 'unavailable';
+  const headingId = useId();
   return (
-    <Card className={cn('flex flex-col px-5 py-4', className)}>
+    // A labelled group: assistive technology announces which figure the content belongs to.
+    <Card role="group" aria-labelledby={headingId} className={cn('flex flex-col px-5 py-4', className)}>
       <div className="flex items-start justify-between gap-3">
-        <h2 className="text-[13px] text-ink-2">{label}</h2>
+        <h2 id={headingId} className="text-[13px] text-ink-2">
+          {label}
+        </h2>
         <ConfidenceBadge level={confidence} hint={confidenceHint} />
       </div>
       <p

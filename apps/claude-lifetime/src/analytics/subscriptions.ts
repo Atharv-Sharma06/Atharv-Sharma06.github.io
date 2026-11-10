@@ -218,15 +218,17 @@ export function buildSegments(periods: SubscriptionPeriod[], firstUsageAt: strin
 }
 
 export interface SegmentStats extends SegmentRange {
-  /** Length of the segment in days (up to now for a running segment). */
+  /** Length of the segment in days as entered (up to now for a running segment). */
   days: number;
+  /** Days of the segment that have already passed: less than `days` for a period that ends in the future, 0 before it starts. */
+  elapsedDays: number;
   tokens: number;
   exact: number;
   estimated: number;
   conversations: number;
   messages: number;
   activeDays: number;
-  /** Tokens divided by the length of the segment in days. */
+  /** Tokens divided by the days of the segment that have passed. */
   averageDailyTokens: number | null;
   value: ValueFigures;
 }
@@ -251,12 +253,12 @@ async function aggregateRanges(
     `SELECT seg.idx::int AS idx, sum(${tok})::bigint AS tokens,
             COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'exact'), 0)::bigint AS exact,
             COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'estimated'), 0)::bigint AS estimated,
-            count(DISTINCT f.conversation_id)::int AS conversations,
+            count(DISTINCT ${f.conversationId})::int AS conversations,
             sum(f.user_message_count + f.assistant_message_count)::bigint AS messages,
             count(DISTINCT ${f.day})::int AS active_days,
             min(f.occurred_at) AS first_at, max(f.occurred_at) AS last_at,
             min(${f.day})::text AS first_day, max(${f.day})::text AS last_day
-       FROM ${f.from} ${join(p.add(starts), p.add(ends))}
+       FROM ${f.from} ${join(p.add(starts), p.add(ends))} ${f.conversationJoin}
       WHERE ${f.where} GROUP BY 1`,
     p.values,
   );
@@ -285,19 +287,23 @@ export async function getSegmentStats(
   const { rows, values } = await aggregateRanges(db, filter, segments, options);
   return segments.map((seg, i) => {
     const r = rows.get(i + 1);
+    const startMs = Date.parse(seg.start);
     const endMs = seg.end ? Date.parse(seg.end) : now.getTime();
-    const days = Math.max(1, Math.round((endMs - Date.parse(seg.start)) / DAY_MS));
+    const days = Math.max(1, Math.round((endMs - startMs) / DAY_MS));
+    // Usage can only have accrued up to now, whatever end date was entered.
+    const elapsedDays = startMs >= now.getTime() ? 0 : Math.max(1, Math.round((Math.min(endMs, now.getTime()) - startMs) / DAY_MS));
     const tokens = toNumber(r?.tokens);
     return {
       ...seg,
       days,
+      elapsedDays,
       tokens,
       exact: toNumber(r?.exact),
       estimated: toNumber(r?.estimated),
       conversations: toNumber(r?.conversations),
       messages: toNumber(r?.messages),
       activeDays: toNumber(r?.active_days),
-      averageDailyTokens: tokens > 0 ? tokens / days : null,
+      averageDailyTokens: tokens > 0 && elapsedDays > 0 ? tokens / elapsedDays : null,
       value: values.get(String(i + 1)) ?? ZERO_FIGURES,
     };
   });

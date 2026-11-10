@@ -44,8 +44,8 @@ test('subscription periods are entered by hand and split the usage by date', asy
 
   // The overview now splits at the first PAID period.
   await open(page, '/');
-  const before = page.locator('div', { has: page.getByRole('heading', { name: 'Before subscription' }) }).last();
-  const after = page.locator('div', { has: page.getByRole('heading', { name: 'After subscription' }) }).last();
+  const before = page.getByRole('group', { name: 'Before subscription' });
+  const after = page.getByRole('group', { name: 'After subscription' });
   await expect(before.getByText('Before Pro started on Sep 1, 2025.')).toBeVisible();
   await expect(after.getByText('Since Pro started on Sep 1, 2025.')).toBeVisible();
   await expect(before.getByText('Estimated', { exact: true })).toBeVisible();

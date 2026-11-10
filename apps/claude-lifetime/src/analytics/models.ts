@@ -38,9 +38,9 @@ export async function getModelBreakdown(db: SqlExecutor, filter: AnalyticsFilter
             sum(${tok})::bigint AS total,
             COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'exact'), 0)::bigint AS exact,
             COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'estimated'), 0)::bigint AS estimated,
-            count(DISTINCT f.conversation_id)::int AS conversations,
+            count(DISTINCT ${f.conversationId})::int AS conversations,
             sum(f.request_count)::bigint AS requests
-       FROM ${f.from} LEFT JOIN model_catalog mc ON mc.id = f.model_id
+       FROM ${f.from} LEFT JOIN model_catalog mc ON mc.id = f.model_id ${f.conversationJoin}
       WHERE ${f.where}
       GROUP BY 1, 2, 3, 4, 5
      HAVING sum(${tok}) > 0 OR sum(f.request_count) > 0

@@ -60,7 +60,10 @@ export function dayExpr(tz: string): string {
  * `FROM ... WHERE ...` for usage facts under a filter. Sources the user excluded from
  * totals (to avoid counting overlapping sources twice) are always left out.
  */
-export function factsFrom(filter: AnalyticsFilter, p: Params): { from: string; where: string; tz: string; day: string } {
+export function factsFrom(
+  filter: AnalyticsFilter,
+  p: Params,
+): { from: string; where: string; tz: string; day: string; conversationJoin: string; conversationId: string } {
   // The cast lets PostgreSQL type the parameter wherever it is used (AT TIME ZONE takes text).
   const tz = `${p.add(filter.timezone)}::text`;
   const day = dayExpr(tz);
@@ -77,6 +80,11 @@ export function factsFrom(filter: AnalyticsFilter, p: Params): { from: string; w
     where: conditions.join(' AND '),
     tz,
     day,
+    // For counting conversations: add `conversationJoin` to the FROM clause and count DISTINCT
+    // `conversationId`. Rows of API reports and generic imports hang off containers of kind
+    // usage_bucket, which are not conversations and must not be counted as such.
+    conversationJoin: `LEFT JOIN conversations cv ON cv.id = f.conversation_id AND cv.kind IN ('chat', 'code_session')`,
+    conversationId: 'cv.id',
   };
 }
 

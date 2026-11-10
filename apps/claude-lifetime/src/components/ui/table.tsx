@@ -1,22 +1,22 @@
 'use client';
 
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react';
-import type { HTMLAttributes, ReactNode, TdHTMLAttributes, ThHTMLAttributes } from 'react';
+import { forwardRef, type HTMLAttributes, type ReactNode, type TdHTMLAttributes, type ThHTMLAttributes } from 'react';
 import { cn } from '@/lib/cn';
 
 /**
  * Table primitives. Wide tables scroll inside their own frame so the page itself
  * never scrolls sideways; figures are right-aligned with tabular digits.
  */
-export function TableFrame({ className, children, ...props }: HTMLAttributes<HTMLDivElement>) {
+export const TableFrame = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(function TableFrame({ className, children, ...props }, ref) {
   return (
     // `relative` matters: visually hidden labels inside the table are absolutely positioned, and
     // without a positioned ancestor here they would escape the frame and widen the whole page.
-    <div className={cn('scrollbar-thin relative overflow-x-auto rounded-[var(--radius-control)] border border-line', className)} {...props}>
+    <div ref={ref} className={cn('scrollbar-thin relative overflow-x-auto rounded-[var(--radius-control)] border border-line', className)} {...props}>
       {children}
     </div>
   );
-}
+});
 
 export function Table({ className, ...props }: HTMLAttributes<HTMLTableElement>) {
   return <table className={cn('w-full border-collapse text-[13px]', className)} {...props} />;

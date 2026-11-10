@@ -122,9 +122,9 @@ export async function getOverview(db: SqlExecutor, filter: AnalyticsFilter): Pro
       `SELECT ${fd.day}::text AS day, sum(${tok})::bigint AS tokens,
               COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'exact'), 0)::bigint AS exact,
               COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'estimated'), 0)::bigint AS estimated,
-              count(DISTINCT f.conversation_id)::int AS conversations,
+              count(DISTINCT ${fd.conversationId})::int AS conversations,
               sum(f.user_message_count + f.assistant_message_count)::bigint AS messages
-         FROM ${fd.from} WHERE ${fd.where}
+         FROM ${fd.from} ${fd.conversationJoin} WHERE ${fd.where}
         GROUP BY 1 HAVING sum(${tok}) > 0 ORDER BY 2 DESC, 1 DESC LIMIT 1`,
       pd.values,
     )
@@ -229,9 +229,9 @@ export async function getTimeSeries(
             sum(f.cache_write_5m_tokens + f.cache_write_1h_tokens)::bigint AS cache_write,
             sum(f.replay_tokens)::bigint AS replay,
             sum(f.user_message_count + f.assistant_message_count)::bigint AS messages,
-            count(DISTINCT f.conversation_id)::int AS conversations,
+            count(DISTINCT ${f.conversationId})::int AS conversations,
             sum(f.request_count)::bigint AS requests
-       FROM ${f.from} ${g.join}
+       FROM ${f.from} ${g.join} ${f.conversationJoin}
       WHERE ${f.where}
       GROUP BY 1, 2 ORDER BY 1, 2`,
     p.values,
