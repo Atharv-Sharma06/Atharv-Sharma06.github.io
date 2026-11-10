@@ -1,7 +1,7 @@
 'use client';
 
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ImportRecord } from '@/analytics/coverage';
 import { SOURCE_KIND_LABEL } from '@/components/shell/coverage-indicator';
 import { Button } from '@/components/ui/button';
@@ -27,13 +27,30 @@ export function ImportHistory({ autoSync = false, locked = false, onDeleted }: {
   const imports = useImports();
   const [open, setOpen] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<ImportRecord | null>(null);
+  const heading = useRef<HTMLSpanElement>(null);
+  /** Set by a deletion: the row whose button opened the dialog goes away, so the focus needs a new home. */
+  const deleted = useRef(false);
   const tz = app.settings.timezone;
+
+  // The dialog hands the focus back to the Delete button that opened it, and that button disappears with
+  // its row when the list has been read again. The heading of the list takes the focus then.
+  useEffect(() => {
+    if (!deleted.current) return;
+    deleted.current = false;
+    const frame = requestAnimationFrame(() => heading.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [imports.data]);
   const replacedEarlier = deleting?.warnings.find((w) => w.code === 'replaced_earlier') ?? null;
 
   return (
     <Card>
       <CardHeader
-        title="Import history"
+        title={
+          // Takes the focus after a deletion; the ring would suggest an interactive element.
+          <span ref={heading} tabIndex={-1} style={{ outline: 'none' }}>
+            Import history
+          </span>
+        }
         description="Each import can be deleted on its own. Deleting one removes exactly the records it added and nothing else."
       />
       <CardBody>
@@ -154,12 +171,14 @@ export function ImportHistory({ autoSync = false, locked = false, onDeleted }: {
           await deleteBatch(app.db, app.userId, deleting.batchId);
           // Otherwise the next visit would read the folder and put the deleted usage straight back.
           if (deleting.sourceKind === 'claude_code' && !deleting.isSynthetic) await stopAutoSyncAfterDeletion();
+          deleted.current = true;
           app.notifyDataChanged();
           onDeleted?.();
         }}
       >
         <p>
-          <span className="text-ink">{deleting?.fileName}</span>, imported on {deleting ? formatInstant(deleting.importedAt, tz, 'datetime') : ''}.
+          <span className="text-ink [overflow-wrap:anywhere]">{deleting?.fileName}</span>, imported on{' '}
+          {deleting ? formatInstant(deleting.importedAt, tz, 'datetime') : ''}.
         </p>
         <p>
           The {deleting ? formatInt(deleting.recordsInserted) : ''} records it added are removed, along with conversations that have nothing left in them.

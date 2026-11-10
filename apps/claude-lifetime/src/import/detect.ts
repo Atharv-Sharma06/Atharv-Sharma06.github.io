@@ -1,5 +1,5 @@
 import { ImportError, type ImportFile } from '@/core/types';
-import { apiErrorMessage } from './api-reports/detect';
+import { apiErrorMessage, isUndecidedReport } from './api-reports/detect';
 import { isTranscriptRow, transcriptPathInfo } from './claude-code/extract';
 import { looksLikeLedger } from './claude-code/ledger';
 import { previewCsv, type CsvPreview } from './generic/csv';
@@ -48,17 +48,48 @@ const SUPPORTED =
   'Claude Lifetime reads: the claude.ai data export (ZIP or conversations.json), Claude Code transcripts (.jsonl files or the whole .claude folder), ' +
   'Anthropic API usage and cost reports (JSON), Claude Console CSV exports, and usage tables as CSV or JSON.';
 
-async function readHead(blob: Blob, bytes = HEAD_BYTES): Promise<{ bytes: Uint8Array; text: string; utf8: boolean }> {
+type Encoding = 'utf-8' | 'utf-16le' | 'utf-16be';
+
+async function readHead(blob: Blob, bytes = HEAD_BYTES): Promise<{ bytes: Uint8Array; text: string; utf8: boolean; encoding: Encoding }> {
   const buffer = new Uint8Array(await blob.slice(0, bytes).arrayBuffer());
-  let text: string;
-  let utf8 = false;
-  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) text = new TextDecoder('utf-16le').decode(buffer);
-  else if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) text = new TextDecoder('utf-16be').decode(buffer);
-  else {
-    text = new TextDecoder('utf-8').decode(buffer);
-    utf8 = true;
+  let encoding: Encoding = 'utf-8';
+  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) encoding = 'utf-16le';
+  else if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) encoding = 'utf-16be';
+  const text = new TextDecoder(encoding).decode(buffer);
+  return { bytes: buffer, utf8: encoding === 'utf-8', encoding, text: text.replace(/^﻿/, '') };
+}
+
+/** What tells a usage report from a cost report in the text of a file: a row's amount, or one of its token counts. */
+const COST_MARK = /"amount"\s*:/;
+const USAGE_MARK = /"(?:uncached_input_tokens|cache_read_input_tokens|output_tokens|cache_creation|total_tokens)"\s*:/;
+/** Longest text one of the two marks can span, so that a mark cut in two by a chunk boundary is still found. */
+const MARK_OVERLAP = 64;
+
+/** Which report a text is from, going by whichever of the two marks comes first. Null when it holds neither. */
+function reportByMarks(text: string): 'api-usage' | 'api-cost' | null {
+  const cost = text.search(COST_MARK);
+  const usage = text.search(USAGE_MARK);
+  if (cost === -1 && usage === -1) return null;
+  if (usage === -1) return 'api-cost';
+  return cost !== -1 && cost < usage ? 'api-cost' : 'api-usage';
+}
+
+/**
+ * Reads a file to the end, a megabyte at a time, until it shows whether it is a usage or
+ * a cost report. Only used for a report that begins with nothing but empty time buckets:
+ * those look the same in both, and a cost report that starts before the first spend
+ * begins exactly like that. Null when the whole file holds neither a count nor an amount.
+ */
+async function scanForReportKind(blob: Blob, encoding: Encoding): Promise<'api-usage' | 'api-cost' | null> {
+  const decoder = new TextDecoder(encoding);
+  let carry = '';
+  for (let offset = 0; offset < blob.size; offset += LINE_STEP_BYTES) {
+    const text = carry + decoder.decode(new Uint8Array(await blob.slice(offset, offset + LINE_STEP_BYTES).arrayBuffer()), { stream: true });
+    const found = reportByMarks(text);
+    if (found !== null) return found;
+    carry = text.slice(-MARK_OVERLAP);
   }
-  return { bytes: buffer, utf8, text: text.replace(/^﻿/, '') };
+  return null;
 }
 
 /**
@@ -129,6 +160,11 @@ type Kind =
       csv?: CsvPreview;
       /** Set when the parsed JSON itself showed what the file is, rather than its name or a pattern in its text. */
       fromJson?: true;
+      /**
+       * Set for a report that holds only empty time buckets, to its very end: it is a usage or a cost
+       * report, and nothing in it says which. Among other files it goes with whichever report they are.
+       */
+      undecided?: true;
     }
   | { parser: null; problem: string };
 
@@ -161,6 +197,17 @@ async function classify(file: ImportFile): Promise<Kind> {
   if (file.size === 0) return { parser: null, problem: `"${file.name}" is empty.` };
   const head = await readHead(file.blob);
   const name = file.name.toLowerCase();
+
+  /** What a parsed value is. `value` is the part of the file that was looked at: its first page, its first line, or all of it. */
+  const fromValue = async (value: unknown, what: string): Promise<Kind | null> => {
+    const kind = fromJsonFormat(detectJsonFormat(value), what);
+    if (kind === null || kind.parser !== 'api-usage' || !isUndecidedReport(value)) return kind;
+    // Nothing but empty time buckets so far. The rest of the file says which report this is.
+    const found = await scanForReportKind(file.blob, head.encoding);
+    if (found === 'api-cost') return { parser: 'api-cost', recognisedAs: `${what} with an Anthropic API cost report`, fromJson: true };
+    if (found === 'api-usage') return kind;
+    return { parser: 'api-usage', recognisedAs: `${what} with an Anthropic API report that has no figures in it`, fromJson: true, undecided: true };
+  };
 
   if (looksLikeZip(head.bytes)) {
     const entries = await readZipDirectory(file.blob);
@@ -196,8 +243,15 @@ async function classify(file: ImportFile): Promise<Kind> {
       return { parser: 'claude-export', recognisedAs: 'conversations.json from a claude.ai data export' };
     }
     if (first === undefined && /^\[\s*\]/.test(text)) return { parser: null, problem: `"${file.name}" is an empty JSON list: there is nothing in it to import.` };
-    const kind = fromJsonFormat(detectJsonFormat(first === undefined ? undefined : [first]), 'JSON file');
+    const kind = first === undefined ? null : await fromValue([first], 'JSON file');
     if (kind) return kind;
+    // The first entry does not end inside the part that was read: a page of a report with many rows is larger
+    // than that. Its beginning still shows what it is.
+    if (first === undefined && /"data"\s*:\s*\[/.test(text) && /"starting_at"\s*:/.test(text)) {
+      const byMarks = reportByMarks(text) ?? (await scanForReportKind(file.blob, head.encoding));
+      if (byMarks !== null) return { parser: byMarks, recognisedAs: `JSON file with an Anthropic API ${byMarks === 'api-cost' ? 'cost' : 'usage'} report` };
+      return { parser: 'api-usage', recognisedAs: 'JSON file with an Anthropic API report that has no figures in it', undecided: true };
+    }
     if (isObject(first) && typeof first.uuid === 'string' && ('email_address' in first || 'full_name' in first)) {
       return { parser: null, problem: `"${file.name}" is the account file of a claude.ai export. Choose conversations.json (or the whole ZIP) instead.` };
     }
@@ -223,7 +277,7 @@ async function classify(file: ImportFile): Promise<Kind> {
     // JSON Lines: the first line is a complete value of its own.
     if (lineValue !== undefined && (firstLineEnd !== -1 || linesByName)) {
       if (isTranscriptRow(lineValue)) return { parser: 'claude-code', recognisedAs: 'Claude Code session transcript', fromJson: true };
-      const kind = fromJsonFormat(detectJsonFormat(lineValue), 'JSON Lines file');
+      const kind = await fromValue(lineValue, 'JSON Lines file');
       if (kind) return kind;
       if (byName) return byName;
     }
@@ -238,6 +292,20 @@ async function classify(file: ImportFile): Promise<Kind> {
         try {
           value = JSON.parse(file.size <= head.bytes.length ? head.text : await file.blob.text());
         } catch (error) {
+          // Not one document. It can still be one value per line under a name that does not say so, with a first
+          // line longer than the part that was read: pages of a report saved one per line, for example.
+          const line = cutLine && head.utf8 ? await readFirstLine(file.blob, head.bytes, PARSE_WHOLE_BYTES) : null;
+          let first: unknown;
+          try {
+            first = line === null ? undefined : JSON.parse(line);
+          } catch {
+            first = undefined;
+          }
+          if (first !== undefined) {
+            if (isTranscriptRow(first)) return { parser: 'claude-code', recognisedAs: 'Claude Code session transcript', fromJson: true };
+            const kind = await fromValue(first, 'JSON Lines file');
+            if (kind) return kind;
+          }
           return {
             parser: null,
             problem: `"${file.name}" starts like a JSON document but cannot be parsed (${error instanceof Error ? error.message : 'invalid JSON'}). The file may be incomplete.`,
@@ -251,13 +319,17 @@ async function classify(file: ImportFile): Promise<Kind> {
           problem: `"${file.name}" is an error response from the Anthropic API, not a report: ${apiError}. Run the request again and save a successful response.`,
         };
       }
-      const kind = fromJsonFormat(detectJsonFormat(value), 'JSON file');
+      const kind = await fromValue(value, 'JSON file');
       if (kind) return kind;
       if (isObject(value) && Array.isArray(value.conversations) && value.conversations.some(looksLikeConversation)) {
         return { parser: null, problem: `"${file.name}" wraps its conversations in an object. Claude Lifetime reads the conversations.json of the official export, which is a plain list.` };
       }
     } else if (/"data"\s*:\s*\[/.test(text) && /"starting_at"\s*:/.test(text)) {
-      return { parser: /"amount"\s*:/.test(text) && !/"uncached_input_tokens"\s*:/.test(text) ? 'api-cost' : 'api-usage', recognisedAs: 'JSON file with an Anthropic API report' };
+      // Too large to parse whole. The marks in its beginning say which report it is; a beginning of empty time
+      // buckets has none, and then the rest of the file is looked through.
+      const byMarks = reportByMarks(text) ?? (await scanForReportKind(file.blob, head.encoding));
+      if (byMarks === null) return { parser: 'api-usage', recognisedAs: 'JSON file with an Anthropic API report that has no figures in it', undecided: true };
+      return { parser: byMarks, recognisedAs: `JSON file with an Anthropic API ${byMarks === 'api-cost' ? 'cost' : 'usage'} report` };
     } else if (longFirstLine) {
       // The first line is longer than what is read, or it is not valid JSON. The Claude Code parser reads on past such a line.
       return byName ?? { parser: null, problem: `The first line of "${file.name}" could not be read as JSON, so the app cannot tell what the file holds. ${SUPPORTED}` };
@@ -420,6 +492,12 @@ export async function detectImport(files: ImportFile[]): Promise<Detected> {
   if (good.length === 0) {
     throw new ImportError(problems[0]?.problem ?? `These files are not in a format this app can read. ${SUPPORTED}`, 'unknown_format');
   }
+  // A page of nothing but empty time buckets belongs to the report the other pages are from: a cost report
+  // that starts before the first spend has such a page, and so has a usage report with a quiet week.
+  const settled = new Set(good.filter((e) => !e.k.undecided).map((e) => e.k.parser));
+  if (settled.size === 1 && settled.has('api-cost')) {
+    for (const e of good) if (e.k.undecided) e.k = { ...e.k, parser: 'api-cost' };
+  }
   const parsers = new Set(good.map((e) => e.k.parser));
   if (parsers.size > 1) {
     throw new ImportError(
@@ -432,6 +510,8 @@ export async function detectImport(files: ImportFile[]): Promise<Detected> {
     throw new ImportError('Import CSV files one at a time: each has its own columns to match.', 'mixed_selection');
   }
   if (files.length > MAX_SEPARATE_FILES) throw tooManyFiles(files.length, parser);
-  const recognisedAs = good.length > 1 ? `${good.length} files: ${good[0].k.recognisedAs}` : good[0].k.recognisedAs;
+  // Named after a file that shows what the selection is, not after a page that happens to be empty.
+  const lead = (good.find((e) => !e.k.undecided) ?? good[0]).k;
+  const recognisedAs = good.length > 1 ? `${good.length} files: ${lead.recognisedAs}` : lead.recognisedAs;
   return done(parser, good.map((e) => e.i), recognisedAs, good[0].k.csv);
 }

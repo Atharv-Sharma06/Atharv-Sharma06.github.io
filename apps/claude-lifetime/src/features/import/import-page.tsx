@@ -12,6 +12,7 @@ import { Card } from '@/components/ui/card';
 import { Field, Input, Switch } from '@/components/ui/controls';
 import { BASE_PATH } from '@/db/client';
 import { GENERIC_FIELDS } from '@/import/generic/fields';
+import { sourceRefFromName } from '@/import/generic/source-ref';
 import { toImportFiles } from '@/import/session';
 import { formatRelative, plural } from '@/lib/format';
 import { useApp } from '@/state/app';
@@ -73,13 +74,12 @@ function downloadText(name: string, text: string, type: string) {
   URL.revokeObjectURL(url);
 }
 
-const computerRef = (name: string) =>
-  name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40);
+/**
+ * The reference of the source a named computer's usage is filed under. Made from the name in
+ * whatever script it is written, so two names never share a reference because neither has an
+ * ASCII letter; a name is cut to 40 characters, as it always was.
+ */
+const computerRef = (name: string) => sourceRefFromName(Array.from(name.trim()).slice(0, 40).join(''));
 
 export function ImportPage() {
   const app = useApp();

@@ -28,8 +28,9 @@ export function EmptyState({ title, children, action, className }: { title: stri
 export function ErrorNote({ title, children, className }: { title: string; children?: ReactNode; className?: string }) {
   return (
     <div role="alert" className={cn('rounded-[var(--radius-control)] border border-critical/40 bg-critical/10 px-3.5 py-3', className)}>
-      <p className="font-medium text-ink">{title}</p>
-      {children ? <div className="mt-1 text-ink-2">{children}</div> : null}
+      {/* A title can quote a file name, which has no place to break: let it wrap anywhere rather than widen the page. */}
+      <p className="font-medium text-ink [overflow-wrap:anywhere]">{title}</p>
+      {children ? <div className="mt-1 text-ink-2 [overflow-wrap:anywhere]">{children}</div> : null}
     </div>
   );
 }

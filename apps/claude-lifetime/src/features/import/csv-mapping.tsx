@@ -137,7 +137,7 @@ export function ConfidenceForm({
             `These ${fileCount} files hold usage records in the Claude Lifetime format.`
           ) : (
             <>
-              <span className="font-medium">{fileName}</span> holds usage records in the Claude Lifetime format.
+              <span className="font-medium [overflow-wrap:anywhere]">{fileName}</span> holds usage records in the Claude Lifetime format.
             </>
           )}
         </p>
@@ -174,7 +174,12 @@ export function CsvMappingForm({
 }: {
   fileName: string;
   csv: CsvPreview;
-  onSubmit: (options: CsvImportOptions) => void;
+  /**
+   * `rememberChoices` stores what was chosen for tables with these columns. The caller runs it when the
+   * import has been saved: choices of an import that was cancelled at its preview are not "what was
+   * imported before", and must not be offered as such the next time.
+   */
+  onSubmit: (options: CsvImportOptions, rememberChoices: () => void) => void;
   onCancel: () => void;
 }) {
   // Read once, when the form appears for this file.
@@ -202,14 +207,16 @@ export function CsvMappingForm({
         e.preventDefault();
         if (check.problems.length > 0) return;
         const sourceLabel = label.trim() || 'Custom usage data';
-        remember(csv.header, { label: label.trim(), confidence, mapping: check.mapping });
+        const choices = { label: label.trim(), confidence, mapping: check.mapping };
         // The reference keeps tables apart, so it is made from the name in every script; only no name at all gives the unnamed source.
-        onSubmit({ mapping: check.mapping, confidence, sourceLabel, sourceRef: sourceRefFromName(label), delimiter: csv.delimiter });
+        onSubmit({ mapping: check.mapping, confidence, sourceLabel, sourceRef: sourceRefFromName(label), delimiter: csv.delimiter }, () =>
+          remember(csv.header, choices),
+        );
       }}
     >
       <div>
         <p className="text-ink">
-          <span className="font-medium">{fileName}</span> is a table with {csv.header.length} columns.
+          <span className="font-medium [overflow-wrap:anywhere]">{fileName}</span> is a table with {csv.header.length} columns.
         </p>
         <p className="mt-0.5 text-[13px] text-ink-2">
           Say which column holds what. A date or time and at least one token count are needed; everything else is optional. Columns you leave out are

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ImportError, type ImportFile } from '@/core/types';
-import { apiUsageReportParser } from '@/import/api-reports';
+import { apiCostReportParser, apiUsageReportParser } from '@/import/api-reports';
 import { claudeCodeParser } from '@/import/claude-code';
 import { detectImport } from '@/import/detect';
 import { genericJsonParser } from '@/import/generic';
@@ -360,6 +360,219 @@ describe('more files than are looked at one by one', () => {
     const message = (result as { message: string }).message;
     expect(message).toMatch(/They look like usage files in the Claude Lifetime format\. Import them in groups of up to 200/);
     expect(message).not.toMatch(/Claude Code/);
+  });
+});
+
+describe('a report of the older API endpoints that begins with empty time buckets', () => {
+  // Both of these reports list every time bucket of the period, with or without figures, and an empty bucket
+  // looks the same in both. A cost report that starts before the first spend begins with a page of them.
+  const day = (d: number) => `2026-04-${String(d).padStart(2, '0')}T00:00:00Z`;
+  const bucket = (d: number, results: unknown[]) => ({ starting_at: day(d), ending_at: day(d + 1), results });
+  const pageOf = (data: unknown[], more = false, next = 'page_abc') => ({ data, has_more: more, next_page: more ? next : null });
+  const cost = {
+    amount: '1250',
+    currency: 'USD',
+    context_window: null,
+    cost_type: 'tokens',
+    description: 'Claude Sonnet 4.6 Usage - Output Tokens',
+    inference_geo: null,
+    model: 'claude-sonnet-4-6',
+    service_tier: 'standard',
+    speed: null,
+    token_type: 'output_tokens',
+    workspace_id: null,
+  };
+  const week = (from: number, results: (d: number) => unknown[], more = false) => pageOf(Array.from({ length: 7 }, (_, i) => bucket(from + i, results(from + i))), more);
+  const emptyWeek = week(1, () => [], true);
+  const weekWithCost = week(8, (d) => (d === 9 ? [cost] : []));
+  const weekWithUsage = week(8, (d) => (d === 9 ? [{ uncached_input_tokens: 5, output_tokens: 1, model: 'claude-sonnet-4-6' }] : []));
+
+  const costsOf = async (files: ImportFile[]) => {
+    const { sink, out } = collectingSink();
+    await apiCostReportParser.parse(files, sink, {});
+    return out.costs.map((c) => [c.occurredAt.slice(0, 10), c.amountUsd]);
+  };
+
+  it('is a cost report when a later page of the file holds an amount: pages kept as one list', async () => {
+    const file = fileOf('cost-report.json', JSON.stringify([emptyWeek, weekWithCost]));
+    expect(await outcome([file])).toMatchObject({ parser: 'api-cost', recognisedAs: 'JSON file with an Anthropic API cost report', fileIndexes: [0] });
+    expect(await costsOf([file])).toEqual([['2026-04-09', '12.5']]);
+  });
+
+  it('and pages kept one per line', async () => {
+    const file = fileOf('cost-report.jsonl', jsonl([emptyWeek, weekWithCost]));
+    expect(await outcome([file])).toMatchObject({ parser: 'api-cost', recognisedAs: 'JSON Lines file with an Anthropic API cost report' });
+    expect(await costsOf([file])).toEqual([['2026-04-09', '12.5']]);
+  });
+
+  it('and pages kept one per file: the empty page goes with the report the other pages are from', async () => {
+    const files = [fileOf('cost-page-1.json', JSON.stringify(emptyWeek)), fileOf('cost-page-2.json', JSON.stringify(weekWithCost))];
+    // The selection is named after the page that shows what it is, whichever comes first.
+    const expected = { parser: 'api-cost', recognisedAs: '2 files: JSON file with an Anthropic API cost report', ignoredFiles: 0 };
+    expect(await outcome(files)).toMatchObject({ ...expected, fileIndexes: [0, 1] });
+    expect(await outcome([files[1], files[0]])).toMatchObject({ ...expected, fileIndexes: [0, 1] });
+    expect(await costsOf(files)).toEqual([['2026-04-09', '12.5']]);
+  });
+
+  it('stays a usage report when the figures that follow are token counts', async () => {
+    expect(await outcome([fileOf('usage-report.json', JSON.stringify([emptyWeek, weekWithUsage]))])).toMatchObject({
+      parser: 'api-usage',
+      recognisedAs: 'JSON file with an Anthropic API usage report',
+    });
+    expect(await outcome([fileOf('usage-report.jsonl', jsonl([emptyWeek, weekWithUsage]))])).toMatchObject({
+      parser: 'api-usage',
+      recognisedAs: 'JSON Lines file with an Anthropic API usage report',
+    });
+    expect(await outcome([fileOf('usage-1.json', JSON.stringify(emptyWeek)), fileOf('usage-2.json', JSON.stringify(weekWithUsage))])).toMatchObject({
+      parser: 'api-usage',
+      recognisedAs: '2 files: JSON file with an Anthropic API usage report',
+      fileIndexes: [0, 1],
+    });
+  });
+
+  it('is not sorted into either report when it has no figure at all, and the importer says that it holds nothing', async () => {
+    const file = fileOf('report.json', JSON.stringify(emptyWeek));
+    expect(await outcome([file])).toMatchObject({ parser: 'api-usage', recognisedAs: 'JSON file with an Anthropic API report that has no figures in it' });
+    expect(await outcome([file, fileOf('report-2.json', JSON.stringify(week(8, () => [])))])).toMatchObject({
+      parser: 'api-usage',
+      recognisedAs: '2 files: JSON file with an Anthropic API report that has no figures in it',
+    });
+    const { sink } = collectingSink();
+    await expect(apiUsageReportParser.parse([file], sink, {})).rejects.toMatchObject({
+      code: 'no_rows',
+      message: 'The report has 7 time buckets between 2026-04-01 and 2026-04-08, but none of them contains any usage or cost. There is nothing to import.',
+    });
+  });
+
+  it('still refuses usage and cost pages that are selected together', async () => {
+    const mixed = await outcome([
+      fileOf('page-1.json', JSON.stringify(emptyWeek)),
+      fileOf('usage.json', JSON.stringify(weekWithUsage)),
+      fileOf('cost.json', JSON.stringify(weekWithCost)),
+    ]);
+    expect(mixed).toMatchObject({ error: 'mixed_selection' });
+  });
+
+  it('finds the first figure wherever it is in the file, also where two reads meet', async () => {
+    // The file is looked through a megabyte at a time. The word "amount" is put across the end of the first megabyte.
+    const READ_BYTES = 1024 * 1024;
+    const second = JSON.stringify(weekWithCost);
+    const at = (padding: number) => {
+      const first = JSON.stringify(pageOf(emptyWeek.data, true, `page_${'x'.repeat(padding)}`));
+      return { text: `${first}\n${second}\n`, amountAt: first.length + 1 + second.indexOf('"amount"') };
+    };
+    const base = at(0);
+    const { text, amountAt } = at(READ_BYTES - 4 - base.amountAt);
+    expect(amountAt).toBe(READ_BYTES - 4);
+    expect(text.slice(READ_BYTES - 4, READ_BYTES + 5)).toBe('"amount":');
+
+    const reads = noReads();
+    const file = fileOf('cost-report.jsonl', text);
+    expect(await outcome([counted(file, reads)])).toMatchObject({ parser: 'api-cost', recognisedAs: 'JSON Lines file with an Anthropic API cost report' });
+    expect(reads.whole).toBe(0);
+    expect(await costsOf([file])).toEqual([['2026-04-09', '12.5']]);
+  });
+
+  it('does not read past the beginning of a report whose first page has figures', async () => {
+    const reads = noReads();
+    const big = jsonl([weekWithUsage, ...Array.from({ length: 4000 }, (_, i) => reportPage(1 + (i % 28), 5))]);
+    expect(big.length).toBeGreaterThan(1_000_000);
+    expect(await outcome([counted(fileOf('usage-report.jsonl', big), reads)])).toMatchObject({ parser: 'api-usage' });
+    expect(reads.whole).toBe(0);
+    expect(reads.bytes).toBeLessThanOrEqual(HEAD_BYTES);
+  });
+});
+
+describe('report pages that are larger than the part of a file that is read first', () => {
+  // A page of the Analytics API holds up to a thousand rows; five hundred are already more than is read first.
+  const hour = (i: number) => new Date(Date.UTC(2026, 8, 1) + i * 3_600_000).toISOString().replace('.000Z', 'Z');
+  const group = {
+    product: null, model: 'claude-sonnet-5', context_window: null, inference_geo: null, speed: 'standard', slack_channel_id: null,
+    claude_tag_category: null, claude_tag_user_id: null, rbac_group_id: null, workspace_id: null, service_tier: 'standard',
+    user_profile_id: null, agent_id: null, environment_id: null, deployment_id: null, session_id: null, actor: null, actor_type: null,
+    api_key_id: null,
+  };
+  const usageRow = (i: number) => ({
+    starting_at: hour(i),
+    ending_at: hour(i + 1),
+    group,
+    usage: {
+      uncached_input_tokens: 100,
+      cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 },
+      cache_read_input_tokens: 0,
+      output_tokens: 0,
+      total_tokens: 100,
+      server_tool_use: { web_search_requests: 0 },
+      requests: 1,
+    },
+  });
+  const costRow = (i: number) => ({ starting_at: hour(i), ending_at: hour(i + 1), group, cost: { amount: '0.25', currency: 'USD' } });
+  const analyticsPage = (row: (i: number) => unknown, rows: number, more: boolean, offset = 0) => ({
+    data: Array.from({ length: rows }, (_, i) => row(offset + i)),
+    has_more: more,
+    next_page: more ? 'page_x' : null,
+    data_refreshed_at: '2026-10-05T00:00:00Z',
+  });
+  const usagePages = [JSON.stringify(analyticsPage(usageRow, 500, true)), JSON.stringify(analyticsPage(usageRow, 100, false, 500))];
+  const costPages = [JSON.stringify(analyticsPage(costRow, 600, true)), JSON.stringify(analyticsPage(costRow, 100, false, 600))];
+
+  const usageRows = async (file: ImportFile) => {
+    const { sink, out } = collectingSink();
+    await apiUsageReportParser.parse([file], sink, {});
+    return out.usage.length;
+  };
+
+  it('are recognised when they are kept as one list', async () => {
+    expect(usagePages[0].length).toBeGreaterThan(HEAD_BYTES);
+    const file = fileOf('usage-pages.json', `[${usagePages.join(',')}]`);
+    expect(await outcome([file])).toMatchObject({ parser: 'api-usage', recognisedAs: 'JSON file with an Anthropic API usage report', fileIndexes: [0] });
+    expect(await usageRows(file)).toBe(600);
+  });
+
+  it('are recognised when they are kept one per line, whatever the file is called', async () => {
+    const lines = `${usagePages.join('\n')}\n`;
+    for (const name of ['usage-pages.json', 'usage-pages.txt', 'usage-pages.jsonl']) {
+      const file = fileOf(name, lines);
+      expect(await outcome([file]), name).toMatchObject({ parser: 'api-usage', recognisedAs: 'JSON Lines file with an Anthropic API usage report' });
+      expect(await usageRows(file), name).toBe(600);
+    }
+  });
+
+  it('are told apart by their figures: pages of a cost report are recognised as a cost report', async () => {
+    expect(costPages[0].length).toBeGreaterThan(HEAD_BYTES);
+    expect(await outcome([fileOf('cost-pages.json', `[${costPages.join(',')}]`)])).toMatchObject({
+      parser: 'api-cost',
+      recognisedAs: 'JSON file with an Anthropic API cost report',
+    });
+    expect(await outcome([fileOf('cost-pages.json', `${costPages.join('\n')}\n`)])).toMatchObject({
+      parser: 'api-cost',
+      recognisedAs: 'JSON Lines file with an Anthropic API cost report',
+    });
+  });
+
+  it('are looked through to their first figure when the list begins with a large page of empty time buckets', async () => {
+    const minute = (i: number) => new Date(Date.UTC(2026, 3, 1) + i * 60_000).toISOString().replace('.000Z', 'Z');
+    const quiet = { data: Array.from({ length: 4000 }, (_, i) => ({ starting_at: minute(i), ending_at: minute(i + 1), results: [] })), has_more: true, next_page: 'page_abc' };
+    const withCost = { data: [{ starting_at: minute(4000), ending_at: minute(4001), results: [{ amount: '1250', currency: 'USD' }] }], has_more: false, next_page: null };
+    expect(JSON.stringify(quiet).length).toBeGreaterThan(HEAD_BYTES);
+    expect(await outcome([fileOf('cost-report.json', JSON.stringify([quiet, withCost]))])).toMatchObject({
+      parser: 'api-cost',
+      recognisedAs: 'JSON file with an Anthropic API cost report',
+    });
+    expect(await outcome([fileOf('report.json', JSON.stringify([quiet, { ...quiet, has_more: false, next_page: null }]))])).toMatchObject({
+      parser: 'api-usage',
+      recognisedAs: 'JSON file with an Anthropic API report that has no figures in it',
+    });
+  });
+
+  it('leave other large lists and broken documents with the messages they had', async () => {
+    const list = await outcome([fileOf('things.json', JSON.stringify([{ name: 'x'.repeat(300_000) }, { name: 'y' }]))]);
+    expect(list).toMatchObject({ error: 'unknown_format' });
+    expect((list as { message: string }).message).toMatch(/^"things\.json" is a JSON list, but its entries are neither conversations nor usage records\./);
+
+    const cut = await outcome([fileOf('usage-pages.json', usagePages[0].slice(0, 300_000))]);
+    expect(cut).toMatchObject({ error: 'unknown_format' });
+    expect((cut as { message: string }).message).toMatch(/starts like a JSON document but cannot be parsed .*The file may be incomplete\.$/);
   });
 });
 

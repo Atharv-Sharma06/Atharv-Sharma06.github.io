@@ -127,8 +127,9 @@ export; the CSV files are recognised by their header row.
 **Admin API (organizations only):** save the JSON responses of the usage report and cost
 report endpoints. Both generations of the API are recognised (the usage and cost report
 endpoints and the analytics endpoints). A report that spans several pages: select all
-page files together. The Admin API needs an admin key and is not available to individual
-accounts.
+page files together (up to 200 files in one import), or keep the pages in one file, as a
+JSON list of the pages or with one page per line. The Admin API needs an admin key and is
+not available to individual accounts.
 
 **Read from it:** per time bucket the uncached input, cache-read, cache-write (5-minute
 and 1-hour) and output tokens, web searches, and the dimensions the report was grouped by
@@ -168,6 +169,11 @@ billed amounts, which are stored as actual spend, to the hundred-millionth of a 
   priced.
 - Usage in the `priority`, `flex` or long-context tiers of models with no published price
   for that tier is counted but left unpriced.
+- Whether a file is a usage or a cost report is read from its figures, wherever in the
+  file the first one stands. A cost report that begins before the first spend, with a
+  page of empty days, is a cost report all the same, and an empty page that is selected
+  with other pages goes with them. A report without a single figure is reported as
+  empty.
 - A saved error response (for example an authentication error) is recognised and
   explained instead of being rejected as an unknown file.
 
@@ -273,3 +279,4 @@ The message names the file and says what was found. The most common cases:
 | These files contain no token usage | Transcripts older than the retention period were already deleted. |
 | … is an error response from the Anthropic API | The request failed when the file was saved. Run it again with a valid admin key. |
 | Another import is being prepared in a different tab | Finish or cancel it there; all tabs share one database. |
+| This selection has … files | Files that are not found by their name are opened one by one, at most 200 per import. The message says what they look like and how to import them: a folder for Claude Code transcripts, one file with all pages for a report, groups of 200 for the rest. |

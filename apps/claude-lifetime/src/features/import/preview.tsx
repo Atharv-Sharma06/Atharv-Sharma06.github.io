@@ -111,18 +111,24 @@ export function ImportPreviewView({ prepared, timezone }: { prepared: PreparedIm
   const tokens = p.tokens.exact + p.tokens.estimated;
   // Model and token counts have their own lines below; this list is for everything else a format lacks.
   const otherMissing = p.missingFields.filter((f) => f !== 'model' && f !== 'token counts');
+  const removedRows = (p.replaced?.usageRows ?? 0) + (p.replaced?.costRows ?? 0);
+  /** No record of the file is new. Records that are new and carry no tokens are another matter. */
+  const nothingToAdd = p.usageRows.new + p.messages.new + p.costRows.new === 0;
   // Calendar days as the charts count them: a record that only knows its day is that day in every timezone.
   const range = p.coveredDays.first && p.coveredDays.last ? `${formatDay(p.coveredDays.first)} – ${formatDay(p.coveredDays.last)}` : 'No dated records';
 
   return (
     <div className="space-y-5">
       <div>
-        <p className="text-ink">
+        <p className="text-ink [overflow-wrap:anywhere]">
           <span className="font-medium">{p.fileName}</span>
           {p.fileSize > 0 ? <span className="text-ink-3"> ({formatBytes(p.fileSize)})</span> : null}
         </p>
-        <p className="mt-0.5 text-[13px] text-ink-2">
+        <p className="mt-0.5 text-[13px] text-ink-2 [overflow-wrap:anywhere]">
           Recognised as {info.label}: {prepared.detected.recognisedAs}. Will be stored under the source “{p.source.label}”.
+          {prepared.detected.ignoredFiles > 0
+            ? ` ${plural(prepared.detected.ignoredFiles, 'other file')} in the selection ${prepared.detected.ignoredFiles === 1 ? 'is' : 'are'} not part of this import and will be ignored.`
+            : ''}
         </p>
       </div>
 
@@ -180,9 +186,16 @@ export function ImportPreviewView({ prepared, timezone }: { prepared: PreparedIm
             </dd>
             <p className="mt-1.5 text-xs text-ink-3">
               {tokens === 0
-                ? p.figures.costs
+                ? p.figures.costs || (p.costRows.total > 0 && p.usageRows.total + p.messages.total === 0)
                   ? 'this file states amounts of money, not tokens'
-                  : 'this file carries no token counts'
+                  : !nothingToAdd
+                    ? 'this file carries no token counts'
+                    : removedRows > 0
+                      ? // Nothing to add is not "no token counts": the file restates rows, and some stored ones go.
+                        `nothing to add; ${plural(removedRows, 'stored row')}${p.replaced && p.replaced.tokens > 0 ? ` with ${formatTokens(p.replaced.tokens)} tokens` : ''} will be removed`
+                      : p.usageRows.total + p.messages.total > 0
+                        ? 'nothing to add: what the file holds is stored already'
+                        : 'this file carries no token counts'
                 : p.tokens.exact > 0 && p.tokens.estimated > 0
                   ? `${formatTokens(p.tokens.exact)} exact, ${formatTokens(p.tokens.estimated)} estimated`
                   : p.tokens.estimated > 0
