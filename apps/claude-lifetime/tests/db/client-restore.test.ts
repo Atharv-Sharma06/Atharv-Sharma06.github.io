@@ -7,7 +7,7 @@ vi.mock('@electric-sql/pglite/worker', async (original) => ({
   PGliteWorker: (await import('../helpers/fake-pglite-worker')).FakePGliteWorker,
 }));
 
-import { openDatabase, releaseDatabase, restoreDatabase } from '@/db/client';
+import { DATA_CHANNEL, openDatabase, releaseDatabase, restoreDatabase, type TabMessage } from '@/db/client';
 import { MIGRATIONS } from '@/db/migrations.generated';
 import {
   installIndexedDb,
@@ -152,6 +152,41 @@ describe('restoreDatabase(): the database it replaces', () => {
       'delete /pglite/claude-lifetime',
       `unlock claude-lifetime:restore:${name}`,
     ]);
+  });
+
+  it('lets the caller adjust what is kept beside the database once the restore is certain, before the other tabs are told', async () => {
+    await openDatabase();
+    resetTimeline();
+    const told: string[] = [];
+    const others = new BroadcastChannel(DATA_CHANNEL);
+    others.onmessage = (event: MessageEvent<TabMessage>) => told.push(event.data.op);
+
+    await restoreDatabase(backup, undefined, async () => {
+      timeline.push(`adjusted with ${storage[POINTER]} current, other tabs told: ${told.length}`);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    others.close();
+
+    const name = built().name;
+    // After the restored database became the current one, and before anybody else was told to load it.
+    expect(timeline).toContain(`adjusted with ${name} current, other tabs told: 0`);
+    expect(timeline.indexOf(`localStorage ${POINTER}=${name}`)).toBeLessThan(timeline.findIndex((entry) => entry.startsWith('adjusted')));
+    expect(told).toEqual(['reload']);
+  });
+
+  it('does not ask for that when the restore fails, and a failure of it does not undo a restore', async () => {
+    let asked = 0;
+    fakeDatabases.answerFlush = (request) => ({ op: 'flushed', id: request.id, ok: false, error: QUOTA });
+    expect(await failureOf(restoreDatabase(backup, undefined, async () => void asked++))).not.toBeNull();
+    expect(asked).toBe(0);
+
+    fakeDatabases.reset();
+    await restoreDatabase(backup, undefined, async () => {
+      asked++;
+      throw new Error('the browser refused');
+    });
+    expect(asked).toBe(1);
+    expect(storage[POINTER]).toBe(fakeDatabases.opened.find((database) => database.fromBackup)!.name);
   });
 
   it('deletes the database the pointer named, also when that was itself a restored one', async () => {

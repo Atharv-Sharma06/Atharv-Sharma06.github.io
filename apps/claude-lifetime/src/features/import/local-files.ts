@@ -178,23 +178,49 @@ export async function setAutoSync(enabled: boolean): Promise<void> {
   await kvDelete(AUTO_SYNC_STOPPED_KEY);
 }
 
+/** When and why the app itself switched automatic reading off. Kept until the user sets the switch again. */
+export interface AutoSyncStop {
+  at: number;
+  after: 'deletion' | 'restore';
+}
+
+async function stopAutoSync(after: AutoSyncStop['after']): Promise<boolean> {
+  if (!(await autoSyncEnabled())) return false;
+  await kvDelete(AUTO_SYNC_KEY);
+  await kvSet(AUTO_SYNC_STOPPED_KEY, { at: Date.now(), after } satisfies AutoSyncStop).catch(() => undefined);
+  return true;
+}
+
 /**
  * Call after Claude Code data was deleted. Automatic reading of the remembered folder
  * would bring the deleted usage straight back on the next visit, so it is switched off;
  * the folder stays remembered and can still be read on request. Returns whether the
  * switch was on.
  */
-export async function stopAutoSyncAfterDeletion(): Promise<boolean> {
-  if (!(await autoSyncEnabled())) return false;
-  await kvDelete(AUTO_SYNC_KEY);
-  await kvSet(AUTO_SYNC_STOPPED_KEY, Date.now()).catch(() => undefined);
-  return true;
+export function stopAutoSyncAfterDeletion(): Promise<boolean> {
+  return stopAutoSync('deletion');
 }
 
-/** When a deletion last switched automatic reading off, until the user sets the switch again. */
-export async function autoSyncStoppedAt(): Promise<number | null> {
-  const at = await kvGet<number>(AUTO_SYNC_STOPPED_KEY);
-  return typeof at === 'number' ? at : null;
+/**
+ * Call when a backup is restored, before the restored data becomes what every tab
+ * shows. A restore sets the stored data to what the backup holds; automatic reading
+ * would add this computer's Claude Code usage to it on the next visit, without a
+ * preview. So it is switched off, as after a deletion, and what is on record about the
+ * last reading goes as well: it describes the data that is being replaced. The folder
+ * stays remembered. Returns whether the switch was on.
+ */
+export async function stopAutoSyncAfterRestore(): Promise<boolean> {
+  await kvDelete(LAST_SYNC_KEY).catch(() => undefined);
+  return stopAutoSync('restore');
+}
+
+/** When and why the app last switched automatic reading off, until the user sets the switch again. */
+export async function autoSyncStop(): Promise<AutoSyncStop | null> {
+  const stored = await kvGet<Partial<AutoSyncStop> | number>(AUTO_SYNC_STOPPED_KEY);
+  // Only the time was kept at first, when a deletion was the only reason.
+  if (typeof stored === 'number') return { at: stored, after: 'deletion' };
+  if (!stored || typeof stored.at !== 'number') return null;
+  return { at: stored.at, after: stored.after === 'restore' ? 'restore' : 'deletion' };
 }
 
 /**

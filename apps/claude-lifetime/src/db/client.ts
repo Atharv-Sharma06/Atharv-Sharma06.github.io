@@ -632,8 +632,13 @@ export async function destroyDatabase(): Promise<void> {
  * into a separate database, checked and copied to this device's storage first; the
  * current data is only removed once the browser has confirmed that copy. The page
  * must be reloaded afterwards.
+ *
+ * `beforeItCounts` runs once the restore can no longer fail, right before the other tabs
+ * are told to load the restored data: the place to adjust what the app keeps beside the
+ * database. Afterwards would be too late for those tabs, and earlier would change it for
+ * a restore that did not happen.
  */
-export async function restoreDatabase(file: Blob, passphrase?: string): Promise<void> {
+export async function restoreDatabase(file: Blob, passphrase?: string, beforeItCounts?: () => Promise<unknown>): Promise<void> {
   if (file.size === 0) throw new Error('The file is empty.');
   // A passphrase-protected backup is decrypted first; a wrong passphrase stops here, before anything changes.
   const backup = (await isEncryptedBackup(file)) ? await decryptBackup(file, passphrase) : file;
@@ -676,8 +681,10 @@ export async function restoreDatabase(file: Blob, passphrase?: string): Promise<
       await deleteIndexedDb(name).catch(() => undefined);
       throw new Error('This browser does not allow the site to save settings, so the backup cannot be activated. Nothing was changed.');
     }
-    // From here on the restored database is the current one. Other tabs load it when they reload;
-    // the previous database is deleted once nothing has it open any more.
+    // From here on the restored database is the current one, and nothing can stop the restore any more.
+    // A failure in what the caller wants done now costs a convenience, not the restore.
+    await beforeItCounts?.().catch(() => undefined);
+    // Other tabs load the restored database when they reload; the previous one is deleted once nothing has it open any more.
     announce('reload');
     await dropCurrent();
     if (previous !== name) await deleteIndexedDb(previous).catch(() => undefined);

@@ -8,11 +8,12 @@ import { Field, Input } from '@/components/ui/controls';
 import { ErrorNote, Skeleton } from '@/components/ui/feedback';
 import { Dialog, InfoTip } from '@/components/ui/overlay';
 import { restoreDatabase } from '@/db/client';
+import { stopAutoSyncAfterRestore, useAutoSyncEnabled } from '@/features/import/local-files';
 import { BackupCryptoError, encryptBackup, isEncryptedBackup, MIN_PASSPHRASE_LENGTH } from '@/lib/backup-crypto';
 import { formatBytes, formatInt, plural } from '@/lib/format';
 import { useApp, useData } from '@/state/app';
 import { useCoverage } from '@/state/queries';
-import { backupFileName, checkPassphrase, looksLikeDatabaseDump } from './logic';
+import { backupFileName, checkPassphrase, inspectBackupFile } from './logic';
 import { SettingRow, SettingsSection } from './parts';
 
 interface StorageInfo {
@@ -286,13 +287,15 @@ function RestoreDialog({ file, encrypted, onClose }: { file: File; encrypted: bo
 
   const sources = coverage.data?.sources ?? [];
   const conversations = sources.reduce((sum, s) => sum + s.conversations, 0);
+  const autoSync = useAutoSyncEnabled();
 
   const restore = async () => {
     setBusy(true);
     setPassphraseError(null);
     setFailure(null);
     try {
-      await restoreDatabase(file, encrypted ? passphrase : undefined);
+      // Otherwise the next visit would read the remembered Claude Code folder and add its usage to the restored data.
+      await restoreDatabase(file, encrypted ? passphrase : undefined, stopAutoSyncAfterRestore);
     } catch (error) {
       if (error instanceof BackupCryptoError && error.code !== 'damaged') {
         setPassphraseError(error.message);
@@ -348,6 +351,12 @@ function RestoreDialog({ file, encrypted, onClose }: { file: File; encrypted: bo
           that cannot be read{encrypted ? ', or a wrong passphrase,' : ''} changes nothing. Afterwards this page reloads, and so does every other
           open tab of the app.
         </p>
+        {autoSync ? (
+          <p>
+            Reading the Claude Code folder automatically is switched off with this, because it would add this computer’s Claude Code usage to
+            the restored data the next time the app opens. You can switch it back on under Import data.
+          </p>
+        ) : null}
         {encrypted ? (
           <Field label="Passphrase for this backup" error={passphraseError} className="pt-1">
             <Input
@@ -374,6 +383,14 @@ function RestoreDialog({ file, encrypted, onClose }: { file: File; encrypted: bo
   );
 }
 
+/** Why a chosen file is not restored, in words for the person. A backup that was cut off is not called something else. */
+export function notABackup(fileName: string, kind: 'cut_short' | 'other'): string {
+  if (kind === 'cut_short') {
+    return `“${fileName}” is a Claude Lifetime backup, but not all of it: the file ends before the backup does, or it was damaged. That happens when a download or a copy is cut off. Get the file again from where you keep it, then choose it here. Nothing was changed.`;
+  }
+  return `“${fileName}” is not a Claude Lifetime backup. Choose the .tar.gz or .clbackup file that “Download backup” saved.`;
+}
+
 function RestoreRow() {
   const input = useRef<HTMLInputElement>(null);
   const [picked, setPicked] = useState<{ file: File; encrypted: boolean } | null>(null);
@@ -387,8 +404,9 @@ function RestoreRow() {
     try {
       const encrypted = await isEncryptedBackup(file);
       // A protected backup can only be looked into with its passphrase; a plain one is checked here and now.
-      if (!encrypted && !(await looksLikeDatabaseDump(file))) {
-        setError(`“${file.name}” is not a Claude Lifetime backup. Choose the .tar.gz or .clbackup file that “Download backup” saved.`);
+      const kind = encrypted ? 'backup' : await inspectBackupFile(file);
+      if (kind !== 'backup') {
+        setError(notABackup(file.name, kind));
         return;
       }
       setPicked({ file, encrypted });

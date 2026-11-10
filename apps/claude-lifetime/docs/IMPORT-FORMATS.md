@@ -60,7 +60,9 @@ model.
   The name is remembered on this device. It decides which source the usage is filed
   under, so keep it the same for the same computer.
 - Deleting Claude Code usage switches automatic reading of the folder off, because it
-  would add the deleted usage again on the next visit. It can be switched back on.
+  would add the deleted usage again on the next visit. Restoring a backup switches it off
+  as well, so that the restored data stays as the backup has it. The folder stays
+  remembered, the import page says why the switch is off, and it can be switched back on.
 
 ## Claude Code ledger (collector script)
 
@@ -269,7 +271,8 @@ record, which suits very large files. `version` is 1, and `records` is a list.
 
 "Add usage by hand" on the import page stores one day of usage as its own import: date,
 optional model, token counts by category, whether the figure is exact or your own
-estimate, and a note.
+estimate, and a note. The day can be any day from 2021 up to today in the timezone set
+in Settings, and each count at most 1,000,000,000,000 tokens.
 
 ## When a file is not accepted
 

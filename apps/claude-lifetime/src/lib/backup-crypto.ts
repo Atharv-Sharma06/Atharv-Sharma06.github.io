@@ -67,7 +67,7 @@ export async function decryptBackup(encrypted: Blob, passphrase: string | undefi
     const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce as BufferSource }, key, bytes.subarray(HEADER_BYTES) as BufferSource);
     return new Blob([plain], { type: 'application/gzip' });
   } catch {
-    // GCM authenticates the data: a wrong passphrase and a modified file fail the same way.
-    throw new BackupCryptoError('The passphrase does not match this backup, or the file was changed after it was saved.', 'wrong_passphrase');
+    // GCM authenticates the data: a wrong passphrase, a modified file and one that was cut off fail the same way.
+    throw new BackupCryptoError('The passphrase does not match this backup, or the file was changed or cut short after it was saved.', 'wrong_passphrase');
   }
 }

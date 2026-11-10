@@ -105,7 +105,7 @@ function ManualEntryForm({
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Day">
-          <Input type="date" value={date} min={MANUAL_ENTRY_FIRST_DAY} max={manualEntryLastDay()} onChange={(e) => setDate(e.target.value)} required />
+          <Input type="date" value={date} min={MANUAL_ENTRY_FIRST_DAY} max={manualEntryLastDay(app.settings.timezone)} onChange={(e) => setDate(e.target.value)} required />
         </Field>
         <Field label="Model" hint="Leave empty if you do not know it. Unknown models are counted but not priced.">
           <Input value={model} onChange={(e) => setModel(e.target.value)} list="manual-entry-models" placeholder="claude-sonnet-4-5" autoComplete="off" spellCheck={false} />

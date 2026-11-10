@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { PGlite } from '@electric-sql/pglite';
 import { describe, expect, it } from 'vitest';
@@ -13,6 +14,7 @@ import {
   formatPrice,
   isWholeValueInput,
   listTimezones,
+  inspectBackupFile,
   looksLikeDatabaseDump,
   looksLikeGzip,
   normalisePrice,
@@ -23,7 +25,8 @@ import {
   tierLabel,
   utcOffsetLabel,
 } from '@/features/settings/logic';
-import { encryptBackup, isEncryptedBackup, MIN_PASSPHRASE_LENGTH } from '@/lib/backup-crypto';
+import { notABackup } from '@/features/settings/backup-section';
+import { decryptBackup, encryptBackup, isEncryptedBackup, MIN_PASSPHRASE_LENGTH } from '@/lib/backup-crypto';
 
 const blob = (bytes: Uint8Array | Buffer) => new Blob([bytes as unknown as BlobPart]);
 
@@ -326,6 +329,54 @@ describe('backup files', () => {
     expect(await looksLikeDatabaseDump(blob(gzipSync(tarOf([{ name: 'PG_VERSION', content: '18\n' }]))))).toBe(true);
     // a file of that name deeper down is not the data directory's own
     expect(await looksLikeDatabaseDump(blob(gzipSync(tarOf([{ name: 'backup/old/PG_VERSION', content: '18\n' }]))))).toBe(false);
+  });
+
+  it('tells a backup that was cut short from a file that never was one', async () => {
+    const pg = new PGlite();
+    await pg.exec('CREATE TABLE t (id int); INSERT INTO t SELECT generate_series(1, 2000);');
+    const dump = Buffer.from(await ((await pg.dumpDataDir('gzip')) as Blob).arrayBuffer());
+    await pg.close();
+    expect(await inspectBackupFile(blob(dump))).toBe('backup');
+
+    // A download that broke off half-way. The root PG_VERSION stands near the end of the archive, so the
+    // quick check never reaches it. Before the fix this file was called "not a Claude Lifetime backup".
+    const half = blob(dump.subarray(0, Math.floor(dump.length / 2)));
+    expect(await looksLikeDatabaseDump(half)).toBe(false);
+    expect(await inspectBackupFile(half)).toBe('cut_short');
+    expect(await inspectBackupFile(blob(dump.subarray(0, Math.floor(dump.length / 10))))).toBe('cut_short');
+    // Nearly all of it: PG_VERSION is there, so the quick check passes it, and only reading to the end finds out.
+    const nearlyAll = blob(dump.subarray(0, dump.length - 60));
+    expect(await looksLikeDatabaseDump(nearlyAll)).toBe(true);
+    expect(await inspectBackupFile(nearlyAll)).toBe('cut_short');
+    // All of it, with one byte changed on the way: gzip's checksum at the end does not match.
+    const damaged = Buffer.from(dump);
+    damaged[Math.floor(damaged.length / 2)] ^= 0xff;
+    expect(await inspectBackupFile(blob(damaged))).not.toBe('backup');
+
+    // Files that never were a backup stay "not a backup", whole or cut off.
+    const photos = gzipSync(tarOf([{ name: 'photos/a.jpg', content: randomBytes(60_000).toString('latin1') }, { name: 'notes.md', content: 'hello' }]));
+    expect(await inspectBackupFile(blob(photos))).toBe('other');
+    expect(await inspectBackupFile(blob(photos.subarray(0, Math.floor(photos.length / 2))))).toBe('other');
+    expect(await inspectBackupFile(blob(Buffer.from('this is plain text, long enough to pass the size check')))).toBe('other');
+    expect(await inspectBackupFile(blob(gzipSync(Buffer.from('a gzip file, but not a database '.repeat(50)))))).toBe('other');
+    // An archive that ends properly but has no data directory at its root.
+    expect(await inspectBackupFile(blob(gzipSync(tarOf([{ name: 'backup/old/PG_VERSION', content: '18\n' }, { name: 'base/1/1259', content: 'x' }]))))).toBe('other');
+  });
+
+  it('says of a backup that was cut short what it is and what to do, instead of calling it something else', () => {
+    expect(notABackup('half.tar.gz', 'cut_short')).toBe(
+      '“half.tar.gz” is a Claude Lifetime backup, but not all of it: the file ends before the backup does, or it was damaged. That happens when a download or a copy is cut off. Get the file again from where you keep it, then choose it here. Nothing was changed.',
+    );
+    expect(notABackup('holiday.tar.gz', 'other')).toBe(
+      '“holiday.tar.gz” is not a Claude Lifetime backup. Choose the .tar.gz or .clbackup file that “Download backup” saved.',
+    );
+  });
+
+  it('says of a protected backup that does not open that it may have been cut short as well', async () => {
+    const sealed = Buffer.from(await (await encryptBackup(blob(gzipSync(tarOf([{ name: '/PG_VERSION', content: '18\n' }]))), 'correct horse 42')).arrayBuffer());
+    await expect(decryptBackup(blob(sealed.subarray(0, sealed.length - 40)), 'correct horse 42')).rejects.toThrow(
+      'The passphrase does not match this backup, or the file was changed or cut short after it was saved.',
+    );
   });
 
   it('leaves a protected backup to its passphrase: it is recognised as one, not as a plain dump', async () => {

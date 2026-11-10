@@ -4,6 +4,7 @@ import { toNumber, type SqlDriver, type SqlExecutor } from '@/db/driver';
 import { commitImport } from '@/import/commit';
 import { asOnlyImport } from '@/import/lock';
 import { resetStaging, StagingWriter } from '@/import/staging';
+import { dayInZone } from '@/lib/format';
 import type { TokenBasis } from './base';
 
 /** Preferences and accounting assumptions, stored in users.settings / users.timezone. */
@@ -256,10 +257,21 @@ export interface ManualUsageResult {
 /** No Claude model was available before 2021; the importers refuse earlier dates for the same reason. */
 export const MANUAL_ENTRY_FIRST_DAY = '2021-01-01';
 
-/** The latest day an entry can be for: tomorrow in UTC, which is "today" in the timezones furthest ahead. */
-export function manualEntryLastDay(now: Date = new Date()): string {
-  return new Date(now.getTime() + 86_400_000).toISOString().slice(0, 10);
+/**
+ * The latest day an entry can be for: today in `timezone`, the timezone the app shows
+ * days in. An entry is filed under the day the person names, in that timezone.
+ */
+export function manualEntryLastDay(timezone: string, now: Date = new Date()): string {
+  return dayInZone(now, timezone);
 }
+
+/**
+ * The most tokens one count of an entry can be: far more than anybody uses in a day, and
+ * far less than the largest number that is stored exactly. Without a limit, a slip of
+ * the keyboard (a pasted number, a key held down) was stored rounded, or refused by the
+ * database in its own words.
+ */
+export const MANUAL_ENTRY_MAX_TOKENS = 1_000_000_000_000;
 
 /** Records one day of usage typed in by the user, as its own deletable import. */
 export async function addManualUsage(db: SqlDriver, userId: number, input: ManualUsageInput, now: Date = new Date()): Promise<ManualUsageResult> {
@@ -268,10 +280,14 @@ export async function addManualUsage(db: SqlDriver, userId: number, input: Manua
   }
   // A year that is still being typed (0226 for 2026) is a valid date too, and one such entry stretches every chart over centuries.
   if (input.date < MANUAL_ENTRY_FIRST_DAY) throw new SettingsError('Enter a day in 2021 or later: no Claude usage can have happened before.');
-  if (input.date > manualEntryLastDay(now)) throw new SettingsError('Enter a day that is not in the future.');
+  const { timezone } = await getSettings(db, userId);
+  if (input.date > manualEntryLastDay(timezone, now)) throw new SettingsError('Enter a day that is not in the future.');
   const n = (v: number | undefined, name: string) => {
     const x = v ?? 0;
     if (!Number.isFinite(x) || x < 0 || !Number.isInteger(x)) throw new SettingsError(`${name} must be a whole number of tokens, zero or more.`);
+    if (x > MANUAL_ENTRY_MAX_TOKENS) {
+      throw new SettingsError(`${name} is more than one day can hold: enter at most ${MANUAL_ENTRY_MAX_TOKENS.toLocaleString('en-US')} tokens.`);
+    }
     return x;
   };
   const tokens = {

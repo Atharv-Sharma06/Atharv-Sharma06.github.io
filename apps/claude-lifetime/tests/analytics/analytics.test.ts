@@ -344,9 +344,33 @@ describe('settings and manual entries', () => {
     await expect(entry2('2020-12-31')).rejects.toThrow(/2021 or later/);
     await expect(entry2('2062-11-05')).rejects.toThrow(/not in the future/);
     await expect(entry2('2026-11-12')).rejects.toThrow(/not in the future/);
-    // tomorrow in UTC is already today in the timezones furthest ahead
-    const tomorrow = await entry2('2026-11-11');
-    await deleteBatch(t.db, t.userId, tomorrow.batchId!);
+    // "The future" starts after today in the timezone the app shows days in. Before the fix it started
+    // after tomorrow in UTC for everybody: in the evening west of UTC, the day after the person's own
+    // tomorrow was accepted, and every chart then ran to that day.
+    await expect(entry2('2026-11-11')).rejects.toThrow(/not in the future/);
+    const today = await entry2('2026-11-10');
+    await deleteBatch(t.db, t.userId, today.batchId!);
+    const { timezone: zoneBefore } = await getSettings(t.db, t.userId);
+    try {
+      await updateSettings(t.db, t.userId, { timezone: 'America/Los_Angeles' });
+      // 19:00 on 9 November in Los Angeles
+      const evening = new Date('2026-11-10T03:00:00Z');
+      const inLosAngeles = (date: string) => addManualUsage(t.db, t.userId, { date, confidence: 'exact', inputTokens: 1 }, evening);
+      await expect(inLosAngeles('2026-11-11')).rejects.toThrow(/not in the future/);
+      await expect(inLosAngeles('2026-11-10')).rejects.toThrow(/not in the future/);
+      await deleteBatch(t.db, t.userId, (await inLosAngeles('2026-11-09')).batchId!);
+      // and east of UTC, today is already the day that UTC calls tomorrow
+      await updateSettings(t.db, t.userId, { timezone: 'Pacific/Kiritimati' });
+      await deleteBatch(t.db, t.userId, (await entry2('2026-11-11')).batchId!);
+    } finally {
+      await updateSettings(t.db, t.userId, { timezone: zoneBefore });
+    }
+    // A count nobody can have used in a day is a slip of the keyboard. Before the fix the first of these was
+    // stored rounded, and the second was refused by the database: 'value "1e+20" is out of range for type bigint'.
+    await expect(addManualUsage(t.db, t.userId, { date: '2024-11-05', confidence: 'exact', inputTokens: 9007199254740993 })).rejects.toThrow(
+      'Input tokens is more than one day can hold: enter at most 1,000,000,000,000 tokens.',
+    );
+    await expect(addManualUsage(t.db, t.userId, { date: '2024-11-05', confidence: 'exact', outputTokens: 1e20 })).rejects.toThrow(/Output tokens is more than one day can hold/);
     await deleteBatch(t.db, t.userId, batchId!);
     expect((await getOverview(t.db, filter())).tokens).toEqual(before);
   });

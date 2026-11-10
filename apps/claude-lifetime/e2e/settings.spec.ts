@@ -115,7 +115,7 @@ test('a passphrase-protected backup opens only with its passphrase, and a wrong 
 
   await dialog.getByLabel('Passphrase for this backup').fill('not the passphrase');
   await dialog.getByRole('button', { name: 'Replace with backup' }).click();
-  await expect(dialog.getByText('The passphrase does not match this backup, or the file was changed after it was saved.')).toBeVisible();
+  await expect(dialog.getByText('The passphrase does not match this backup, or the file was changed or cut short after it was saved.')).toBeVisible();
   // Still open, and nothing was replaced.
   await expect(dialog).toBeVisible();
 

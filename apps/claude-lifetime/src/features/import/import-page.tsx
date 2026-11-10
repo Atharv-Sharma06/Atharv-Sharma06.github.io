@@ -21,7 +21,7 @@ import { lastSync, syncClaudeCodeFolder, type SyncOutcome } from './background-s
 import { ImportHistory } from './history';
 import {
   autoSyncEnabled,
-  autoSyncStoppedAt,
+  autoSyncStop,
   canPickFolders,
   forgetFolder,
   pickClaudeCodeFolder,
@@ -29,6 +29,7 @@ import {
   rememberedComputerName,
   rememberedFolder,
   setAutoSync,
+  type AutoSyncStop,
   type RememberedFolder,
 } from './local-files';
 import { ManualEntryDialog } from './manual-entry';
@@ -81,6 +82,18 @@ function downloadText(name: string, text: string, type: string) {
  */
 const computerRef = (name: string) => sourceRefFromName(name);
 
+/**
+ * Why the folder is no longer read by itself, when the app switched that off. `when`
+ * is the time in words ("2 hours ago").
+ */
+export function autoStopNotice(stop: AutoSyncStop, when: string): string {
+  const then =
+    stop.after === 'restore'
+      ? `when a backup was restored. Left on, it would have added this computer’s Claude Code usage to the restored data the next time the app opened.`
+      : `when Claude Code usage was deleted. Left on, it would have added the deleted usage again the next time the app opened.`;
+  return `Automatic reading was switched off ${when}, ${then} Switch it back on whenever you want the folder read by itself again.`;
+}
+
 export function ImportPage() {
   const app = useApp();
   const coverage = useCoverage();
@@ -94,7 +107,7 @@ export function ImportPage() {
   const [computer, setComputer] = useState('');
   const [folder, setFolder] = useState<RememberedFolder | null>(null);
   const [auto, setAuto] = useState(false);
-  const [autoStoppedAt, setAutoStoppedAt] = useState<number | null>(null);
+  const [autoStop, setAutoStop] = useState<AutoSyncStop | null>(null);
   const [sync, setSync] = useState<SyncOutcome | null>(null);
   /** Why the last click on "Read the folder again" did not read it. Not a reading, so it is kept apart from `sync`. */
   const [notRead, setNotRead] = useState<string | null>(null);
@@ -107,12 +120,12 @@ export function ImportPage() {
   const refreshFolder = useCallback(() => setFolderVersion((v) => v + 1), []);
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([rememberedFolder(), autoSyncEnabled(), lastSync(), autoSyncStoppedAt()]).then(([remembered, enabled, outcome, stoppedAt]) => {
+    void Promise.all([rememberedFolder(), autoSyncEnabled(), lastSync(), autoSyncStop()]).then(([remembered, enabled, outcome, stopped]) => {
       if (cancelled) return;
       setFolder(remembered);
       setAuto(enabled);
       setSync(outcome ?? null);
-      setAutoStoppedAt(stoppedAt);
+      setAutoStop(stopped);
     });
     return () => {
       cancelled = true;
@@ -411,7 +424,7 @@ export function ImportPage() {
                 checked={auto}
                 onChange={async (checked) => {
                   setAuto(checked);
-                  setAutoStoppedAt(null);
+                  setAutoStop(null);
                   await setAutoSync(checked);
                 }}
               />
@@ -423,12 +436,9 @@ export function ImportPage() {
                 </span>
               </span>
             </label>
-            {autoStoppedAt !== null && !auto ? (
+            {autoStop !== null && !auto ? (
               <div className="mt-3">
-                <Notice>
-                  Automatic reading was switched off {formatRelative(autoStoppedAt)}, when Claude Code usage was deleted. Left on, it would have added
-                  the deleted usage again the next time the app opened. Switch it back on whenever you want the folder read by itself again.
-                </Notice>
+                <Notice>{autoStopNotice(autoStop, formatRelative(autoStop.at))}</Notice>
               </div>
             ) : null}
             {(notRead ?? sync?.problem) ? (

@@ -335,7 +335,7 @@ export function backupFileName(now: Date = new Date(), encrypted = false): strin
 }
 
 // The checks on a backup file live with the code that restores one.
-export { looksLikeDatabaseDump, looksLikeGzip } from '@/lib/backup-format';
+export { inspectBackupFile, looksLikeDatabaseDump, looksLikeGzip } from '@/lib/backup-format';
 
 export type PassphraseCheck =
   | { ok: true; passphrase: string | null }
