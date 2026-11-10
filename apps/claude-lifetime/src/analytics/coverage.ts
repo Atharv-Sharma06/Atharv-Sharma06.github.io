@@ -241,6 +241,14 @@ export interface ImportRecord {
   importedAt: string;
   coverageStart: string | null;
   coverageEnd: string | null;
+  /**
+   * The calendar days the records of this import fall on, by the rule every chart uses: a
+   * record that adds up a day or more (a daily report row, a dated table row, a manual
+   * entry) is its UTC day everywhere, and covers every day up to its end; a record with a
+   * time of day falls on the day it has in the user's timezone. Null for an import whose
+   * records are all gone.
+   */
+  coveredDays: { first: string; last: string } | null;
   recordsSeen: number;
   recordsInserted: number;
   recordsDuplicate: number;
@@ -249,14 +257,26 @@ export interface ImportRecord {
   warnings: Array<{ code: string; message: string; count: number; sample?: string }>;
 }
 
-export async function listImports(db: SqlExecutor, userId: number): Promise<ImportRecord[]> {
+/** First and last calendar day a row `x` covers (see ImportRecord.coveredDays). `$2` holds the timezone. */
+const firstDayOf = (x: string) =>
+  `(CASE WHEN ${x}.bucket_seconds >= 86400 THEN (${x}.occurred_at AT TIME ZONE 'UTC')::date ELSE (${x}.occurred_at AT TIME ZONE $2::text)::date END)`;
+const lastDayOf = (x: string) =>
+  `(CASE WHEN ${x}.bucket_seconds >= 86400 THEN ((${x}.occurred_at + make_interval(secs => ${x}.bucket_seconds - 1)) AT TIME ZONE 'UTC')::date
+         ELSE (${x}.occurred_at AT TIME ZONE $2::text)::date END)`;
+
+export async function listImports(db: SqlExecutor, userId: number, timezone = 'UTC'): Promise<ImportRecord[]> {
   const { rows } = await db.query<Record<string, unknown>>(
     `SELECT b.id, b.source_id, s.kind::text AS kind, s.label, s.is_synthetic, b.file_name, b.file_size, b.format, b.created_at,
             b.coverage_start, b.coverage_end, b.records_seen, b.records_inserted, b.records_duplicate, b.records_skipped,
-            b.missing_fields, b.warnings
+            b.missing_fields, b.warnings, d.first_day::text AS first_day, d.last_day::text AS last_day
        FROM import_batches b JOIN data_sources s ON s.id = b.source_id
+       LEFT JOIN LATERAL (
+         SELECT min(x.first_day) AS first_day, max(x.last_day) AS last_day
+           FROM (SELECT min(${firstDayOf('f')}) AS first_day, max(${lastDayOf('f')}) AS last_day FROM usage_facts f WHERE f.batch_id = b.id
+                 UNION ALL
+                 SELECT min(${firstDayOf('c')}), max(${lastDayOf('c')}) FROM reported_costs c WHERE c.batch_id = b.id) x) d ON true
       WHERE b.user_id = $1 ORDER BY b.created_at DESC, b.id DESC`,
-    [userId],
+    [userId, timezone],
   );
   return rows.map((r) => ({
     batchId: toNumber(r.id),
@@ -270,6 +290,7 @@ export async function listImports(db: SqlExecutor, userId: number): Promise<Impo
     importedAt: toIso(r.created_at)!,
     coverageStart: toIso(r.coverage_start),
     coverageEnd: toIso(r.coverage_end),
+    coveredDays: typeof r.first_day === 'string' && typeof r.last_day === 'string' ? { first: r.first_day, last: r.last_day } : null,
     recordsSeen: toNumber(r.records_seen),
     recordsInserted: toNumber(r.records_inserted),
     recordsDuplicate: toNumber(r.records_duplicate),

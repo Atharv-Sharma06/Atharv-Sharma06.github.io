@@ -19,7 +19,7 @@ export function useCoverage() {
 }
 
 export function useImports() {
-  return useData(['imports'], (app) => listImports(app.db, app.userId));
+  return useData(['imports'], (app) => listImports(app.db, app.userId, app.settings.timezone));
 }
 
 export function usePeriods() {

@@ -10,7 +10,7 @@ import { ConfirmDialog } from '@/components/ui/confirm';
 import { EmptyState, ErrorNote, Skeleton } from '@/components/ui/feedback';
 import { Table, TableFrame, Td, Th, THead, Tr } from '@/components/ui/table';
 import { deleteBatch } from '@/import/delete';
-import { formatBytes, formatInstant, formatInt, plural } from '@/lib/format';
+import { formatBytes, formatDay, formatInstant, formatInt, plural } from '@/lib/format';
 import { useApp } from '@/state/app';
 import { useImports } from '@/state/queries';
 import { stopAutoSyncAfterDeletion } from './local-files';
@@ -113,7 +113,8 @@ export function ImportHistory({ autoSync = false, locked = false, onDeleted }: {
                         </Td>
                         <Td className="whitespace-nowrap text-ink-2">{formatInstant(r.importedAt, tz, 'datetime')}</Td>
                         <Td className="whitespace-nowrap text-ink-2">
-                          {r.coverageStart ? `${formatInstant(r.coverageStart, tz)} – ${formatInstant(r.coverageEnd, tz)}` : '–'}
+                          {/* Calendar days as the charts count them: a record that only knows its day is that day in every timezone. */}
+                          {r.coveredDays ? `${formatDay(r.coveredDays.first)} – ${formatDay(r.coveredDays.last)}` : '–'}
                         </Td>
                         <Td numeric>{formatInt(r.recordsInserted)}</Td>
                         <Td numeric className="text-ink-2">
