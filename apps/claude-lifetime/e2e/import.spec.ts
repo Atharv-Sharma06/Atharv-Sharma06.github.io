@@ -1,21 +1,38 @@
-import { expect, test } from '@playwright/test';
-import { writeFileSync } from 'node:fs';
-import { chooseFiles, fixture, importFiles, lifetimeTokens, open, watch } from './helpers';
+import { expect } from '@playwright/test';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { chooseFiles, deleteImport, fixture, importFiles, lifetimeTokens, open, test } from './helpers';
 
 const EXPORT_ZIP = fixture('claude-export/claude-export-sample.zip');
+const TRANSCRIPTS = [
+  fixture('claude-code/research-example/projects/-home-alex-demo/11111111-1111-4111-8111-111111111111.jsonl'),
+  fixture('claude-code/research-example/projects/-home-alex-demo/11111111-1111-4111-8111-111111111111/subagents/agent-a0000000000000001.jsonl'),
+];
+
+/** Every token a page of a usage report states, added up straight from the file. */
+function tokensInReportPage(file: string): number {
+  type Result = Record<string, number | null | Record<string, number>>;
+  const page = JSON.parse(readFileSync(file, 'utf8')) as { data: Array<{ results: Result[] }> };
+  const count = (value: unknown) => (typeof value === 'number' ? value : 0);
+  let total = 0;
+  for (const bucket of page.data) {
+    for (const r of bucket.results) {
+      const written = (r.cache_creation ?? {}) as Record<string, number>;
+      total += count(r.uncached_input_tokens) + count(r.cache_read_input_tokens) + count(r.output_tokens);
+      total += count(written.ephemeral_5m_input_tokens) + count(written.ephemeral_1h_input_tokens);
+    }
+  }
+  return total;
+}
 
 test('a first visit shows the empty state and talks to no other server', async ({ page }) => {
-  const problems = watch(page);
   await open(page, '/');
   await expect(page.getByRole('heading', { name: 'CLAUDE LIFETIME' })).toBeVisible();
   await expect(page.getByText('Your entire history with Claude, quantified.')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Your history starts with an import' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Data coverage: No data yet/ })).toBeVisible();
-  expect(problems).toEqual([]);
 });
 
 test('a claude.ai export is previewed, saved as estimated usage, and never counted twice', async ({ page }) => {
-  const problems = watch(page);
   await chooseFiles(page, EXPORT_ZIP);
 
   // The preview states what the file holds before anything is stored.
@@ -54,15 +71,10 @@ test('a claude.ai export is previewed, saved as estimated usage, and never count
   await page.reload();
   await expect(page.locator('main [aria-busy="true"]')).toHaveCount(0, { timeout: 60_000 });
   expect(await lifetimeTokens(page)).toBe(total);
-  expect(problems).toEqual([]);
 });
 
 test('Claude Code transcripts are imported as exact usage', async ({ page }) => {
-  const problems = watch(page);
-  await importFiles(page, [
-    fixture('claude-code/research-example/projects/-home-alex-demo/11111111-1111-4111-8111-111111111111.jsonl'),
-    fixture('claude-code/research-example/projects/-home-alex-demo/11111111-1111-4111-8111-111111111111/subagents/agent-a0000000000000001.jsonl'),
-  ]);
+  await importFiles(page, TRANSCRIPTS);
   await page.getByRole('link', { name: 'Open the overview' }).click();
   const hero = page.getByRole('group', { name: 'Lifetime tokens' });
   await expect(hero.getByText('Exact', { exact: true }).first()).toBeVisible();
@@ -71,22 +83,28 @@ test('Claude Code transcripts are imported as exact usage', async ({ page }) => 
   const value = page.getByRole('group', { name: 'Equivalent API value' });
   await expect(value.getByText('Exact', { exact: true })).toBeVisible();
   await expect(value.getByText(/^(\$\d|<\$0\.01)/).first()).toBeVisible();
-  expect(problems).toEqual([]);
 });
 
 test('an API usage report spread over two pages is imported in one go', async ({ page }) => {
-  const problems = watch(page);
-  await chooseFiles(page, [fixture('api-reports/usage-report.daily.page-1.json'), fixture('api-reports/usage-report.daily.page-2.json')]);
+  const pages = [fixture('api-reports/usage-report.daily.page-1.json'), fixture('api-reports/usage-report.daily.page-2.json')];
+  // What the two files state together, worked out here from the files themselves.
+  const [first, second] = pages.map(tokensInReportPage);
+  expect(first).toBeGreaterThan(0);
+  expect(second).toBeGreaterThan(0);
+
+  await chooseFiles(page, pages);
   await expect(page.getByRole('heading', { name: 'Review before saving' })).toBeVisible();
   await expect(page.getByText('Recognised as Anthropic API usage report')).toBeVisible();
   await expect(page.getByText('Token counts are metered by the source')).toBeVisible();
   await page.getByRole('button', { name: 'Save to my history' }).click();
   await expect(page.getByRole('heading', { name: 'Saved' })).toBeVisible();
-  expect(problems).toEqual([]);
+
+  // Both pages were read: the total is the sum of the two, not the first page alone.
+  await open(page, '/');
+  expect(await lifetimeTokens(page)).toBe(`${(first + second).toLocaleString('en-US')} tokens`);
 });
 
 test('a CSV of your own asks which column is which before it is read', async ({ page }) => {
-  const problems = watch(page);
   await chooseFiles(page, fixture('generic/usage.csv'));
   await expect(page.getByRole('heading', { name: 'Match the columns' })).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Column for Timestamp' })).toContainText('timestamp');
@@ -98,11 +116,9 @@ test('a CSV of your own asks which column is which before it is read', async ({ 
   await expect(page.getByText('Drop a file or folder here')).toBeVisible();
   // Cancelling stores nothing.
   await expect(page.getByText('No imports yet')).toBeVisible();
-  expect(problems).toEqual([]);
 });
 
 test('a file the app cannot read is explained, and nothing is stored', async ({ page }, testInfo) => {
-  const problems = watch(page);
   const odd = testInfo.outputPath('notes.json');
   writeFileSync(odd, JSON.stringify({ hello: 'world' }));
   await chooseFiles(page, odd);
@@ -115,19 +131,36 @@ test('a file the app cannot read is explained, and nothing is stored', async ({ 
   await page.getByRole('button', { name: 'Choose another file' }).click();
   await chooseFiles(page, errorBody);
   await expect(page.getByText('is an error response from the Anthropic API')).toBeVisible();
-  expect(problems).toEqual([]);
-});
 
-test('an import can be deleted again, which removes exactly what it added', async ({ page }) => {
-  const problems = watch(page);
-  await importFiles(page, EXPORT_ZIP);
-  await open(page, '/import/');
-  const row = page.getByRole('row', { name: /claude-export-sample\.zip/ });
-  await expect(row).toBeVisible();
-  await row.getByRole('button', { name: 'Delete' }).click();
-  await page.getByRole('button', { name: 'Delete import' }).click();
+  // Neither file left anything behind: no import is listed, and the overview is still empty.
   await expect(page.getByText('No imports yet')).toBeVisible();
   await open(page, '/');
   await expect(page.getByRole('heading', { name: 'Your history starts with an import' })).toBeVisible();
-  expect(problems).toEqual([]);
+});
+
+test('an import can be deleted again, which removes exactly what it added', async ({ page }) => {
+  // Two imports, so that there is something the deletion must leave alone.
+  await importFiles(page, TRANSCRIPTS);
+  await open(page, '/');
+  const before = await lifetimeTokens(page);
+  expect(before).toMatch(/^[\d,]+ tokens$/);
+
+  await importFiles(page, EXPORT_ZIP);
+  await open(page, '/');
+  const withExport = await lifetimeTokens(page);
+  expect(withExport).not.toBe(before);
+
+  await deleteImport(page, /claude-export-sample\.zip/);
+  // The other import is still listed, and the total is to the token what it was before the export came in.
+  await expect(page.getByRole('row', { name: /2 transcript files/ })).toBeVisible();
+  await open(page, '/');
+  expect(await lifetimeTokens(page)).toBe(before);
+  await open(page, '/conversations/');
+  await expect(page.getByText('Planning a week in Lisbon')).toHaveCount(0);
+
+  // Deleting the last import as well returns the app to its empty state.
+  await deleteImport(page, /2 transcript files/);
+  await expect(page.getByText('No imports yet')).toBeVisible();
+  await open(page, '/');
+  await expect(page.getByRole('heading', { name: 'Your history starts with an import' })).toBeVisible();
 });

@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { APP, watch } from './helpers';
+import { expect } from '@playwright/test';
+import { APP, test } from './helpers';
 
 test('the portfolio links to the app, and the app links back', async ({ page, context }) => {
   // The portfolio page loads web fonts and GitHub activity of its own; only the app is held to "no other origin".
@@ -12,17 +12,18 @@ test('the portfolio links to the app, and the app links back', async ({ page, co
   await expect(portfolio).toHaveURL(/\/claude-lifetime\/$/);
   await portfolio.close();
 
-  const problems = watch(page);
   await page.goto(`${APP}/`);
   await expect(page.getByRole('heading', { name: 'CLAUDE LIFETIME' })).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole('link', { name: /portfolio/ })).toHaveAttribute('href', '/');
-  expect(problems).toEqual([]);
 });
 
-test('a deep link to any page of the app works without a server rewrite', async ({ page }) => {
+test('a deep link to any page of the app works without a server rewrite, and contacts no other server', async ({ page, problems }) => {
   for (const path of ['/usage/', '/subscriptions/', '/conversations/', '/models/', '/activity/', '/import/', '/settings/', '/methodology/']) {
     const response = await page.goto(`${APP}${path}`);
     expect(response?.status(), path).toBe(200);
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 60_000 });
+    // The page has finished reading the local database, so everything it loads on a direct visit has been requested.
+    await expect(page.locator('main [aria-busy="true"]')).toHaveCount(0, { timeout: 60_000 });
+    expect(problems, path).toEqual([]);
   }
 });

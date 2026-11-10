@@ -19,8 +19,9 @@ your browser, on your device.
   and cost reports** (Admin API JSON and Claude Console CSV), and **CSV or JSON tables**
   of your own. Single days can also be typed in by hand.
 - Labels every figure **Exact** (metered by the source), **Estimated** (reconstructed
-  from text) or **Unavailable** (no source has it). Exact and estimated tokens are kept
-  apart in the database and in every chart.
+  from text, or stated by a file or an entry that does not mark it as exact) or
+  **Unavailable** (no source has it). Exact and estimated tokens are kept apart in the
+  database and in every chart.
 - Shows lifetime totals, usage over time (daily to yearly, cumulative, by token category,
   by model, by plan), an activity heatmap, a model breakdown, a searchable conversation
   explorer, and a subscription timeline with a before/after comparison.

@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, test as base, type Page } from '@playwright/test';
 import { resolve } from 'node:path';
 
 export const ORIGIN = 'http://localhost:4173';
@@ -26,6 +26,24 @@ export function watch(page: Page) {
   });
   return problems;
 }
+
+/**
+ * `test` for every spec file. The page a test is given is watched from its first request
+ * to its last, and the test fails at its end when anything was collected. A spec file
+ * that imports `test` from Playwright itself would run without that check, which is why
+ * tests/e2e-conventions.test.ts does not allow it. A page a test opens on its own (a
+ * second tab, a browser profile of its own) is not covered: the test calls watch() for it.
+ */
+export const test = base.extend<{ problems: string[] }>({
+  problems: [
+    async ({ page }, use) => {
+      const problems = watch(page);
+      await use(problems);
+      expect(problems, 'script errors, failed requests and requests to another origin').toEqual([]);
+    },
+    { auto: true },
+  ],
+});
 
 /** Opens a page of the app and waits until the local database is open and the page has settled. */
 export async function open(page: Page, path = '/') {
@@ -58,4 +76,22 @@ export async function importFiles(page: Page, files: string | string[]) {
   await expect(page.getByRole('heading', { name: 'Review before saving' })).toBeVisible({ timeout: 60_000 });
   await page.getByRole('button', { name: 'Save to my history' }).click();
   await expect(page.getByRole('heading', { name: 'Saved' })).toBeVisible({ timeout: 60_000 });
+}
+
+/**
+ * Deletes one import in the history of the import page and waits until it is gone.
+ *
+ * The dialog stays open while the records are removed, and while it is open the rest of
+ * the page is hidden from assistive technology. A check for the row at that moment
+ * passes although nothing has been deleted yet, and a test that then leaves the page
+ * cuts the deletion short. So this waits for the dialog to close first.
+ */
+export async function deleteImport(page: Page, fileName: RegExp) {
+  await open(page, '/import/');
+  const row = page.getByRole('row', { name: fileName });
+  await row.getByRole('button', { name: 'Delete' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Delete this import?' });
+  await dialog.getByRole('button', { name: 'Delete import' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(row).toHaveCount(0);
 }

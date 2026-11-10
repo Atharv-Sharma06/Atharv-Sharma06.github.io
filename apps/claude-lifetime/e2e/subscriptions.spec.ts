@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { fixture, importFiles, open, watch } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { fixture, importFiles, open, test } from './helpers';
 
 /** The sample export holds conversations from March 2025 to April 2026. */
 const EXPORT_ZIP = fixture('claude-export/claude-export-sample.zip');
@@ -16,7 +16,6 @@ async function addPeriod(page: Page, plan: string, start: string, end?: string) 
 }
 
 test('subscription periods are entered by hand and split the usage by date', async ({ page }) => {
-  const problems = watch(page);
   await importFiles(page, EXPORT_ZIP);
 
   // Without any period the split is unavailable, not zero.
@@ -54,5 +53,4 @@ test('subscription periods are entered by hand and split the usage by date', asy
   await page.reload();
   await expect(page.locator('main [aria-busy="true"]')).toHaveCount(0, { timeout: 60_000 });
   await expect(page.getByText('Before Pro started on Sep 1, 2025.')).toBeVisible();
-  expect(problems).toEqual([]);
 });

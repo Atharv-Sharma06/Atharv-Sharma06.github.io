@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { loadDemo, open, watch } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { loadDemo, open, test } from './helpers';
 
 const PAGES: Array<{ link: string; heading: string | RegExp }> = [
   { link: 'Lifetime Usage', heading: 'Lifetime Usage' },
@@ -16,7 +16,6 @@ const PAGES: Array<{ link: string; heading: string | RegExp }> = [
 const overflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
 test('the synthetic demo data is labelled on every page, and every page renders it', async ({ page }) => {
-  const problems = watch(page);
   await loadDemo(page);
 
   for (const { link, heading } of PAGES) {
@@ -33,11 +32,9 @@ test('the synthetic demo data is labelled on every page, and every page renders 
   await expect(page.getByText('Exact', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Estimated', { exact: true }).first()).toBeVisible();
   await expect(page.getByRole('heading', { name: 'What We Know About Your Claude History' })).toBeVisible();
-  expect(problems).toEqual([]);
 });
 
 test('removing the demo data returns the app to its empty state', async ({ page }) => {
-  const problems = watch(page);
   await loadDemo(page);
   await page.getByRole('button', { name: 'Remove demo data' }).click();
   await expect(page.getByRole('heading', { name: 'Your history starts with an import' })).toBeVisible();
@@ -45,12 +42,10 @@ test('removing the demo data returns the app to its empty state', async ({ page 
   // The demo's subscription periods are gone as well.
   await open(page, '/subscriptions/');
   await expect(page.getByText('Synthetic', { exact: true })).toHaveCount(0);
-  expect(problems).toEqual([]);
 });
 
 test('every page works on a phone-sized screen', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  const problems = watch(page);
   await loadDemo(page);
   for (const { link, heading } of PAGES) {
     await page.getByRole('button', { name: 'Open menu' }).click();
@@ -59,5 +54,4 @@ test('every page works on a phone-sized screen', async ({ page }) => {
     await expect(page.locator('main [aria-busy="true"]')).toHaveCount(0, { timeout: 60_000 });
     expect(await overflow(page), `${link} scrolls sideways on a phone`).toBeLessThanOrEqual(0);
   }
-  expect(problems).toEqual([]);
 });

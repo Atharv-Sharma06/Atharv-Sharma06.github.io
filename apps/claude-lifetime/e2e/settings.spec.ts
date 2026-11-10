@@ -1,7 +1,7 @@
-import { chromium, expect, test, type Page } from '@playwright/test';
+import { chromium, expect, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { gzipSync } from 'node:zlib';
-import { fixture, lifetimeTokens, loadDemo, open, ORIGIN, watch } from './helpers';
+import { gunzipSync, gzipSync } from 'node:zlib';
+import { deleteImport, fixture, importFiles, lifetimeTokens, loadDemo, open, ORIGIN, test, watch } from './helpers';
 
 async function downloadBackup(page: Page, saveTo: (name: string) => string, passphrase?: string): Promise<string> {
   await open(page, '/settings/');
@@ -31,7 +31,6 @@ async function deleteAllImported(page: Page) {
 const chooseBackup = (page: Page, file: string) => page.locator('input[aria-label="Backup file"]').setInputFiles(file);
 
 test('a backup brings everything back after the data was deleted', async ({ page }, testInfo) => {
-  const problems = watch(page);
   await loadDemo(page);
   const total = await lifetimeTokens(page);
   expect(total).toMatch(/^[\d,]+ tokens$/);
@@ -56,11 +55,49 @@ test('a backup brings everything back after the data was deleted', async ({ page
   await page.reload();
   await expect(page.locator('main [aria-busy="true"]')).toHaveCount(0, { timeout: 60_000 });
   expect(await lifetimeTokens(page)).toBe(total);
-  expect(problems).toEqual([]);
+});
+
+test('a backup made after an import was deleted holds nothing of that import', async ({ page }, testInfo) => {
+  // A chat export with titles, and Claude Code sessions with the folder they ran in.
+  await importFiles(page, fixture('claude-export/claude-export-sample.zip'));
+  await importFiles(page, [
+    fixture('claude-code/research-example/projects/-home-alex-demo/11111111-1111-4111-8111-111111111111.jsonl'),
+    fixture('claude-code/research-example/projects/-home-alex-demo/11111111-1111-4111-8111-111111111111/subagents/agent-a0000000000000001.jsonl'),
+  ]);
+  await open(page, '/conversations/');
+  await expect(page.getByText('Planning a week in Lisbon').first()).toBeVisible();
+
+  // The export is deleted; the Claude Code import stays.
+  await deleteImport(page, /claude-export-sample\.zip/);
+  await open(page, '/conversations/');
+  await expect(page.getByText('Planning a week in Lisbon')).toHaveCount(0);
+  await open(page, '/');
+  const total = await lifetimeTokens(page);
+
+  // The backup is unpacked and searched as anyone could who got hold of the file.
+  const backup = await downloadBackup(page, (name) => testInfo.outputPath(name));
+  const files = gunzipSync(readFileSync(backup));
+  expect(files.includes('PG_VERSION')).toBe(true);
+  for (const title of ['Planning a week in Lisbon', 'Fixing a flaky integration test', 'Explaining Bayes to a colleague']) {
+    expect(files.includes(title), title).toBe(false);
+  }
+  // What is still stored is in it: the folder of the Claude Code sessions.
+  expect(files.includes('/home/alex/demo')).toBe(true);
+
+  // And it restores to the same total.
+  await deleteAllImported(page);
+  await open(page, '/settings/');
+  await chooseBackup(page, backup);
+  await page.getByRole('dialog', { name: 'Replace everything with this backup?' }).getByRole('button', { name: 'Replace with backup' }).click();
+  // The page reloads into the restored database: the source that was in the backup is listed again.
+  await expect(page.getByRole('heading', { name: 'Claude Code (this computer)' })).toBeVisible({ timeout: 90_000 });
+  await open(page, '/');
+  expect(await lifetimeTokens(page)).toBe(total);
+  await open(page, '/conversations/');
+  await expect(page.getByText('Planning a week in Lisbon')).toHaveCount(0);
 });
 
 test('a passphrase-protected backup opens only with its passphrase, and a wrong one changes nothing', async ({ page }, testInfo) => {
-  const problems = watch(page);
   await loadDemo(page);
   const total = await lifetimeTokens(page);
 
@@ -87,11 +124,9 @@ test('a passphrase-protected backup opens only with its passphrase, and a wrong 
   await expect(page.getByText('Synthetic demo data.')).toBeVisible({ timeout: 90_000 });
   await open(page, '/');
   expect(await lifetimeTokens(page)).toBe(total);
-  expect(problems).toEqual([]);
 });
 
 test('a file that is not a backup is refused and the stored data stays', async ({ page }, testInfo) => {
-  const problems = watch(page);
   await loadDemo(page);
   const total = await lifetimeTokens(page);
   await open(page, '/settings/');
@@ -110,11 +145,9 @@ test('a file that is not a backup is refused and the stored data stays', async (
 
   await open(page, '/');
   expect(await lifetimeTokens(page)).toBe(total);
-  expect(problems).toEqual([]);
 });
 
 test('erasing the local database resets this tab and every other open tab', async ({ page, context }) => {
-  const problems = watch(page);
   await loadDemo(page);
   // Something the browser remembers outside the database.
   await page.getByRole('button', { name: /^Date range/ }).click();
@@ -147,7 +180,6 @@ test('erasing the local database resets this tab and every other open tab', asyn
   await page.getByRole('button', { name: 'Explore with demo data' }).click();
   await expect(page.getByText('Synthetic demo data.')).toBeVisible({ timeout: 90_000 });
   await expect(other.getByText('Synthetic demo data.')).toBeVisible({ timeout: 90_000 });
-  expect(problems).toEqual([]);
   expect(otherProblems).toEqual([]);
 });
 

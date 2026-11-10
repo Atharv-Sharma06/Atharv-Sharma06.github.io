@@ -231,4 +231,6 @@ the repository root. GitHub Pages serves that folder at `/claude-lifetime/`.
   in-memory PostgreSQL with the app's migrations applied.
 - **End-to-end** (`npm run test:e2e`, Playwright): the published static files, served the
   way GitHub Pages serves them. Besides the user flows, every test fails on a script
-  error, a failed request, or any request to another origin.
+  error, a failed request, or any request to another origin: the `test` of
+  `e2e/helpers.ts` watches the page of every test, and a unit test keeps the spec files
+  from using any other.

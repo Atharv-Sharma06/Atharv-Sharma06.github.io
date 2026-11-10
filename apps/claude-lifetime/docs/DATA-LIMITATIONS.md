@@ -10,7 +10,7 @@ Your Claude History" on the overview.
 | Label | Meaning | Examples |
 |---|---|---|
 | **Exact** | A source metered the tokens itself; the app only adds them up. | Claude Code transcripts, Anthropic usage reports, manual entries you marked as copied from a report |
-| **Estimated** | Reconstructed from text because the source has no token counts. A total that includes an estimated part is labelled estimated. | claude.ai conversations, CSV rows you did not declare exact |
+| **Estimated** | Either reconstructed from text because the source has no token counts, or stated by a file or an entry that does not mark its counts as exact. A total that includes an estimated part is labelled estimated. | claude.ai conversations (from text); CSV and JSON rows and manual entries you did not declare exact (as stated) |
 | **Unavailable** | No imported source has the information. The app shows a dash and the reason, never a zero or a guess. | The model behind a chat message, the split before/after a subscription when no dates were entered |
 
 No figure in this app is an official Anthropic accounting of your account. Anthropic does
