@@ -1,15 +1,16 @@
 /// <reference lib="webworker" />
 import { PGlite } from '@electric-sql/pglite';
-import { worker, type PGliteWorkerOptions } from '@electric-sql/pglite/worker';
+import type { PGliteWorkerOptions } from '@electric-sql/pglite/worker';
 import { cleanBackup, CleanCopyError } from '../clean-copy';
 import { NewerSchemaError } from '../migrate';
+import { host } from './host';
 
 /**
  * Hosts PostgreSQL (PGlite) for every tab of the app.
  *
- * `worker()` elects one leader tab; only that tab's worker runs `init` and owns the
- * database, the others proxy their queries to it. The data directory is persisted to
- * IndexedDB, so nothing leaves the device.
+ * Every tab starts this worker, and one of them gets to open the database and serve all
+ * tabs (see ./host.ts for how, and for what happens when a tab goes away). The data
+ * directory is persisted to IndexedDB, so nothing leaves the device.
  *
  * Durability: PGlite runs with relaxed durability (it does not wait for IndexedDB
  * after every query, which would cost ~80 ms each). After a write that must not be
@@ -74,8 +75,8 @@ export type BackupAnswer =
 
 /**
  * Posted to the worker's own page when the database could not be started. PGlite's
- * worker library keeps a failed start to itself, so without this message the page
- * could only give up after a long wait, without knowing the reason.
+ * page class is not told about a failed start, so without this message the page could
+ * only give up after a long wait, without knowing the reason.
  */
 export interface StartFailure {
   type: 'claude-lifetime:start-failed';
@@ -118,26 +119,20 @@ let db: PGlite | null = null;
 let engine: { pgliteWasmModule: WebAssembly.Module; initdbWasmModule: WebAssembly.Module; fsBundle: Blob } | null = null;
 /** Whether the database is up. Until then, anything that stops this worker is a failed start. */
 let started = false;
-/** What stopped the start, once that has been reported to the page. */
-let startFailure: { reason: unknown } | null = null;
+/** Whether the page has been told that the start failed. It is told once. */
+let startFailureReported = false;
 
 /**
  * Tells the page why the database did not start. The page shows the reason and stops
  * this worker, which also lets the worker of another tab try.
  */
 function reportStartFailure(reason: unknown): void {
-  if (started || startFailure) return;
-  startFailure = { reason };
+  if (started || startFailureReported) return;
+  startFailureReported = true;
   self.postMessage({ type: 'claude-lifetime:start-failed', error: describeError(reason) } satisfies StartFailure);
 }
 
 self.addEventListener('unhandledrejection', (event) => {
-  // After a failed start the library rejects once more for every tab that asks for the database.
-  // The page already has the reason, so these repeats are kept out of the console.
-  if (startFailure && event.reason === startFailure.reason) {
-    event.preventDefault();
-    return;
-  }
   // With relaxed durability PGlite starts some syncs without awaiting them. One of those can fail
   // harmlessly while the data directory is being created (a file it was about to copy is renamed by
   // PostgreSQL). Swallow that rejection and sync again.
@@ -207,7 +202,7 @@ async function start(options: PGliteWorkerOptions): Promise<PGlite> {
   await instance.waitReady;
   engine = files;
 
-  // Only the leader (this worker) answers requests on the control channel; follower tabs hold no database.
+  // Only the worker that holds the database (this one) answers on the control channel; the workers of other tabs hold none.
   const control = new BroadcastChannel(meta.controlChannel);
   control.onmessage = async (event: MessageEvent<Partial<FlushRequest | BackupRequest> | undefined>) => {
     const request = event.data;
@@ -241,21 +236,19 @@ async function start(options: PGliteWorkerOptions): Promise<PGlite> {
   return instance;
 }
 
-worker({
-  async init(options) {
-    try {
-      return await start(options);
-    } catch (error) {
-      // There is no database to sync or flush after this, whatever state the engine was left in.
-      db = null;
-      reportStartFailure(error);
-      throw error;
-    }
-  },
+host(async (options) => {
+  try {
+    return await start(options);
+  } catch (error) {
+    // There is no database to sync or flush after this, whatever state the engine was left in.
+    db = null;
+    reportStartFailure(error);
+    throw error;
+  }
 }).catch((error: unknown) => {
   // Nothing is expected to fail once the database is up; if something does, it stays visible in the console.
   if (started) throw error;
-  // A failed `init` was reported above. Whatever else stops the library before the database is up
+  // A failed start was reported above. Whatever else stops this worker before the database is up
   // (a browser without Web Locks, for one) leaves the page waiting just the same, so it is reported too.
   reportStartFailure(error);
 });
