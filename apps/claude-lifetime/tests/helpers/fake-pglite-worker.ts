@@ -55,6 +55,11 @@ export const fakeDatabases = {
    * its place; when it returns 'silence' the worker says nothing at all, like a tab that is gone.
    */
   answerBackup: null as null | ((request: BackupRequest, name: string) => BackupAnswer | 'silence' | null | Promise<BackupAnswer | 'silence' | null>),
+  /**
+   * How often the worker says that it is still making the backup, as the real one does every few
+   * seconds, or null for a worker that falls silent after taking the request up: its tab was closed.
+   */
+  backupBeatMs: null as number | null,
   /** False for a database whose worker never gets it started: the page then waits and is told nothing by PGlite. */
   becomeReady: true,
   reset() {
@@ -62,6 +67,7 @@ export const fakeDatabases = {
     this.opened.length = 0;
     this.answerFlush = confirm;
     this.answerBackup = null;
+    this.backupBeatMs = null;
     this.becomeReady = true;
   },
 };
@@ -71,6 +77,8 @@ export class FakePGliteWorker {
   private pg: PGlite | null = null;
   private control: BroadcastChannel | null = null;
   private readonly record: OpenedDatabase;
+  /** Timers of backups that are "still being made"; stopped with the worker. */
+  private readonly beats: Array<ReturnType<typeof setInterval>> = [];
 
   constructor(worker: WorkerLike, options: { dataDir: string; loadDataDir?: Blob; meta: WorkerMeta }) {
     const name = options.dataDir.replace(/^idb:\/\//, '');
@@ -117,7 +125,12 @@ export class FakePGliteWorker {
     if (custom) {
       const given = await custom(request, name);
       if (given === 'silence') return;
-      control.postMessage({ op: 'backup-started', id: request.id } satisfies BackupStarted);
+      const atWork = () => {
+        if (this.control === control) control.postMessage({ op: 'backup-started', id: request.id } satisfies BackupStarted);
+      };
+      atWork();
+      // A worker that never answers keeps saying that it is at work, when the test asks for that.
+      if (given === null && fakeDatabases.backupBeatMs !== null) this.beats.push(setInterval(atWork, fakeDatabases.backupBeatMs));
       answer = given;
     } else {
       control.postMessage({ op: 'backup-started', id: request.id } satisfies BackupStarted);
@@ -158,6 +171,7 @@ export class FakePGliteWorker {
   }
 
   private shutDown() {
+    for (const beat of this.beats.splice(0)) clearInterval(beat);
     this.control?.close();
     this.control = null;
     const pg = this.pg;

@@ -52,9 +52,11 @@ export interface BackupRequest {
 }
 
 /**
- * Sent as soon as a backup request is taken up, before the work begins. A page that
- * hears nothing knows that no tab hosts the database at that moment, and does not
- * have to wait for as long as a large backup may take.
+ * Sent as soon as a backup request is taken up, before the work begins, and again every
+ * few seconds for as long as the backup is being made. A page that hears nothing knows
+ * that no tab hosts the database at that moment, and a page that stops hearing it knows
+ * that the tab which was making the backup is gone; neither has to wait for as long as
+ * a large backup may take.
  */
 export interface BackupStarted {
   op: 'backup-started';
@@ -155,6 +157,9 @@ async function flush(): Promise<void> {
   await instance.runExclusive(() => fs.syncToFs(false));
 }
 
+/** How often a page that waits for a backup is told that the work is still going on. */
+const BACKUP_BEAT_MS = 5_000;
+
 /** Backups are made one after the other: each needs a whole second database in memory while it is made. */
 let backups: Promise<unknown> = Promise.resolve();
 
@@ -218,12 +223,16 @@ async function start(options: PGliteWorkerOptions): Promise<PGlite> {
       }
       control.postMessage(answer);
     } else if (request.op === 'backup') {
-      control.postMessage({ op: 'backup-started', id } satisfies BackupStarted);
+      const atWork = () => control.postMessage({ op: 'backup-started', id } satisfies BackupStarted);
+      atWork();
+      const beat = setInterval(atWork, BACKUP_BEAT_MS);
       let answer: BackupAnswer;
       try {
         answer = { op: 'backed-up', id, ok: true, backup: await backup() };
       } catch (error) {
         answer = { op: 'backed-up', id, ok: false, ...backupFailure(error) };
+      } finally {
+        clearInterval(beat);
       }
       control.postMessage(answer);
     }

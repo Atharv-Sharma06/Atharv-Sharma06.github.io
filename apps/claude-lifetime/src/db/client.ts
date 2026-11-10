@@ -158,6 +158,12 @@ async function saveWrites(name: string): Promise<void> {
 
 /** How long a page waits for the database worker to take up a backup request. */
 const BACKUP_START_TIMEOUT_MS = 20_000;
+/**
+ * How long the worker may stay silent while it makes a backup. It says that it is at work every
+ * few seconds; silence for this long means the tab that was making the backup has been closed.
+ * Generous, because one large table can keep the worker busy for a while without a word.
+ */
+const BACKUP_QUIET_TIMEOUT_MS = 90_000;
 /** How long the backup itself may take. The whole database is copied row by row and then packed. */
 const BACKUP_TIMEOUT_MS = 900_000;
 
@@ -186,12 +192,18 @@ export function readBackupMessage(message: unknown, id: string): BackupMessage |
  * written for the person, when no backup was made. There is no other way to get a
  * backup: the database's own files still hold deleted rows and are never handed out.
  */
-export function requestBackup(name: string, timeouts: { startMs: number; totalMs: number } = { startMs: BACKUP_START_TIMEOUT_MS, totalMs: BACKUP_TIMEOUT_MS }): Promise<Blob> {
+export function requestBackup(
+  name: string,
+  timeouts: { startMs?: number; quietMs?: number; totalMs?: number } = {},
+): Promise<Blob> {
+  const { startMs = BACKUP_START_TIMEOUT_MS, quietMs = BACKUP_QUIET_TIMEOUT_MS, totalMs = BACKUP_TIMEOUT_MS } = timeouts;
   return new Promise((resolve, reject) => {
     const channel = new BroadcastChannel(controlChannel(name));
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    let quietTimer: ReturnType<typeof setTimeout> | undefined;
     const end = () => {
       clearTimeout(startTimer);
+      clearTimeout(quietTimer);
       clearTimeout(totalTimer);
       channel.close();
     };
@@ -204,17 +216,20 @@ export function requestBackup(name: string, timeouts: { startMs: number; totalMs
         fail(
           'The database did not answer, so no backup was made. This can happen for a moment after the tab that held the database was closed. Try again.',
         ),
-      timeouts.startMs,
+      startMs,
     );
-    const totalTimer = setTimeout(
-      () => fail(`The backup was not finished after ${Math.round(timeouts.totalMs / 60_000)} minutes, so nothing was downloaded. Try again.`),
-      timeouts.totalMs,
-    );
+    const totalTimer = setTimeout(() => fail(`The backup was not finished after ${Math.round(totalMs / 60_000)} minutes, so nothing was downloaded. Try again.`), totalMs);
     channel.onmessage = (event: MessageEvent<unknown>) => {
       const said = readBackupMessage(event.data, id);
       if (said === null) return;
       if (said.status === 'started') {
         clearTimeout(startTimer);
+        // The worker says this again every few seconds while it works. When it stops, the tab that held the database is gone.
+        clearTimeout(quietTimer);
+        quietTimer = setTimeout(
+          () => fail('The tab that was making the backup was closed before it was finished, so nothing was downloaded. Try again.'),
+          quietMs,
+        );
       } else if (said.status === 'done') {
         end();
         resolve(said.backup);

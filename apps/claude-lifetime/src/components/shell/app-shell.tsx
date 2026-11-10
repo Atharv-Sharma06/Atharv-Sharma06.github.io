@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowUpRight, FlaskConical, HardDrive, Menu, Upload, X } from 'lucide-react';
+import { FlaskConical, HardDrive, Menu, Upload, X } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Dialog as RDialog } from 'radix-ui';
@@ -106,7 +106,6 @@ function SidebarContent({ pathname, onNavigate, extra }: { pathname: string; onN
         {/* A plain link on purpose: the portfolio is a separate site outside this app's router and base path. */}
         <a href={PORTFOLIO_HOME} className="mt-2.5 inline-flex items-center gap-1 text-ink-2 hover:text-ink">
           Atharv Sharma&rsquo;s portfolio
-          <ArrowUpRight className="size-3.5" aria-hidden="true" />
         </a>
       </div>
     </>

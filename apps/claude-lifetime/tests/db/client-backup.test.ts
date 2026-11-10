@@ -130,21 +130,39 @@ describe('Download backup', () => {
     );
   });
 
-  it('waits for a backup that was taken up for as long as it is given, then says that it was not finished', async () => {
+  it('waits for a backup for as long as the worker says it is at work, then says that it was not finished', async () => {
     await openDatabase();
-    // Taken up, and never answered.
+    // Taken up and never answered, by a worker that keeps saying it is at work.
     fakeDatabases.answerBackup = () => null;
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    fakeDatabases.backupBeatMs = 5_000;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'], shouldAdvanceTime: true });
 
-    const asked = messageOf(requestBackup('claude-lifetime', { startMs: 20_000, totalMs: 120_000 }));
+    const asked = messageOf(requestBackup('claude-lifetime', { startMs: 20_000, quietMs: 30_000, totalMs: 120_000 }));
     await waitFor(() => timeline.includes('backup claude-lifetime: no answer'));
     let settled = false;
     void asked.then(() => (settled = true));
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(100_000);
     expect(settled).toBe(false);
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(20_000);
 
     expect(await asked).toBe('The backup was not finished after 2 minutes, so nothing was downloaded. Try again.');
+  });
+
+  it('gives up when the tab that was making the backup is closed, instead of waiting the whole time out', async () => {
+    await openDatabase();
+    // Taken up, and then nothing more: no word that the work goes on, and no answer.
+    fakeDatabases.answerBackup = () => null;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+
+    const asked = messageOf(requestBackup('claude-lifetime', { startMs: 20_000, quietMs: 30_000, totalMs: 900_000 }));
+    await waitFor(() => timeline.includes('backup claude-lifetime: no answer'));
+    let settled = false;
+    void asked.then(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(await asked).toBe('The tab that was making the backup was closed before it was finished, so nothing was downloaded. Try again.');
   });
 });
 
