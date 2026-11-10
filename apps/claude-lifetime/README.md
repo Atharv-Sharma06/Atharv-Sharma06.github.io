@@ -153,7 +153,7 @@ Run these in `apps/claude-lifetime`.
 | `npm run publish:site` | Build, then copy the result to `/claude-lifetime/` at the repository root, where GitHub Pages serves it |
 | `npm run preview` | Serve the repository root at http://localhost:4173/ the way GitHub Pages does |
 | `npm run test:e2e` | End-to-end tests (Playwright) against the published files. Run `npm run publish:site` first. |
-| `npm run db:migration` | Print the SQL that would bring the migrations in line with `prisma/schema.prisma` |
+| `npm run db:migration` | Print the SQL that would bring the migrations in line with `prisma/schema.prisma`. Needs a running PostgreSQL server and `SHADOW_DATABASE_URL` (see below) |
 | `node scripts/calibrate-tokens.mjs` | Re-measure the token estimator against Anthropic's published tokenizer |
 
 ## How it is built
@@ -173,9 +173,18 @@ are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Configuration
 
-Nothing needs to be configured. [`.env.example`](.env.example) lists the two optional
-variables: the path the app is served under, and a database URL that only the Prisma CLI
-uses when you write a new migration.
+Nothing needs to be configured to run, test or build the app. [`.env.example`](.env.example)
+lists the optional variables; copy it to `.env.local` to set them. One is the path the
+app is served under. The other two are read only by the Prisma CLI, through
+`prisma.config.ts`:
+
+- `SHADOW_DATABASE_URL` is required by `npm run db:migration`. To compare the migrations
+  with the schema, Prisma replays them in this database, so it needs a PostgreSQL server
+  you can reach, and it erases whatever the database holds. Without the variable the
+  command stops with "You must set `datasource.shadowDatabaseUrl`"; with a server that is
+  not running it stops with error P1001.
+- `DATABASE_URL` is the database `npx prisma migrate deploy` applies the migrations to,
+  if you move the schema to a server-side PostgreSQL.
 
 ## Publishing to the portfolio
 
@@ -195,8 +204,15 @@ the `_next/` folder. Commit the changes in `claude-lifetime/` together with the 
 - All processing happens on your device. The app makes no network request with your
   data and contains no analytics. The end-to-end tests fail if any page contacts another
   origin.
-- The app stores metadata: titles, dates, sizes and token figures. It does **not** store
-  the text of your messages; an export is read once to measure it.
-- Backups ("Download backup" in Settings) can be protected with a passphrase.
+- The app stores metadata: titles, dates, sizes and token figures. For each Claude Code
+  session it also stores the path of the project folder it ran in, its git branch, the
+  version of Claude Code and whether it used subagents. These are part of every backup.
+  It does **not** store the text of your messages; an export is read once to measure it.
+- Backups ("Download backup" in Settings) can be protected with a passphrase. A backup
+  is made from a fresh copy of the rows that are stored at that moment, so it holds
+  nothing of what you deleted before. The database's own files are never handed out:
+  like any database, they can keep remnants of deleted rows for a while.
 - You can delete a single import, a whole source, all imported data, or the entire local
-  database from the import page and Settings.
+  database from the import page and Settings. What you delete leaves every figure and
+  every later backup at once. "Erase the local database" in Settings also removes the
+  database files from this device's storage, remnants included.

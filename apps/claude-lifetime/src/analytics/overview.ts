@@ -1,4 +1,5 @@
 import { toIso, toNumber, type SqlExecutor } from '@/db/driver';
+import { UNCATEGORISED_TIER } from '@/import/generic/values';
 import { bucketExpr, conversationShown, factsFrom, NO_PLAN, Params, tokenExpr, UNKNOWN_MODEL_LABEL, type AnalyticsFilter, type Granularity } from './base';
 
 export interface TokenTotals {
@@ -9,12 +10,19 @@ export interface TokenTotals {
   /** Ends of the uncertainty band of `total` (equal to it when everything is exact). */
   low: number;
   high: number;
-  /** Categories, independent of the basis. */
+  /** Categories, independent of the basis. `input` leaves out `unsplit`. */
   input: number;
   output: number;
   cacheRead: number;
   cacheWrite: number;
   replay: number;
+  /** Tokens of rows that only state a total, without the split into input and output. */
+  unsplit: number;
+  /**
+   * Whether any counted record in the range states each category. A category no record
+   * states is unknown, not zero, and is shown as such.
+   */
+  recorded: { input: boolean; output: boolean; cacheWrite: boolean; cacheRead: boolean; replay: boolean };
 }
 
 export interface Overview {
@@ -45,17 +53,49 @@ export interface Overview {
   } | null;
 }
 
+/**
+ * A row that only states a total. Generic imports keep such a total in the input column
+ * under a tier that has no price (src/import/generic/records.ts), so it must not be read
+ * as input. The tier is also given to rows whose tier label could not be read; those keep
+ * their other columns, which is why the other categories must be empty as well.
+ */
+const TOTAL_ONLY = `(f.price_tier = '${UNCATEGORISED_TIER}' AND f.output_tokens = 0 AND f.cache_read_tokens = 0
+  AND f.cache_write_5m_tokens = 0 AND f.cache_write_1h_tokens = 0 AND f.replay_tokens = 0)`;
+
+/**
+ * Sources that state cache tokens on every record, so that a zero there is a real zero.
+ * Other sources (CSV and JSON files, manual entries) may simply have no such column: for
+ * them a category counts as stated only where a record has a value in it.
+ */
+const STATES_CACHE = `s.kind::text IN ('claude_code', 'api_usage_report')`;
+
+/**
+ * Records whose input and output are both known, so that a zero in either is a real zero:
+ * metered usage, and estimates made from message text, which count what each side wrote.
+ * A table or an entry may have only one of the two columns; there a side counts as stated
+ * only where a record has a value in it.
+ */
+const STATES_BOTH_SIDES = `(${STATES_CACHE} OR f.method_id IS NOT NULL)`;
+
+/** Columns for TokenTotals. Needs the facts joined with their source as `s` (factsFrom does that). */
 const TOTAL_COLUMNS = (tok: string) => `
   COALESCE(sum(${tok}), 0)::bigint AS total,
   COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'exact'), 0)::bigint AS exact,
   COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'estimated'), 0)::bigint AS estimated,
   COALESCE(round(sum(${tok} * f.low_factor)), 0)::bigint AS low,
   COALESCE(round(sum(${tok} * f.high_factor)), 0)::bigint AS high,
-  COALESCE(sum(f.input_tokens), 0)::bigint AS input,
+  COALESCE(sum(f.input_tokens) FILTER (WHERE NOT ${TOTAL_ONLY}), 0)::bigint AS input,
+  COALESCE(sum(f.input_tokens) FILTER (WHERE ${TOTAL_ONLY}), 0)::bigint AS unsplit,
   COALESCE(sum(f.output_tokens), 0)::bigint AS output,
   COALESCE(sum(f.cache_read_tokens), 0)::bigint AS cache_read,
   COALESCE(sum(f.cache_write_5m_tokens + f.cache_write_1h_tokens), 0)::bigint AS cache_write,
-  COALESCE(sum(f.replay_tokens), 0)::bigint AS replay`;
+  COALESCE(sum(f.replay_tokens), 0)::bigint AS replay,
+  COALESCE(bool_or(NOT ${TOTAL_ONLY} AND (${STATES_BOTH_SIDES} OR f.input_tokens > 0)), false) AS records_input,
+  COALESCE(bool_or(${STATES_BOTH_SIDES} OR f.output_tokens > 0), false) AS records_output,
+  COALESCE(bool_or(${STATES_CACHE} OR f.cache_write_5m_tokens + f.cache_write_1h_tokens > 0), false) AS records_cache_write,
+  COALESCE(bool_or(${STATES_CACHE} OR f.cache_read_tokens > 0), false) AS records_cache_read,
+  -- Re-read context is modelled for estimates made from chat text, the only facts with a method.
+  COALESCE(bool_or(f.method_id IS NOT NULL OR f.replay_tokens > 0), false) AS records_replay`;
 
 export function readTotals(row: Record<string, unknown>): TokenTotals {
   return {
@@ -69,6 +109,14 @@ export function readTotals(row: Record<string, unknown>): TokenTotals {
     cacheRead: toNumber(row.cache_read),
     cacheWrite: toNumber(row.cache_write),
     replay: toNumber(row.replay),
+    unsplit: toNumber(row.unsplit),
+    recorded: {
+      input: row.records_input === true,
+      output: row.records_output === true,
+      cacheWrite: row.records_cache_write === true,
+      cacheRead: row.records_cache_read === true,
+      replay: row.records_replay === true,
+    },
   };
 }
 

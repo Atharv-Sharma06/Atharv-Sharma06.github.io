@@ -9,8 +9,10 @@ import { cn } from '@/lib/cn';
  *
  *  exact        reported by a source that meters tokens (Claude Code transcripts,
  *               Anthropic usage reports)
- *  estimated    reconstructed from text with a tokenizer model (claude.ai exports),
- *               or a total that includes such a part
+ *  estimated    not metered: reconstructed from text with a tokenizer model (claude.ai
+ *               exports), or a count a file or an entry states without declaring it
+ *               exact (CSV and JSON files, manual entries), or a total that includes
+ *               such a part
  *  unavailable  no source holds the information; nothing is shown in its place
  *
  * The level is always written out next to an icon; colour is never the only signal.
@@ -34,7 +36,7 @@ const META: Record<ConfidenceLevel, { label: string; icon: typeof CircleCheck; t
     label: 'Estimated',
     icon: CircleDashed,
     tone: 'text-warning',
-    help: 'Reconstructed from the text of your conversations with a tokenizer model, or a total that includes such a part. The real figure can differ.',
+    help: 'Not metered: counted from conversation text with a tokenizer model, or stated by a file or an entry without being marked exact, or a total that includes such a part. The real figure can differ.',
   },
   unavailable: {
     label: 'Unavailable',

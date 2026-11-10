@@ -92,10 +92,14 @@ function Fact({ label, children, note }: { label: string; children: ReactNode; n
 
 function Composition({ tokens, basis, note, className }: { tokens: TokenTotals; basis: TokenBasis; note?: string; className?: string }) {
   // Only categories this conversation has. A chat export knows nothing about the prompt
-  // cache, so a row "Cache reads 0" would state as fact what is really unknown.
-  const rows = [
-    { label: 'Input', value: tokens.input, hint: 'New content given to the model', always: true },
-    { label: 'Output', value: tokens.output, hint: 'What the model wrote', always: true },
+  // cache, so a row "Cache reads 0" would state as fact what is really unknown. Input and
+  // output are always listed; a side for which no record has a count shows a dash, because
+  // a table without that column stores nothing for it. A total that is not split into the
+  // two has a line of its own.
+  const rows: Array<{ label: string; value: number | null; hint: string; always: boolean }> = [
+    { label: 'Input', value: tokens.recorded.input ? tokens.input : null, hint: 'New content given to the model', always: true },
+    { label: 'Output', value: tokens.recorded.output ? tokens.output : null, hint: 'What the model wrote', always: true },
+    { label: 'Not split into input and output', value: tokens.unsplit, hint: 'Rows that only state a total', always: false },
     { label: 'Cache writes', value: tokens.cacheWrite, hint: 'Input stored in the prompt cache', always: false },
     ...(basis === 'processed'
       ? [
@@ -103,8 +107,8 @@ function Composition({ tokens, basis, note, className }: { tokens: TokenTotals; 
           { label: 'Re-read context', value: tokens.replay, hint: 'Context re-sent on later turns (modelled for chat exports)', always: false },
         ]
       : []),
-  ].filter((r) => r.always || r.value > 0);
-  const max = Math.max(1, ...rows.map((r) => r.value));
+  ].filter((r) => r.always || (r.value ?? 0) > 0);
+  const max = Math.max(1, ...rows.map((r) => r.value ?? 0));
   return (
     <Card className={className}>
       <CardHeader
@@ -114,12 +118,16 @@ function Composition({ tokens, basis, note, className }: { tokens: TokenTotals; 
       <CardBody>
         <dl className="space-y-3">
           {rows.map((r) => (
-            <div key={r.label} className="grid grid-cols-[7.5rem_minmax(0,1fr)_4rem] items-center gap-3 text-[13px]" title={`${r.hint}: ${formatInt(r.value)} tokens`}>
-              <dt className="truncate text-ink-2">{r.label}</dt>
+            <div
+              key={r.label}
+              className="grid grid-cols-[7.5rem_minmax(0,1fr)_4rem] items-center gap-3 text-[13px]"
+              title={r.value === null ? `${r.hint}: no record of this conversation has a count for it` : `${r.hint}: ${formatInt(r.value)} tokens`}
+            >
+              <dt className="text-ink-2">{r.label}</dt>
               <div className="h-1.5 overflow-hidden rounded-full bg-raised" aria-hidden="true">
-                <div className="h-full rounded-full bg-accent/80" style={{ width: `${r.value > 0 ? Math.max(1.5, (r.value / max) * 100) : 0}%` }} />
+                <div className="h-full rounded-full bg-accent/80" style={{ width: `${r.value ? Math.max(1.5, (r.value / max) * 100) : 0}%` }} />
               </div>
-              <dd className="tabular text-right text-ink">{formatTokens(r.value)}</dd>
+              <dd className={cn('tabular text-right', r.value === null ? 'text-ink-3' : 'text-ink')}>{r.value === null ? '–' : formatTokens(r.value)}</dd>
             </div>
           ))}
         </dl>

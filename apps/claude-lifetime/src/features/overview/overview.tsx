@@ -70,38 +70,64 @@ function SplitBar({ exact, estimated }: { exact: number; estimated: number }) {
   );
 }
 
-function Composition({ tokens, basis }: { tokens: TokenTotals; basis: 'processed' | 'new' }) {
-  const rows = [
-    { label: 'Input', value: tokens.input, hint: 'New content given to the model' },
-    { label: 'Output', value: tokens.output, hint: 'What the model wrote' },
-    { label: 'Cache writes', value: tokens.cacheWrite, hint: 'Input stored in the prompt cache' },
-    ...(basis === 'processed'
-      ? [
-          { label: 'Cache reads', value: tokens.cacheRead, hint: 'Context re-read from the cache (exact sources)' },
-          { label: 'Re-read context', value: tokens.replay, hint: 'Context re-sent on later turns (modelled for chat exports)' },
-        ]
+const EITHER = new Intl.ListFormat('en', { type: 'disjunction' });
+
+/**
+ * The categories of the total. A category for which no record in the range has a count is
+ * not known to be zero: a table without an output column stores no output, and so does a
+ * day on which nothing was written. It is shown as a dash and named in a note below.
+ * Totals that are not split into input and output get a line of their own instead of
+ * being shown as input. Re-read context exists only as a model for chat exports, so its
+ * line is left out when the range holds no such estimate.
+ */
+export function Composition({ tokens, basis }: { tokens: TokenTotals; basis: 'processed' | 'new' }) {
+  const known = tokens.recorded;
+  const rows: Array<{ label: string; value: number | null; hint: string }> = [
+    { label: 'Input', value: known.input ? tokens.input : null, hint: 'New content given to the model' },
+    { label: 'Output', value: known.output ? tokens.output : null, hint: 'What the model wrote' },
+    ...(tokens.unsplit > 0
+      ? [{ label: 'Not split into input and output', value: tokens.unsplit, hint: 'Rows that only state a total: how much of it was input and how much output is not known' }]
+      : []),
+    { label: 'Cache writes', value: known.cacheWrite ? tokens.cacheWrite : null, hint: 'Input stored in the prompt cache' },
+    ...(basis === 'processed' ? [{ label: 'Cache reads', value: known.cacheRead ? tokens.cacheRead : null, hint: 'Context re-read from the cache (exact sources)' }] : []),
+    ...(basis === 'processed' && known.replay
+      ? [{ label: 'Re-read context', value: tokens.replay, hint: 'Context re-sent on later turns (modelled for chat exports)' }]
       : []),
   ];
-  const max = Math.max(1, ...rows.map((r) => r.value));
+  const hasUsage = tokens.unsplit > 0 || known.input || known.output || known.cacheWrite || known.cacheRead || known.replay;
+  const unknown = rows.filter((r) => r.value === null).map((r) => r.label.toLowerCase());
+  const max = Math.max(1, ...rows.map((r) => r.value ?? 0));
   return (
     <div>
       <h3 className="text-[13px] text-ink-2">What the total is made of</h3>
-      <dl className="mt-3 space-y-2.5">
-        {rows.map((r) => (
-          <div key={r.label} className="grid grid-cols-[7.5rem_minmax(0,1fr)_4rem] items-center gap-3 text-[13px]" title={r.hint}>
-            <dt className="truncate text-ink-2">{r.label}</dt>
-            <div className="h-1.5 overflow-hidden rounded-full bg-raised" aria-hidden="true">
-              <div className="h-full rounded-full bg-accent/80" style={{ width: `${r.value > 0 ? Math.max(1.5, (r.value / max) * 100) : 0}%` }} />
-            </div>
-            <dd className="tabular text-right text-ink">{formatTokens(r.value)}</dd>
-          </div>
-        ))}
-      </dl>
+      {!hasUsage ? (
+        <p className="mt-3 text-[13px] text-ink-3">No imported record in this range has token counts, so there is nothing to break down.</p>
+      ) : (
+        <>
+          <dl className="mt-3 space-y-2.5">
+            {rows.map((r) => (
+              <div key={r.label} className="grid grid-cols-[7.5rem_minmax(0,1fr)_4rem] items-center gap-3 text-[13px]" title={r.hint}>
+                <dt className="text-ink-2">{r.label}</dt>
+                <div className="h-1.5 overflow-hidden rounded-full bg-raised" aria-hidden="true">
+                  <div className="h-full rounded-full bg-accent/80" style={{ width: `${r.value ? Math.max(1.5, (r.value / max) * 100) : 0}%` }} />
+                </div>
+                <dd className={cn('tabular text-right', r.value === null ? 'text-ink-3' : 'text-ink')}>{r.value === null ? '–' : formatTokens(r.value)}</dd>
+              </div>
+            ))}
+          </dl>
+          {unknown.length > 0 ? (
+            <p className="mt-3 text-xs text-ink-3">
+              No record in this range counts any {EITHER.format(unknown)}. Whether there {unknown.length === 1 ? 'was' : 'were'} none or the source
+              does not record {unknown.length === 1 ? 'it' : 'them'} is not known, so no figure is shown.
+            </p>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
 
-function Hero({
+export function Hero({
   overview,
   basis,
   scoped,
@@ -129,7 +155,7 @@ function Hero({
             level={level}
             hint={
               level === 'estimated'
-                ? 'This total includes tokens reconstructed from conversation text. The exact and estimated parts are shown separately below.'
+                ? 'This total includes estimated tokens. The exact and estimated parts are shown separately below.'
                 : undefined
             }
           />
@@ -146,9 +172,12 @@ function Hero({
           <SplitBar exact={t.exact} estimated={t.estimated} />
         </div>
         {t.estimated > 0 && t.low !== t.high ? (
+          // The band covers one thing only: which tokenizer the model used for the text that was counted. What an export
+          // does not contain is not in the band, and it can only add to the real figure.
           <p className="mt-3 text-[13px] text-ink-2">
-            Estimates carry a margin: the total is likely between <span className="tabular text-ink">{formatTokens(t.low)}</span> and{' '}
-            <span className="tabular text-ink">{formatTokens(t.high)}</span>.
+            The tokenizer of the model is not known for part of the text, so the counted content comes to between{' '}
+            <span className="tabular text-ink">{formatTokens(t.low)}</span> and <span className="tabular text-ink">{formatTokens(t.high)}</span>. Content
+            that is not in an export (system prompts, tool definitions, files, images) comes on top and can only make the real figure higher.
           </p>
         ) : null}
       </div>
@@ -245,32 +274,102 @@ function SubscriptionSide({
   );
 }
 
-function ApiValueCard({ value, scenario }: { value: ApiValue; scenario: 'standard' | 'cached' }) {
-  const total = scenario === 'cached' ? value.totalCachedUsd : value.totalStandardUsd;
+/** Unpriced tokens by why they are not priced: no model named, or no price on file for the model or its price tier. */
+function unpricedReasons(value: ApiValue): { unknownModel: number; noPrice: number; complete: boolean } {
+  const unknownModel = value.unpriced.filter((u) => u.reason === 'unknown_model').reduce((sum, u) => sum + u.tokens, 0);
+  const noPrice = value.unpriced.filter((u) => u.reason === 'no_price').reduce((sum, u) => sum + u.tokens, 0);
+  // The list of groups is capped; when it does not account for every unpriced token, the split is not stated.
+  return { unknownModel, noPrice, complete: unknownModel + noPrice === value.unpricedTokens };
+}
+
+const NO_MODEL = 'their source does not name a model';
+const NO_PRICE = 'no price is on file for their model or price tier';
+
+/** The sentence under the figure about tokens that could not be priced, or null when every token was priced. */
+export function unpricedSentence(value: ApiValue): string | null {
+  if (value.unpricedTokens <= 0) return null;
+  const { unknownModel, noPrice, complete } = unpricedReasons(value);
+  // Priced and unpriced amounts are always in processed tokens, whichever basis the page shows.
+  const lead = `${formatTokens(value.unpricedTokens)} processed tokens are not priced`;
+  if (!complete) return `${lead}: some name no model, and for others no price is on file for their model or price tier.`;
+  if (noPrice === 0) return `${lead}: ${NO_MODEL}.`;
+  if (unknownModel === 0) return `${lead}: ${NO_PRICE}.`;
+  return `${lead}: ${formatTokens(unknownModel)} name no model, and for ${formatTokens(noPrice)} no price is on file for their model or price tier.`;
+}
+
+/** The tooltip of the badge. */
+export function apiValueHint(value: ApiValue): string {
+  if (value.pricedTokens === 0) {
+    if (value.unpricedTokens === 0) return 'There is no token usage in this range to price.';
+    const { unknownModel, noPrice, complete } = unpricedReasons(value);
+    if (complete && noPrice === 0) return 'None of the usage in this range names a model, so nothing can be priced.';
+    if (complete && unknownModel === 0) return 'No price is on file for the models or price tiers of the usage in this range, so nothing can be priced.';
+    return 'Part of the usage in this range names no model, and for the rest no price is on file for its model or price tier, so nothing can be priced.';
+  }
   const hasEstimate = Number(value.estimatedStandardUsd) > 0 || value.assumedTokens > 0;
+  return hasEstimate
+    ? 'Includes estimated token counts or an assumed model. See Model Breakdown for the parts.'
+    : 'Metered token counts multiplied by Anthropic’s published API prices.';
+}
+
+export function ApiValueCard({ value, scenario }: { value: ApiValue; scenario: 'standard' | 'cached' }) {
+  const total = scenario === 'cached' ? value.totalCachedUsd : value.totalStandardUsd;
+  const pricesEstimates = Number(value.estimatedStandardUsd) > 0 || Number(value.estimatedCachedUsd) > 0;
+  // Only estimates made from chat text have re-read context, which is what the two scenarios price differently.
+  // Counts a file states are priced the same in both, and then there is no scenario to name.
+  const scenarioMatters = Number(value.estimatedStandardUsd) !== Number(value.estimatedCachedUsd);
+  const hasEstimate = pricesEstimates || value.assumedTokens > 0;
   const level = value.pricedTokens === 0 ? 'unavailable' : hasEstimate ? 'estimated' : 'exact';
+  const unpriced = unpricedSentence(value);
   return (
-    <MetricCard
-      label="Equivalent API value"
-      value={formatUsd(total)}
-      confidence={level}
-      confidenceHint={
-        level === 'unavailable'
-          ? 'None of the usage in this range names a model with a published price, so nothing can be priced.'
-          : level === 'exact'
-            ? 'Metered token counts multiplied by Anthropic’s published API prices.'
-            : 'Includes estimated token counts or an assumed model. See Model Breakdown for the parts.'
-      }
-    >
+    <MetricCard label="Equivalent API value" value={formatUsd(total)} confidence={level} confidenceHint={apiValueHint(value)}>
       <p>What this usage would cost at API list prices. It is not money you paid.</p>
-      {value.unpricedTokens > 0 ? (
+      {level !== 'unavailable' && scenarioMatters ? (
+        // Re-read context of estimated chats costs very different amounts with and without a prompt cache; the figure shows one of the two.
+        <p>{scenario === 'cached' ? 'Estimated chat usage is priced with a 5-minute prompt cache assumed.' : 'Estimated chat usage is priced without prompt caching.'}</p>
+      ) : null}
+      {level !== 'unavailable' && value.assumedTokens > 0 && value.assumedModel ? (
         <p>
-          {/* priced and unpriced amounts are always in processed tokens, whichever basis the page shows */}
-          <span className="tabular text-ink">{formatTokens(value.unpricedTokens)}</span> processed tokens are not priced: their source does not
-          name a model.{' '}
+          <span className="tabular text-ink">{formatTokens(value.assumedTokens)}</span> processed tokens without a recorded model are priced as{' '}
+          {value.assumedModel.displayName}, your assumption.
+        </p>
+      ) : null}
+      {unpriced ? (
+        <p>
+          {unpriced}{' '}
           <Link href="/models/" className="text-accent-soft underline-offset-4 hover:underline">
             Details
           </Link>
+        </p>
+      ) : null}
+    </MetricCard>
+  );
+}
+
+/** The most active day. Conversations and messages are left out for a day that has neither, such as a day of report rows. */
+export function MostActiveDayCard({ day }: { day: Overview['mostActiveDay'] }) {
+  if (!day) {
+    return (
+      <MetricCard label="Most active day" value={null} confidence="unavailable">
+        <p>No usage is recorded in this range.</p>
+      </MetricCard>
+    );
+  }
+  return (
+    <MetricCard
+      label="Most active day"
+      value={<span className="text-[22px] tracking-[-0.01em]">{formatDay(day.day)}</span>}
+      confidence={confidenceOf(day.exact, day.estimated)}
+    >
+      <p>
+        <span className="tabular text-ink" title={`${formatInt(day.tokens)} tokens`}>
+          {formatTokens(day.tokens)}
+        </span>{' '}
+        tokens that day.
+      </p>
+      {day.conversationsActive > 0 || day.messages > 0 ? (
+        <p>
+          {plural(day.conversationsActive, 'conversation')} active ({formatInt(day.conversationsCreated)} started), {formatInt(day.messages)} messages.
         </p>
       ) : null}
     </MetricCard>
@@ -394,33 +493,12 @@ export function OverviewPage() {
 
             {value.data ? <ApiValueCard value={value.data} scenario={settings.costScenario} /> : <Skeleton className="h-36" />}
 
-            {overview.data.mostActiveDay ? (
-              <MetricCard
-                label="Most active day"
-                value={<span className="text-[22px] tracking-[-0.01em]">{formatDay(overview.data.mostActiveDay.day)}</span>}
-                confidence={confidenceOf(overview.data.mostActiveDay.exact, overview.data.mostActiveDay.estimated)}
-              >
-                <p>
-                  <span className="tabular text-ink" title={`${formatInt(overview.data.mostActiveDay.tokens)} tokens`}>
-                    {formatTokens(overview.data.mostActiveDay.tokens)}
-                  </span>{' '}
-                  tokens that day.
-                </p>
-                <p>
-                  {plural(overview.data.mostActiveDay.conversationsActive, 'conversation')} active ({formatInt(overview.data.mostActiveDay.conversationsCreated)}{' '}
-                  started), {formatInt(overview.data.mostActiveDay.messages)} messages.
-                </p>
-              </MetricCard>
-            ) : (
-              <MetricCard label="Most active day" value={null} confidence="unavailable">
-                <p>No usage is recorded in this range.</p>
-              </MetricCard>
-            )}
+            <MostActiveDayCard day={overview.data.mostActiveDay} />
           </div>
 
           <ChartCard
             title="Usage over time"
-            description={`Tokens per ${granularity}${scoped ? `, ${rangeLabel}` : ', all time'}. Solid bars are metered; hatched bars are reconstructed from text.`}
+            description={`Tokens per ${granularity}${scoped ? `, ${rangeLabel}` : ', all time'}. Solid bars are exact; hatched bars are estimated.`}
             legend={<ChartLegend series={chart.series} />}
             footer={
               <Link href="/usage/" className="text-accent-soft underline-offset-4 hover:underline">

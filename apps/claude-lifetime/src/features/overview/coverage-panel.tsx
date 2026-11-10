@@ -2,9 +2,9 @@
 
 import { CircleCheck, CircleDashed, CircleSlash } from 'lucide-react';
 import Link from 'next/link';
-import type { ReactNode } from 'react';
-import type { Coverage } from '@/analytics/coverage';
-import { SOURCE_KIND_LABEL } from '@/components/shell/coverage-indicator';
+import { useEffect, type ReactNode } from 'react';
+import type { Coverage, SourceCoverage } from '@/analytics/coverage';
+import { basisTokens, COVERAGE_ID, revealCoverage, SOURCE_KIND_LABEL } from '@/components/shell/coverage-indicator';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { LIMITATION_TEXT } from '@/core/limitations';
 import { cn } from '@/lib/cn';
@@ -23,6 +23,32 @@ function Group({ icon, tone, title, children }: { icon: typeof CircleCheck; tone
   );
 }
 
+const LIST = new Intl.ListFormat('en', { type: 'conjunction' });
+
+/** Names of the kinds of the given sources, for "metered by ..." and "stated in ...", each once and in a fixed order. */
+function namesOf(sources: SourceCoverage[]): string {
+  const kinds = new Set(sources.map((s) => s.kind));
+  return LIST.format(
+    [
+      kinds.has('claude_code') && 'Claude Code',
+      kinds.has('api_usage_report') && 'API usage reports',
+      kinds.has('generic_csv') && 'CSV files',
+      kinds.has('generic_json') && 'JSON files',
+      kinds.has('manual') && 'entries you typed in',
+    ].filter((v): v is string => typeof v === 'string'),
+  );
+}
+
+/** How many stretches without records there are, and how many of the longest are listed. */
+export function gapHeading(coverage: Pick<Coverage, 'gapCount' | 'gapDays'>, listed: number): string {
+  const count = `${plural(coverage.gapCount, 'stretch', 'stretches')} of ${coverage.gapDays} days or more with no records`;
+  if (coverage.gapCount <= listed) return count;
+  return `${count}; the ${formatInt(listed)} longest:`;
+}
+
+/** Gaps listed under the heading; the rest are counted, not listed. */
+const LISTED_GAPS = 6;
+
 /**
  * "What We Know About Your Claude History": where each number comes from and what no
  * source can tell. Coverage is described by what was imported — sources, dates and
@@ -31,22 +57,26 @@ function Group({ icon, tone, title, children }: { icon: typeof CircleCheck; tone
  */
 export function CoveragePanel({ coverage }: { coverage: Coverage }) {
   const counted = coverage.sources.filter((s) => s.includeInTotals);
-  const kinds = new Set(counted.map((s) => s.kind));
   const hasExact = coverage.exactTokens > 0;
+  // Whether anything is metered does not depend on the basis: metered cache reads have no new tokens.
+  const metered = counted.some((s) => s.hasExactUsage);
   const hasEstimated = coverage.estimatedTokens > 0;
   const conversations = counted.reduce((sum, s) => sum + s.conversations, 0);
   const total = coverage.exactTokens + coverage.estimatedTokens;
+  const tokens = basisTokens(coverage.basis);
   const topLimits = coverage.limitations.filter((l) => l.name !== 'MODEL_UNKNOWN').slice(0, 4);
-  const meteredBy = new Intl.ListFormat('en', { type: 'conjunction' }).format(
-    [
-      kinds.has('claude_code') && 'Claude Code',
-      (kinds.has('api_usage_report') || kinds.has('generic_csv') || kinds.has('generic_json')) && 'usage reports',
-      kinds.has('manual') && 'entries you typed in',
-    ].filter((v): v is string => typeof v === 'string'),
-  );
+  // Only sources that hold exact tokens metered them; a CSV of estimates next to Claude Code did not.
+  const meteredBy = namesOf(counted.filter((s) => s.exactTokens > 0));
+  const statedIn = namesOf(counted.filter((s) => s.statedEstimatedTokens > 0));
+
+  // The panel appears only after the overview has read its figures, which is after the browser looked for the
+  // #coverage target of the address. It brings itself into view then.
+  useEffect(() => {
+    if (window.location.hash === `#${COVERAGE_ID}`) revealCoverage();
+  }, []);
 
   return (
-    <Card id="coverage" className="scroll-mt-20">
+    <Card id={COVERAGE_ID} className="scroll-mt-20">
       <CardHeader
         title="What We Know About Your Claude History"
         description="Every figure in this app is computed from the files you imported. This is what those files establish, what is reconstructed from them, and what none of them can tell."
@@ -58,13 +88,13 @@ export function CoveragePanel({ coverage }: { coverage: Coverage }) {
           <Summary label="Sources counted" value={`${counted.length} of ${coverage.sources.length}`} detail={plural(coverage.importCount, 'import')} />
           <Summary
             label="Exact usage"
-            value={hasExact ? 'Present' : 'None'}
-            detail={total > 0 ? `${formatShare(coverage.exactTokens / total)} of imported tokens` : undefined}
+            value={metered ? 'Present' : 'None'}
+            detail={total > 0 ? `${formatShare(coverage.exactTokens / total)} of imported ${tokens}` : undefined}
           />
           <Summary
             label="Model recorded"
             value={coverage.tokensWithModel > 0 ? (coverage.tokensWithoutModel > 0 ? 'In part' : 'Yes') : 'No'}
-            detail={total > 0 ? `for ${formatShare(coverage.tokensWithModel / total)} of imported tokens` : undefined}
+            detail={total > 0 ? `for ${formatShare(coverage.tokensWithModel / total)} of imported ${tokens}` : undefined}
           />
         </dl>
         <div className="grid gap-x-10 gap-y-7 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
@@ -80,10 +110,10 @@ export function CoveragePanel({ coverage }: { coverage: Coverage }) {
                     Records from
                   </th>
                   <th scope="col" className="px-3 py-2 text-right font-medium">
-                    Exact tokens
+                    Exact {tokens}
                   </th>
                   <th scope="col" className="px-3 py-2 text-right font-medium">
-                    Estimated tokens
+                    Estimated {tokens}
                   </th>
                 </tr>
               </thead>
@@ -111,17 +141,15 @@ export function CoveragePanel({ coverage }: { coverage: Coverage }) {
           </div>
 
           <div className="mt-4 text-[13px] text-ink-2">
-            {coverage.gaps.length === 0 ? (
+            {coverage.gapCount === 0 ? (
               <p>
                 No stretch of {coverage.gapDays} days or more is without records between your first and last imported day.
               </p>
             ) : (
               <>
-                <p className="text-ink">
-                  {plural(coverage.gaps.length, 'stretch', 'stretches')} of {coverage.gapDays} days or more with no records
-                </p>
+                <p className="text-ink">{gapHeading(coverage, Math.min(LISTED_GAPS, coverage.gaps.length))}</p>
                 <ul className="mt-1.5 grid gap-x-6 gap-y-1 sm:grid-cols-2">
-                  {coverage.gaps.slice(0, 6).map((g) => (
+                  {coverage.gaps.slice(0, LISTED_GAPS).map((g) => (
                     <li key={g.from} className="flex justify-between gap-3">
                       <span>
                         {formatDay(g.from)} – {formatDay(g.to)}
@@ -142,8 +170,13 @@ export function CoveragePanel({ coverage }: { coverage: Coverage }) {
           <Group icon={CircleCheck} tone="text-good" title="Known exactly">
             {hasExact ? (
               <li>
-                {formatTokens(coverage.exactTokens)} tokens metered by {meteredBy || 'your sources'}, with their date and, where the source names it, their
-                model.
+                {formatTokens(coverage.exactTokens)} {tokens} metered by {meteredBy || 'your sources'}, with their date and, where the source names it,
+                their model.
+              </li>
+            ) : metered ? (
+              <li>
+                The metered usage you imported holds no {tokens}
+                {coverage.basis === 'new' ? ': it is context that was read again, which Processed counts.' : '.'}
               </li>
             ) : (
               <li>No imported source meters tokens yet. Claude Code logs and API usage reports do.</li>
@@ -154,10 +187,18 @@ export function CoveragePanel({ coverage }: { coverage: Coverage }) {
           <Group icon={CircleDashed} tone="text-warning" title="Estimated">
             {hasEstimated ? (
               <>
-                <li>
-                  {formatTokens(coverage.estimatedTokens)} tokens across {formatInt(coverage.estimatedMessages)} chat messages, reconstructed from their
-                  text because a claude.ai export contains no token counts.
-                </li>
+                {coverage.textEstimatedTokens > 0 ? (
+                  <li>
+                    {formatTokens(coverage.textEstimatedTokens)} {tokens} across {plural(coverage.estimatedMessages, 'chat message')}, reconstructed from
+                    their text because a claude.ai export contains no token counts.
+                  </li>
+                ) : null}
+                {coverage.statedEstimatedTokens > 0 ? (
+                  <li>
+                    {formatTokens(coverage.statedEstimatedTokens)} {tokens} as stated in {statedIn || 'your sources'}, which do not mark them as exact.
+                    They are counted as given, apart from metered counts.
+                  </li>
+                ) : null}
                 {topLimits.map((l) => (
                   <li key={l.name}>
                     {LIMITATION_TEXT[l.name].short}: {formatInt(l.messages)} messages.
@@ -172,8 +213,8 @@ export function CoveragePanel({ coverage }: { coverage: Coverage }) {
           <Group icon={CircleSlash} tone="text-ink-3" title="Not available">
             {coverage.tokensWithoutModel > 0 ? (
               <li>
-                The model behind {formatTokens(coverage.tokensWithoutModel)} tokens. A claude.ai export does not record which model answered, and none
-                is guessed.
+                The model behind {formatTokens(coverage.tokensWithoutModel)} {tokens}. Their source does not record which model answered, and none is
+                guessed.
               </li>
             ) : null}
             <li>Conversations deleted before an export, and anything in a source you have not imported.</li>

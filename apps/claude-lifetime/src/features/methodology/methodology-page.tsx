@@ -148,7 +148,10 @@ export function MethodologyPage() {
           </Section>
 
           <Section id="tokens" title="Two ways to count tokens">
-            <p>The same usage gives two honest totals, depending on whether context that is read again counts again. The switch in the top bar chooses one.</p>
+            <p>
+              The same usage gives two honest totals, depending on whether context that is read again counts again. The Processed and New switch
+              chooses one. It is in the top bar, or in the menu on a narrow screen, and under Token basis in Settings.
+            </p>
             <DocTable
               head={['Basis', 'Includes', 'Answers']}
               rows={[
@@ -166,8 +169,11 @@ export function MethodologyPage() {
           <Section id="chat" title="How chat tokens are estimated">
             <p>
               <strong>Counting text.</strong> Text is measured with a tokenizer model fitted to the tokenizer Anthropic published for Claude 2. Against
-              that tokenizer it is within about 1% on pooled text and within about 3% for most kinds of content; the weakest cases are Korean prose and
-              a few languages it was not fitted on (up to about 14% low). One token of that tokenizer is the app&rsquo;s base unit.
+              that tokenizer it is within about 1% on pooled text and within about 3% for most kinds of content. The known weak cases are further off:
+              everyday Korean prose up to about 12% low, Chinese legal prose about 10% low, Russian technical text about 6% high, languages it was not
+              fitted on such as Dutch and Indonesian about 14% low, Vietnamese stored in decomposed Unicode form about 27% high, and single documents of
+              unusual material, such as long base64 blobs or hex test vectors, up to about 28% off either way. Short texts are less accurate than long
+              ones, and the errors of single messages largely cancel out in totals. One token of that tokenizer is the app&rsquo;s base unit.
             </p>
             <p>
               <strong>Tokenizer generations.</strong> Claude models do not share a tokenizer, and Anthropic has not published the newer ones. The base
@@ -313,7 +319,8 @@ export function MethodologyPage() {
               network requests with your data, and there is no account or analytics.
             </p>
             <p>
-              The app stores titles, dates, sizes and token figures. It does not store the text of your messages: an export is read once to measure it,
+              The app stores titles, dates, sizes and token figures. For each Claude Code session it also stores the path of the project folder it
+              ran in, its git branch, the version of Claude Code and whether it used subagents. It does not store the text of your messages: an export is read once to measure it,
               and the text is discarded. Deleting an import, a source or everything is possible at any time from the import page and Settings.
             </p>
           </Section>

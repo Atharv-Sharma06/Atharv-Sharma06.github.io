@@ -2,27 +2,25 @@
 
 import { ArrowUpRight, FlaskConical, HardDrive, Menu, Upload, X } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { Dialog as RDialog } from 'radix-ui';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button, buttonClass } from '@/components/ui/button';
-import { Segmented } from '@/components/ui/controls';
-import { Tooltip, TooltipProvider } from '@/components/ui/overlay';
+import { TooltipProvider } from '@/components/ui/overlay';
 import { deleteAllData } from '@/import/delete';
+import type { ParamReader } from '@/features/conversations/url-state';
 import { cn } from '@/lib/cn';
 import { useApp, useAppState } from '@/state/app';
 import { useCoverage } from '@/state/queries';
+import { BasisToggle, MenuBasisSwitch } from './basis-switch';
 import { BootError, BootScreen, Paused } from './boot';
 import { CoverageIndicator } from './coverage-indicator';
-import { DateRangePicker } from './date-range';
+import { DateRangePicker, rangeUse } from './date-range';
 import { isActive, NAV, NAV_SECONDARY, type NavItem } from './nav';
 import { RefreshStatus } from './refresh-status';
 
 /** The portfolio this app is a sub-page of: the root of the same site. */
 const PORTFOLIO_HOME = '/';
-
-/** Pages whose figures follow the date range. The others always cover the whole history. */
-const RANGE_ROUTES = ['/', '/usage/', '/conversations/', '/models/'];
 
 /**
  * Opt-in background sync of the remembered Claude Code folder, once per page load.
@@ -76,7 +74,7 @@ function NavLink({ item, pathname, onNavigate }: { item: NavItem; pathname: stri
   );
 }
 
-function SidebarContent({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+function SidebarContent({ pathname, onNavigate, extra }: { pathname: string; onNavigate?: () => void; extra?: ReactNode }) {
   return (
     <>
       <Link href="/" onClick={onNavigate} className="flex h-14 shrink-0 items-center gap-2.5 px-4">
@@ -99,6 +97,7 @@ function SidebarContent({ pathname, onNavigate }: { pathname: string; onNavigate
           ))}
         </ul>
       </nav>
+      {extra}
       <div className="shrink-0 border-t border-line px-4 py-3 text-xs text-ink-3">
         <p className="flex items-start gap-2">
           <HardDrive className="mt-px size-3.5 shrink-0" aria-hidden="true" />
@@ -114,31 +113,32 @@ function SidebarContent({ pathname, onNavigate }: { pathname: string; onNavigate
   );
 }
 
-function BasisToggle() {
-  const { settings, saveSettings } = useApp();
+/** What the menu shows on screens without the sidebar. */
+export function MenuPanel({ pathname, ready, onNavigate }: { pathname: string; ready: boolean; onNavigate: () => void }) {
   return (
-    <Tooltip
-      content={
-        <span>
-          <strong className="font-medium">Processed</strong> counts everything the model read and wrote, including context that is re-read on every turn.{' '}
-          <strong className="font-medium">New</strong> counts each piece of content once.
-        </span>
+    <SidebarContent
+      pathname={pathname}
+      onNavigate={onNavigate}
+      // Below 768 px the top bar has no room for the basis switch, so the menu carries it.
+      extra={
+        ready ? (
+          <div className="shrink-0 md:hidden">
+            <MenuBasisSwitch />
+          </div>
+        ) : null
       }
-      side="bottom"
-    >
-      <span>
-        <Segmented
-          label="Token basis"
-          value={settings.basis}
-          onChange={(basis) => void saveSettings({ basis })}
-          options={[
-            { value: 'processed', label: 'Processed' },
-            { value: 'new', label: 'New' },
-          ]}
-        />
-      </span>
-    </Tooltip>
+    />
   );
+}
+
+/** The date range control, told whether the page at this address follows the range. */
+function RangeControl({ pathname, params }: { pathname: string; params: ParamReader | null }) {
+  const use = rangeUse(pathname, params);
+  return use.applies ? <DateRangePicker /> : <DateRangePicker applies={false} note={use.note} />;
+}
+
+function RangeControlWithQuery({ pathname }: { pathname: string }) {
+  return <RangeControl pathname={pathname} params={useSearchParams()} />;
 }
 
 function DemoBanner() {
@@ -211,7 +211,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <RDialog.Close className="absolute right-2.5 top-3 rounded-md p-2 text-ink-3 hover:bg-raised hover:text-ink" aria-label="Close menu">
               <X className="size-4" aria-hidden="true" />
             </RDialog.Close>
-            <SidebarContent pathname={pathname} onNavigate={() => setMenuOpen(false)} />
+            <MenuPanel pathname={pathname} ready={ready} onNavigate={() => setMenuOpen(false)} />
           </RDialog.Content>
         </RDialog.Portal>
       </RDialog.Root>
@@ -230,7 +230,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             {ready ? (
               <>
                 <div className="min-w-0 shrink">
-                  <DateRangePicker applies={RANGE_ROUTES.some((href) => isActive(pathname, href))} />
+                  {/* A static page has no query string until it runs in the browser, and the export refuses to read one outside a
+                      Suspense boundary. Until then the control follows the pathname alone. */}
+                  <Suspense fallback={<RangeControl pathname={pathname} params={null} />}>
+                    <RangeControlWithQuery pathname={pathname} />
+                  </Suspense>
                 </div>
                 <div className="hidden md:block">
                   <BasisToggle />

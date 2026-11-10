@@ -11,8 +11,9 @@ under "How it is counted".
 | **Processed tokens** | new tokens + cache reads + re-read context | Everything the model read and wrote. This is what the API meters. |
 
 A conversation is sent to the model again in full on every turn. In a long conversation
-the processed total is therefore many times the new total. Both are honest; the switch in
-the top bar chooses which one the charts show.
+the processed total is therefore many times the new total. Both are honest; the Processed
+and New switch chooses which one the charts show. It is in the top bar, or in the menu on
+a screen narrower than 768 pixels, and under Token basis in Settings.
 
 Token categories, as stored:
 

@@ -5,12 +5,33 @@ import { useState } from 'react';
 import { Button, buttonClass } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/controls';
 import { Popover, Tooltip } from '@/components/ui/overlay';
+import { parseTarget, type ParamReader } from '@/features/conversations/url-state';
 import { cn } from '@/lib/cn';
 import { formatDayRange } from '@/lib/format';
 import { RANGE_PRESETS, useApp } from '@/state/app';
+import { isActive } from './nav';
+
+/** Pages whose figures follow the date range. The others always cover the whole history. */
+const RANGE_ROUTES = ['/', '/usage/', '/conversations/', '/models/'];
+
+const WHOLE_HISTORY = 'This page always covers your whole history. The date range applies to Overview, Lifetime Usage, Conversations and Model Breakdown.';
+const WHOLE_CONVERSATION =
+  "A conversation's page always covers the whole conversation. The date range applies to the list of conversations, Overview, Lifetime Usage and Model Breakdown.";
+
+/**
+ * Whether the figures of the page at this address follow the date range, and if not,
+ * what the control says about it. The pathname alone is not enough: one conversation is
+ * shown at the address of the conversation list, with its id in the query string, and
+ * its figures are lifetime figures.
+ */
+export function rangeUse(pathname: string, params: ParamReader | null): { applies: true } | { applies: false; note: string } {
+  if (!RANGE_ROUTES.some((href) => isActive(pathname, href))) return { applies: false, note: WHOLE_HISTORY };
+  if (isActive(pathname, '/conversations/') && params && parseTarget(params).view === 'detail') return { applies: false, note: WHOLE_CONVERSATION };
+  return { applies: true };
+}
 
 /** The date range every chart and table on the page follows. */
-export function DateRangePicker({ applies = true }: { applies?: boolean }) {
+export function DateRangePicker({ applies = true, note = WHOLE_HISTORY }: { applies?: boolean; note?: string }) {
   const { range, setRange, resolved } = useApp();
   const [open, setOpen] = useState(false);
   const [from, setFrom] = useState(resolved.from ?? '');
@@ -45,7 +66,7 @@ export function DateRangePicker({ applies = true }: { applies?: boolean }) {
   // Some pages always cover the whole history; there the control says so instead of pretending to filter.
   if (!applies) {
     return (
-      <Tooltip content="This page always covers your whole history. The date range applies to Overview, Lifetime Usage, Conversations and Model Breakdown." side="bottom">
+      <Tooltip content={note} side="bottom">
         <span tabIndex={0} className={buttonClass('secondary', 'md', 'max-w-full cursor-default justify-start opacity-60')} aria-label="Date range: not used on this page">
           <Calendar className="size-4 shrink-0 text-ink-3" aria-hidden="true" />
           <span className="truncate">Whole history</span>

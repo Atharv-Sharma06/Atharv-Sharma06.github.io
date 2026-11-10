@@ -3,10 +3,10 @@
 import { FlaskConical, Trash, Upload } from 'lucide-react';
 import Link from 'next/link';
 import { useId, useState, type ReactNode } from 'react';
-import type { SourceCoverage } from '@/analytics/coverage';
+import type { Coverage, SourceCoverage } from '@/analytics/coverage';
 import { setSourceIncluded } from '@/analytics/settings';
 import { LoadDemoButton } from '@/components/data/no-data';
-import { SOURCE_KIND_LABEL } from '@/components/shell/coverage-indicator';
+import { basisTokens, SOURCE_KIND_LABEL } from '@/components/shell/coverage-indicator';
 import { Button, buttonClass } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm';
@@ -98,7 +98,7 @@ function ExcludeDialog({
   );
 }
 
-function SourceItem({ source, lastSynthetic }: { source: SourceCoverage; lastSynthetic: boolean }) {
+function SourceItem({ source, basis, lastSynthetic }: { source: SourceCoverage; basis: Coverage['basis']; lastSynthetic: boolean }) {
   const app = useApp();
   const tz = app.settings.timezone;
   const save = useSaveState();
@@ -166,10 +166,14 @@ function SourceItem({ source, lastSynthetic }: { source: SourceCoverage; lastSyn
           {source.firstRecordAt ? `${formatInstant(source.firstRecordAt, tz)} – ${formatInstant(source.lastRecordAt, tz)}` : NONE}
         </Fact>
         <Fact label="Conversations">{source.conversations > 0 ? formatInt(source.conversations) : NONE}</Fact>
-        <Fact label="Exact tokens" title={source.exactTokens > 0 ? `${formatInt(source.exactTokens)} tokens` : undefined}>
+        {/* The figures follow the Processed/New switch, so each says which of the two it is. */}
+        <Fact label={`Exact ${basisTokens(basis)}`} title={source.exactTokens > 0 ? `${formatInt(source.exactTokens)} ${basisTokens(basis)}` : undefined}>
           {source.exactTokens > 0 ? formatTokens(source.exactTokens) : NONE}
         </Fact>
-        <Fact label="Estimated tokens" title={source.estimatedTokens > 0 ? `${formatInt(source.estimatedTokens)} tokens` : undefined}>
+        <Fact
+          label={`Estimated ${basisTokens(basis)}`}
+          title={source.estimatedTokens > 0 ? `${formatInt(source.estimatedTokens)} ${basisTokens(basis)}` : undefined}
+        >
           {source.estimatedTokens > 0 ? formatTokens(source.estimatedTokens) : NONE}
         </Fact>
         {source.reportedCostUsd !== null ? <Fact label="Billed cost reported">{formatUsd(source.reportedCostUsd)}</Fact> : null}
@@ -311,7 +315,7 @@ export function SourcesSection() {
             {coverage.data.exactTokens + coverage.data.estimatedTokens > 0 ? (
               <>
                 : <span className="tabular text-ink">{formatTokens(coverage.data.exactTokens)}</span> exact and{' '}
-                <span className="tabular text-ink">{formatTokens(coverage.data.estimatedTokens)}</span> estimated tokens.
+                <span className="tabular text-ink">{formatTokens(coverage.data.estimatedTokens)}</span> estimated {basisTokens(coverage.data.basis)}.
               </>
             ) : (
               '.'
@@ -319,7 +323,7 @@ export function SourcesSection() {
           </p>
           <ul className="divide-y divide-line">
             {sources.map((source) => (
-              <SourceItem key={source.id} source={source} lastSynthetic={source.isSynthetic && synthetic.length === 1} />
+              <SourceItem key={source.id} source={source} basis={coverage.data.basis} lastSynthetic={source.isSynthetic && synthetic.length === 1} />
             ))}
           </ul>
           <p className="border-t border-line px-5 py-3 text-xs text-ink-3">

@@ -3,11 +3,19 @@
 import { getCoverage, listImports } from '@/analytics/coverage';
 import { listModels } from '@/analytics/settings';
 import { listPeriods } from '@/analytics/subscriptions';
-import { useData } from './app';
+import { useAppState, useData } from './app';
 
-/** Queries shared by several pages. Each is read once and reused. */
+/**
+ * Queries shared by several pages. Each is read once and reused.
+ *
+ * Coverage: token figures follow the selected basis, so that they agree with the totals on the same
+ * screen. useData already keys every query by the basis; it is named here as well because
+ * this result depends on it.
+ */
 export function useCoverage() {
-  return useData(['coverage'], (app) => getCoverage(app.db, app.userId, app.settings.timezone));
+  const state = useAppState();
+  const basis = state.status === 'ready' ? state.app.settings.basis : null;
+  return useData(['coverage', basis], (app) => getCoverage(app.db, app.userId, app.settings.timezone, app.settings.basis));
 }
 
 export function useImports() {

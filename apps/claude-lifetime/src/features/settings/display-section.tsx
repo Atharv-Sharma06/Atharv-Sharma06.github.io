@@ -250,8 +250,8 @@ function BasisSetting() {
       title="Token basis"
       description={
         <p>
-          Which tokens every total, chart and table counts. On wider screens the same switch sits in the top bar; changing either one changes
-          both.
+          Which tokens every total, chart and table counts. The same switch sits in the top bar, or in the menu on a narrow screen; changing
+          either one changes both.
         </p>
       }
     >
