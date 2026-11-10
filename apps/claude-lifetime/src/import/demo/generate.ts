@@ -2,7 +2,7 @@ import { DEFAULT_CONTEXT_WINDOW, METHODS, methodKeyFor, MODELS, PRICES, type Mod
 import { Decimal } from '@/core/decimal';
 import { Limitation } from '@/core/limitations';
 import type { ImportSink, ParsedImport, StagedMessage, StagedUsage } from '@/core/types';
-import { accountConversation, type AccountBlock, type AccountMessage } from '../claude-export/accounting';
+import { accountConversation, ROOT_PARENT, type AccountBlock, type AccountMessage } from '../claude-export/accounting';
 import { basisForDate } from '../claude-export/parser';
 
 /**
@@ -185,8 +185,10 @@ export function buildDemoDataset(now: Date = new Date(), seed = 20261110): DemoD
             const userText = Math.round(rnd.logNormal(70, 1.0)) + 4;
             const attachment = rnd.chance(0.07) ? Math.round(rnd.logNormal(4500, 0.8)) : 0;
             const image = rnd.chance(0.04);
+            // The demo stands for a current export, which records what each message answers.
             account.push({
               id: `${id}-m${account.length}`,
+              parentId: account.length > 0 ? account[account.length - 1].id : ROOT_PARENT,
               role: 'user',
               timeMs: t,
               blocks: [{ kind: 'text', base: userText }],
@@ -223,7 +225,7 @@ export function buildDemoDataset(now: Date = new Date(), seed = 20261110): DemoD
             const reply = Math.round(rnd.logNormal(340, 0.85)) + 8;
             blocks.push({ kind: 'text', base: reply });
             const endMs = t + rnd.int(3, 45) * 1000;
-            account.push({ id: `${id}-m${account.length}`, role: 'assistant', timeMs: t, endMs, blocks, attachmentBase: 0, capBase });
+            account.push({ id: `${id}-m${account.length}`, parentId: account.length > 0 ? account[account.length - 1].id : ROOT_PARENT, role: 'assistant', timeMs: t, endMs, blocks, attachmentBase: 0, capBase });
             shape.push({
               role: 'assistant',
               textChars: Math.round(reply * 4.5),

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ConversationUsage, SideStats, SubscriptionPeriod } from '@/analytics/subscriptions';
 import { ZERO_FIGURES } from '@/analytics/value';
 import {
-  assessComparability, averagePerDay, blockLabelFit, boundaryX, DAY_MS, DAYS_PER_MONTH, dayStartInZone, defaultMode, describeDates, describeRatio, elapsedDays,
+  assessComparability, averagedOverPartOnly, averagePerDay, blockLabelFit, boundaryX, DAY_MS, DAYS_PER_MONTH, dayStartInZone, defaultMode, describeDates, describeRatio, elapsedDays,
   emptyPeriodForm, endDateResolvingOverlap, formToInput, layoutTimeline, leadingUsd, lengthDays, otherUsd, perConversation, periodToForm, periodToInput,
   placeAxisLabels, pricedShare, ratePer, rateRatio, segmentDates, segmentSpans, sideFigure, timelineTicks, timelineX, validatePeriodForm, valueLevel,
   type AxisLabel, type Comparability,
@@ -215,6 +215,16 @@ describe('segments', () => {
     expect(averagePerDay({ tokens: 3000, activeDays: 4, recordedDays: 10 })).toBe(300);
     // nothing recorded inside the segment
     expect(averagePerDay({ tokens: 0, activeDays: 0, recordedDays: 0 })).toBeNull();
+  });
+
+  it('explains an average only when a good part of the segment lies outside the records', () => {
+    // a plan that began a year before the first import
+    expect(averagedOverPartOnly({ recordedDays: 30, elapsedDays: 395 })).toBe(true);
+    // the records start two days into the period, or today has no record yet
+    expect(averagedOverPartOnly({ recordedDays: 241, elapsedDays: 243 })).toBe(false);
+    expect(averagedOverPartOnly({ recordedDays: 334, elapsedDays: 335 })).toBe(false);
+    expect(averagedOverPartOnly({ recordedDays: 100, elapsedDays: 100 })).toBe(false);
+    expect(averagedOverPartOnly({ recordedDays: 0, elapsedDays: 100 })).toBe(false);
   });
 
   it('words the dates of a finished, a running and a coming stretch', () => {

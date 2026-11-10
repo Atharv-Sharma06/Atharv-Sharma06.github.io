@@ -9,7 +9,7 @@ import { cn } from '@/lib/cn';
 import { dayInZone, formatDay, formatMonth, formatSpan, formatTokens, formatUsd, plural } from '@/lib/format';
 import { planColor } from '@/lib/palette';
 import {
-  averagePerDay, blockLabelFit, boundaryX, describeDates, hasRecords, layoutTimeline, leadingUsd, lengthDays, placeAxisLabels, segmentDates, segmentSpans,
+  averagedOverPartOnly, averagePerDay, blockLabelFit, boundaryX, describeDates, hasRecords, layoutTimeline, leadingUsd, lengthDays, placeAxisLabels, segmentDates, segmentSpans,
   timelineTicks, timelineX, valueLevel, type CostScenario,
 } from './logic';
 import { ConfidenceMark, PlanSwatch } from './parts';
@@ -168,7 +168,7 @@ function SegmentDetails({
             </DetailRow>
             <DetailRow label="Average per day">
               {average === null ? '–' : formatTokens(average)}
-              {average !== null && segment.recordedDays < segment.elapsedDays ? <span className="text-ink-2">over {plural(segment.recordedDays, 'day')} with records on file</span> : null}
+              {average !== null && averagedOverPartOnly(segment) ? <span className="text-ink-2">over {plural(segment.recordedDays, 'day')} with records</span> : null}
             </DetailRow>
             <DetailRow label="Equivalent API value">
               {valueLevel(segment.value) === 'unavailable' ? <span className="text-ink-2">Not priced</span> : formatUsd(leadingUsd(segment.value, scenario), { cents: true })}

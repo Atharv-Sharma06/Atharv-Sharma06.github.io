@@ -267,6 +267,15 @@ export function lengthDays(segment: Pick<SegmentStats, 'start' | 'end' | 'days'>
 }
 
 /**
+ * Whether an average over the recorded days of a segment needs a word of explanation:
+ * it does when a good part of the segment lies outside the imported records (a plan
+ * that began long before the first import). A day or two at either end is not worth one.
+ */
+export function averagedOverPartOnly(segment: Pick<SegmentStats, 'recordedDays' | 'elapsedDays'>): boolean {
+  return segment.recordedDays > 0 && segment.recordedDays < segment.elapsedDays * 0.95;
+}
+
+/**
  * Tokens per day over the days of the segment that lie inside the recorded history, or
  * null when there is nothing to average. Days before the first imported record or after
  * the last are not counted: nothing is known about them, which is not the same as no usage.

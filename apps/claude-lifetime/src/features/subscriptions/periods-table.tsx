@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableFrame, Td, Th, THead, Tr } from '@/components/ui/table';
 import { cn } from '@/lib/cn';
 import { dayInZone, formatDay, formatInt, formatMoney, formatShare, formatSpan, formatTokens, formatUsd, plural } from '@/lib/format';
-import { averagePerDay, describeDates, elapsedDays, hasRecords, leadingUsd, lengthDays, pricedShare, segmentDates, valueLevel, type CostScenario } from './logic';
+import { averagedOverPartOnly, averagePerDay, describeDates, elapsedDays, hasRecords, leadingUsd, lengthDays, pricedShare, segmentDates, valueLevel, type CostScenario } from './logic';
 import { BadgedFigure, PlanSwatch, SyntheticTag, Unavailable } from './parts';
 
 export interface PeriodsTableProps {
@@ -172,7 +172,7 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
                               {formatTokens(average)}
                             </span>
                             {/* Days outside the imported history are unknown, not empty, so they are not averaged in. */}
-                            {segment.recordedDays < elapsed ? <span className="mt-0.5 block text-xs text-ink-3">over {plural(segment.recordedDays, 'day')}</span> : null}
+                            {averagedOverPartOnly(segment) ? <span className="mt-0.5 block text-xs text-ink-3">over {plural(segment.recordedDays, 'day')} with records</span> : null}
                           </>
                         )}
                       </Td>
