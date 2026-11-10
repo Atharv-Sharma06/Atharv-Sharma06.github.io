@@ -187,6 +187,100 @@ describe('an operation while no tab holds the database', () => {
   });
 });
 
+describe('what a connection needs done once before it is used', () => {
+  it('is done before the first operation, once, and again when a move interrupted it', async () => {
+    const page = scriptedPage();
+    const attempts: Array<{ work(): void; fail(error: Error): void }> = [];
+    const db = pgliteDriver(page.pg, {
+      onMove: page.onMove,
+      prepare: () => new Promise<void>((resolve, reject) => attempts.push({ work: resolve, fail: reject })),
+    });
+
+    // The first two operations wait for one attempt. The database moves before it has worked.
+    const first = watch(db.query('SELECT 1'));
+    const second = watch(db.query('SELECT 2'));
+    await after(0, null);
+    expect(attempts).toHaveLength(1);
+    expect(page.sent).toEqual([]);
+    await page.move();
+    expect(await first.outcome()).toMatchObject({ error: expect.any(DatabaseMovedError) });
+    expect(await second.outcome()).toMatchObject({ error: expect.any(DatabaseMovedError) });
+
+    // Before the fix nothing asked again: PGlite's page class stayed without the list types, and every
+    // statement that takes a list (each batch of an import) failed until the page was loaded anew.
+    const third = watch(db.query('SELECT 3'));
+    await after(0, null);
+    expect(attempts).toHaveLength(2);
+    attempts[1].work();
+    await after(0, null);
+    await page.answer();
+    expect(await third.outcome()).toMatchObject({ value: { rows: [{ sql: 'SELECT 3' }] } });
+
+    // Once it has worked it is not done again, not after a move either.
+    await page.move();
+    const fourth = watch(db.query('SELECT 4'));
+    await after(0, null);
+    await page.answer();
+    expect(await fourth.outcome()).toMatchObject({ value: { rows: [{ sql: 'SELECT 4' }] } });
+    expect(attempts).toHaveLength(2);
+  });
+
+  it('fails the operation that needed it when it fails, and is tried again by the next one', async () => {
+    const page = scriptedPage();
+    let calls = 0;
+    const db = pgliteDriver(page.pg, {
+      onMove: page.onMove,
+      prepare: async () => {
+        if (++calls === 1) throw new Error('could not read pg_type');
+      },
+    });
+    expect(await watch(db.query('SELECT 1')).outcome()).toMatchObject({ error: new Error('could not read pg_type') });
+    const again = watch(db.query('SELECT 2'));
+    await after(0, null);
+    await page.answer();
+    expect(await again.outcome()).toMatchObject({ value: { rows: [{ sql: 'SELECT 2' }] } });
+    expect(calls).toBe(2);
+  });
+});
+
+describe('waiting for a change to reach storage', () => {
+  /** A worker's answer to "copy everything to storage", which comes when the test says so. */
+  function storage() {
+    let confirm!: () => void;
+    const answered = new Promise<void>((resolve) => (confirm = resolve));
+    return { flush: () => answered, confirm };
+  }
+
+  it('fails when the database moves before the worker that made the change has confirmed it', async () => {
+    const page = scriptedPage();
+    const device = storage();
+    const db = pgliteDriver(page.pg, { onMove: page.onMove, flush: device.flush });
+    const saving = watch(db.query('UPDATE 1'));
+    await after(0, null);
+    await page.answer();
+    expect(await saving.outcome()).toMatchObject({ value: { affectedRows: 0 } });
+
+    // The change is made. The tab whose worker made it is closed before that worker has copied it to storage.
+    const confirming = watch(db.flush());
+    await after(0, null);
+    await page.move();
+
+    // Before the fix the wait ended after a while without an answer, which the app took for "saved".
+    expect(await confirming.outcome()).toMatchObject({ error: expect.any(DatabaseMovedError) });
+  });
+
+  it('succeeds when the worker confirms, and asks the worker that holds the database at that time', async () => {
+    const page = scriptedPage();
+    const device = storage();
+    const db = pgliteDriver(page.pg, { onMove: page.onMove, flush: device.flush });
+    const confirming = watch(db.flush());
+    await after(0, null);
+    device.confirm();
+    expect(await confirming.outcome()).toEqual({ value: undefined });
+    expect(page.listeners.size).toBe(1);
+  });
+});
+
 describe('a transaction that is under way when the database moves', () => {
   it('fails at once and sends nothing more: no further statement, no COMMIT and no ROLLBACK', async () => {
     const page = scriptedPage();

@@ -40,6 +40,14 @@ export interface DriverOptions {
   whyUnavailable?: () => string | null;
   connectTimeoutMs?: number;
   ownFailureTimeoutMs?: number;
+  /**
+   * Something that has to have worked once, through the database, before this connection
+   * is used. For PGlite's page class that is learning which list types the database has:
+   * it starts that by itself when it connects and nobody waits for it, so a move in the
+   * middle leaves it without them for good, and from then on every statement that takes
+   * a list fails (which is every import). Asked for here, it is tried again until it has worked.
+   */
+  prepare?: () => Promise<unknown>;
 }
 
 /** Opening a large database from this device's storage takes a while, and the engine may have to be downloaded again first. */
@@ -67,11 +75,36 @@ const forever = new Promise<never>(() => undefined);
  *    whatever this tab is doing by then.
  *  - An operation that finds no worker holding the database waits for one, but not for
  *    good: when no tab gets the database open, it fails with a DatabaseUnavailableError.
+ *  - Waiting for a change to reach storage fails the same way when the database moves
+ *    before the worker that made the change has confirmed it.
  */
 export function pgliteDriver(pg: PGliteInterface, opts: DriverOptions = {}): SqlDriver {
   const { onMove } = opts;
   let moves = 0;
-  onMove?.(() => void moves++);
+  /** The attempt at `opts.prepare` that is under way, and whether one has worked. */
+  let preparing: Promise<unknown> | null = null;
+  let isPrepared = false;
+  onMove?.(() => {
+    moves++;
+    // An attempt that was under way went with the worker it was talking to.
+    if (!isPrepared) preparing = null;
+  });
+  const prepare = (): Promise<unknown> => {
+    if (isPrepared || !opts.prepare) return Promise.resolve();
+    if (!preparing) {
+      const attempt: Promise<unknown> = opts.prepare().then(
+        () => {
+          if (preparing === attempt) isPrepared = true;
+        },
+        (error: unknown) => {
+          if (preparing === attempt) preparing = null;
+          throw error;
+        },
+      );
+      preparing = attempt;
+    }
+    return preparing;
+  };
   const refuseWhenOver = () => {
     if (opts.isOver?.()) throw new Error('This connection to the database has been given up. Reload the page.');
   };
@@ -117,16 +150,22 @@ export function pgliteDriver(pg: PGliteInterface, opts: DriverOptions = {}): Sql
         stopWatching();
         reject(new DatabaseMovedError());
       });
-      work().then(
-        (value) => {
-          stopWatching();
-          resolve(value);
-        },
-        (error: unknown) => {
-          stopWatching();
-          reject(error);
-        },
-      );
+      prepare()
+        .then(() => {
+          // The page may have given the connection up while this waited.
+          refuseWhenOver();
+          return work();
+        })
+        .then(
+          (value) => {
+            stopWatching();
+            resolve(value);
+          },
+          (error: unknown) => {
+            stopWatching();
+            reject(error);
+          },
+        );
     });
   };
 
@@ -169,7 +208,13 @@ export function pgliteDriver(pg: PGliteInterface, opts: DriverOptions = {}): Sql
       );
     },
     async flush() {
-      await opts.flush?.();
+      const flush = opts.flush;
+      if (!flush) return;
+      // The change this is asked for was made through the worker that held the database then. That worker
+      // copies it to storage, and a worker that is gone confirms nothing: when the database moves before
+      // the answer is there, it is not known whether the change was stored, and that is what is reported.
+      // (Waiting the request out instead would end in "no answer", which reads as saved.)
+      await unlessMoved(() => flush());
     },
     async close() {
       await pg.close();

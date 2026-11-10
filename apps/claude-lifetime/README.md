@@ -168,6 +168,11 @@ Run these in `apps/claude-lifetime`.
 - **Importers run in a Web Worker** and stream large files with bounded memory. Parsed
   records go to staging tables first; the preview is computed from them, and saving
   merges them into the real tables in one transaction.
+- **Several tabs share the one database.** The worker of one tab holds it and the others
+  reach it through that worker. Closing or reloading a tab does not disturb the others:
+  what a closed tab left unfinished is rolled back, and when the tab that held the
+  database goes away another one takes over. An import that was being saved at that
+  moment is not stored in part; the app says so, and it can be imported again.
 
 The reasons for these choices, the data model and how to move the same schema to a server
 are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

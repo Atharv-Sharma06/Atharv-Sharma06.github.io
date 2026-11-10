@@ -1,5 +1,5 @@
 import { ImportError, type ParsedImport } from '@/core/types';
-import { toIso, toNumber, type SqlDriver, type SqlExecutor } from '@/db/driver';
+import { DatabaseMovedError, toIso, toNumber, type SqlDriver, type SqlExecutor } from '@/db/driver';
 import { refreshStatistics } from '@/db/maintenance';
 import { dayInZone } from '@/lib/format';
 import { stagingToken } from './staging';
@@ -754,6 +754,10 @@ export async function commitImport(
   try {
     await db.flush();
   } catch (error) {
+    // The tab that held the database went away before it confirmed the copy to storage. What was saved went
+    // with its worker unless the copy was already made, so this is not "saved but not on the device": whether
+    // it is stored is not known, and the error says to check.
+    if (error instanceof DatabaseMovedError) throw error;
     return { ...result, notOnDevice: error instanceof Error ? error.message : String(error) };
   }
   return result;

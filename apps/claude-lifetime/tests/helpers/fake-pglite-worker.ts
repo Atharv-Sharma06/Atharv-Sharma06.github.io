@@ -177,6 +177,10 @@ export class FakePGliteWorker {
     await fakeDatabases.beforeStatement?.(sql, this.connection);
     return this.database.exec(sql);
   }
+  /** The real class learns here which list types the database has. The database in memory knows them already. */
+  async refreshArrayTypes() {
+    await fakeDatabases.beforeStatement?.('refresh array types', this.connection);
+  }
   onLeaderChange(listener: () => void) {
     fakeDatabases.moveListeners.add(listener);
     return () => void fakeDatabases.moveListeners.delete(listener);

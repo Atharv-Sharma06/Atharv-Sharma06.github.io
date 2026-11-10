@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { StagedCost } from '@/core/types';
 import { getCoverage } from '@/analytics/coverage';
 import { addManualUsage, updateSettings } from '@/analytics/settings';
+import { DatabaseMovedError } from '@/db/driver';
 import { commitImport, importGeneration, previewImport } from '@/import/commit';
 import { deleteBatch } from '@/import/delete';
 import { createTestDb, type TestDb } from '../helpers/db';
@@ -182,6 +183,24 @@ describe('an import whose records are stored but could not be written to the dev
     // a healthy device reports nothing
     await stage(t.db, { usage: [usage('cc:b')] });
     expect((await commitImport(t.db, t.userId, parsed({ source: CODE, contentHash: 'c2' }))).notOnDevice).toBeUndefined();
+  });
+});
+
+describe('an import that was saved by a tab’s worker which went away before it confirmed the copy to storage', () => {
+  it('is not called "saved, but not on the device": whether it is stored is not known, and the error says to check', async () => {
+    // The transaction commits. Then the tab that held the database is closed, and with it the only copy that is certain.
+    const moved = Object.assign(Object.create(t.db) as typeof t.db, {
+      flush: async () => {
+        throw new DatabaseMovedError();
+      },
+    });
+    await stage(t.db, { usage: [usage('cc:a')] });
+
+    // Before the fix this resolved with notOnDevice, and the page said: "The import is saved … It is in the figures
+    // now … Do not import the file a second time". After a move the figures come from what reached storage.
+    await expect(commitImport(moved, t.userId, parsed({ source: CODE, contentHash: 'c1' }))).rejects.toThrow(
+      'The tab that held the database was closed or reloaded at that moment, and another tab has taken over. Check whether this was saved, and do it again if it was not.',
+    );
   });
 });
 

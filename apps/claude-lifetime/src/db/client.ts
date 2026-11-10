@@ -1,6 +1,6 @@
 'use client';
 
-import { PGliteWorker } from '@electric-sql/pglite/worker';
+import { LeaderChangedError, PGliteWorker } from '@electric-sql/pglite/worker';
 import { decryptBackup, isEncryptedBackup } from '@/lib/backup-crypto';
 import { looksLikeDatabaseDump } from '@/lib/backup-format';
 import { KV_DATABASE_NAME } from '@/lib/kv';
@@ -279,6 +279,15 @@ export function restoreFailureMessage(error: unknown): string {
 
 // ── Connecting ──────────────────────────────────────────────────────────────────
 
+// PGlite's page class asks the database a few things of its own when it connects, and waits for none of
+// them. One that is under way when the database moves fails with nobody to tell. The app deals with a move
+// itself (see pglite-driver.ts), so that failure is kept out of the console, where it would read as a fault.
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('unhandledrejection', (event) => {
+    if (event.reason instanceof LeaderChangedError) event.preventDefault();
+  });
+}
+
 interface Handle {
   pg: PGliteWorker;
   db: SqlDriver;
@@ -355,6 +364,7 @@ async function connect(name: string, loadDataDir?: Blob): Promise<Handle> {
       onMove: (listener) => pg.onLeaderChange(listener),
       isOver: () => over,
       whyUnavailable: () => startFailure,
+      prepare: () => pg.refreshArrayTypes(),
     }),
     stop() {
       over = true;
