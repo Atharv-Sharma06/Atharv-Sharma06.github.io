@@ -265,6 +265,9 @@ export function ImportPage() {
                   <FolderOpen className="size-4" aria-hidden="true" />
                   Choose the folder
                 </Button>
+                <Button disabled={!idle} onClick={() => begin(() => wizard.current?.chooseFiles('.zip,application/zip', claudeCodeOptions()))}>
+                  Choose a ZIP
+                </Button>
                 <a href={`${BASE_PATH}/tools/claude-lifetime-collect.mjs`} download className={buttonClass('ghost')}>
                   Download collector script
                 </a>
@@ -273,7 +276,8 @@ export function ImportPage() {
           >
             <p>
               Claude Code logs every model response with its exact token usage. Choose its folder: <Code>.claude</Code> in your home folder, or the{' '}
-              <Code>projects</Code> folder inside it. Hidden folders appear in the file dialog with Cmd+Shift+. on macOS and Ctrl+H on Linux.
+              <Code>projects</Code> folder inside it. Hidden folders appear in the file dialog with Cmd+Shift+. on macOS and Ctrl+H on Linux. A ZIP of
+              either folder, made on another computer for example, works too.
             </p>
             <p>
               Claude Code deletes transcripts after 30 days unless <Code>cleanupPeriodDays</Code> is raised in its settings. To keep a permanent record, run
@@ -308,7 +312,7 @@ export function ImportPage() {
             title="Anthropic API usage reports"
             badge={<ConfidenceBadge level="exact" />}
             actions={
-              <Button disabled={!idle} onClick={() => begin(() => wizard.current?.chooseFiles('.json,.jsonl,.csv,application/json,text/csv'))}>
+              <Button disabled={!idle} onClick={() => begin(() => wizard.current?.chooseFiles('.json,.jsonl,.csv,.zip,application/json,text/csv,application/zip'))}>
                 Choose report files
               </Button>
             }
@@ -316,7 +320,7 @@ export function ImportPage() {
             <p>
               For usage billed through the Claude Developer Platform. In the Claude Console, export the Usage and Cost pages as CSV. With an organization
               admin key you can also save the JSON responses of the Admin API&rsquo;s usage and cost report endpoints; select all pages of a report
-              together.
+              together, or a ZIP that holds them.
             </p>
             <p>
               The Admin API is not available to individual accounts. Cost reports are stored as money actually billed and are kept apart from the
@@ -329,7 +333,10 @@ export function ImportPage() {
             title="CSV or JSON table"
             actions={
               <>
-                <Button disabled={!idle} onClick={() => begin(() => wizard.current?.chooseFiles('.csv,.tsv,.json,.jsonl,text/csv,application/json'))}>
+                <Button
+                  disabled={!idle}
+                  onClick={() => begin(() => wizard.current?.chooseFiles('.csv,.tsv,.json,.jsonl,.zip,text/csv,application/json,application/zip'))}
+                >
                   Choose a file
                 </Button>
                 <Button variant="ghost" onClick={() => downloadText('claude-lifetime-usage-template.csv', csvTemplate, 'text/csv')}>
@@ -340,7 +347,7 @@ export function ImportPage() {
           >
             <p>
               For usage you tracked yourself or exported from another tool: one row per request or per day, with a date and token counts. You match the
-              columns before anything is read, and you say whether the counts are exact or estimates.
+              columns before anything is read, and you say whether the counts are exact or estimates. A file in a ZIP archive is read from the archive.
             </p>
             <p>The template lists every column the importer understands. Only a date and one token column are required.</p>
           </Option>

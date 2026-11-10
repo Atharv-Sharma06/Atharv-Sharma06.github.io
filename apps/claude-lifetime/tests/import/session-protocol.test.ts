@@ -1,3 +1,4 @@
+import { strToU8, zipSync } from 'fflate';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ParsedImport } from '@/core/types';
 import type { SqlDriver } from '@/db/driver';
@@ -436,6 +437,48 @@ describe('with the real import worker', () => {
     expect(second.preview.nothingNew).toBe(true);
     await session.commit(second);
     expect(await stored()).toEqual({ requests: 5, prompts: 2, synced: 2 });
+    expect(locks.held.has(LOCK)).toBe(false);
+  });
+
+  it('reads a ZIP of a Claude Code folder, and on the second reading skips the files it knows', async () => {
+    const day = new Date(2026, 0, 15, 12, 0, 0);
+    const transcript = (session: string, responses: number) =>
+      jsonl([
+        user('please do the thing', { ts: at('09:00:00'), session }),
+        ...Array.from({ length: responses }, (_, i) =>
+          assistant({ ts: at(`09:00:0${i + 1}`), session, id: `msg_${session}_${i}`, req: `req_${session}_${i}`, usage: tokens(100, 50) }),
+        ),
+      ]);
+    const archive = zipSync(
+      {
+        '.claude/settings.json': strToU8('{"theme":"dark"}'),
+        '.claude/projects/-home-alex-demo/s1.jsonl': strToU8(transcript('s1', 3)),
+        '.claude/projects/-home-alex-demo/s2.jsonl': strToU8(transcript('s2', 2)),
+      },
+      { mtime: day },
+    );
+    // The archive is chosen next to a file of no interest: the positions detection returns count the files inside the archive.
+    const selection = [fileOf('notes.txt', 'hello'), fileOf('claude.zip', archive)];
+    const session = open();
+    const found = await session.detect(selection);
+    expect(found).toMatchObject({
+      parser: 'claude-code',
+      fileIndexes: [2, 3],
+      ignoredFiles: 2,
+      leadName: 's1.jsonl',
+      recognisedAs: '2 Claude Code transcript files, from the ZIP archive "claude.zip"',
+    });
+    const first = await session.prepare(selection, found, { now: LATER });
+    expect(first.parsed).toMatchObject({ fileName: 'claude.zip (2 transcript files)', stats: { filesRead: 2, filesSkippedUnchanged: 0 } });
+    await session.commit(first);
+    const synced = await t.db.query<{ path: string }>(`SELECT path FROM synced_files ORDER BY path`);
+    expect(synced.rows.map((r) => r.path)).toEqual(['claude.zip/.claude/projects/-home-alex-demo/s1.jsonl', 'claude.zip/.claude/projects/-home-alex-demo/s2.jsonl']);
+    expect((await t.db.query<{ n: number }>(`SELECT COALESCE(sum(request_count), 0)::int AS n FROM usage_records`)).rows[0].n).toBe(5);
+
+    const second = await session.prepare(selection, await session.detect(selection), { now: LATER });
+    expect(second.parsed.stats).toMatchObject({ filesRead: 0, filesSkippedUnchanged: 2 });
+    expect(second.preview.nothingNew).toBe(true);
+    await session.discard();
     expect(locks.held.has(LOCK)).toBe(false);
   });
 

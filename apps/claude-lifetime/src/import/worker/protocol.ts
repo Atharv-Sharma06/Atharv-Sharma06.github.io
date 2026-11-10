@@ -17,7 +17,8 @@ export interface ParseContextMessage {
 
 export type ToWorker =
   | { type: 'detect'; id: number; files: ImportFile[] }
-  | { type: 'parse'; id: number; parser: ParserKey; files: ImportFile[]; context: ParseContextMessage }
+  /** `files` is the selection as it was detected; `fileIndexes` are the positions detection returned (see selection.ts). */
+  | { type: 'parse'; id: number; parser: ParserKey; files: ImportFile[]; fileIndexes: number[]; context: ParseContextMessage }
   | { type: 'ack'; id: number };
 
 export interface WorkerError {

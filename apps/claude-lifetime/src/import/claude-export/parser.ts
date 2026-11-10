@@ -11,6 +11,7 @@ import {
   type ParseWarning,
   type StagedMessage,
 } from '@/core/types';
+import { importFileName, sameArchive } from '../archive';
 import { iterateJsonArray } from '../util/json-array-stream';
 import { looksLikeZip, openZipEntry, readZipDirectory } from '../util/zip';
 import { accountConversation, type AccountBlock, type AccountMessage } from './accounting';
@@ -558,7 +559,7 @@ export function createClaudeExportParser(countTokens: (text: string) => number):
         formatLabel: 'claude.ai data export',
         parserVersion: CLAUDE_EXPORT_PARSER_VERSION,
         source: { kind: 'claude_export', label: 'claude.ai export', externalRef: account },
-        fileName: files.length === 1 ? files[0].name : `${files.length} files`,
+        fileName: importFileName(files, sameArchive(files)),
         fileSize: files.reduce((s, f) => s + f.size, 0),
         contentHash: hash.hex(),
         recordsSeen: records,

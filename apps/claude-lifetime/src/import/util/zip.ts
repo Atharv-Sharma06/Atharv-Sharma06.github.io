@@ -18,6 +18,8 @@ export interface ZipEntry {
   localHeaderOffset: number;
   encrypted: boolean;
   isDirectory: boolean;
+  /** When the entry was last changed, epoch milliseconds, if the archive says. */
+  lastModified?: number;
 }
 
 const EOCD = 0x06054b50;
@@ -28,6 +30,19 @@ const LOCAL = 0x04034b50;
 
 export function looksLikeZip(head: Uint8Array): boolean {
   return head.length >= 4 && head[0] === 0x50 && head[1] === 0x4b && (head[2] === 0x03 || head[2] === 0x05) && (head[3] === 0x04 || head[3] === 0x06);
+}
+
+/**
+ * The MS-DOS date and time of an entry (local time, to two seconds), or undefined when it is unset or not a date.
+ */
+function dosTime(date: number, time: number): number | undefined {
+  if (date === 0) return undefined;
+  const year = 1980 + (date >> 9);
+  const month = (date >> 5) & 0x0f;
+  const day = date & 0x1f;
+  if (month < 1 || month > 12 || day < 1) return undefined;
+  const at = new Date(year, month - 1, day, time >> 11, (time >> 5) & 0x3f, (time & 0x1f) * 2).getTime();
+  return Number.isFinite(at) ? at : undefined;
 }
 
 async function bytes(blob: Blob, start: number, end: number): Promise<DataView> {
@@ -56,7 +71,7 @@ export async function readZipDirectory(blob: Blob): Promise<ZipEntry[]> {
   }
   if (eocd < 0) {
     throw new ImportError(
-      'This does not look like a complete ZIP archive (its directory is missing). The download may have been cut short; download the export again.',
+      'This does not look like a complete ZIP archive (its directory is missing). The download may have been cut short; download the file again, or make the archive again.',
       'not_a_zip',
     );
   }
@@ -79,7 +94,7 @@ export async function readZipDirectory(blob: Blob): Promise<ZipEntry[]> {
   }
 
   if (directoryOffset + directorySize > size) {
-    throw new ImportError('The ZIP archive is incomplete: its directory points past the end of the file. Download the export again.', 'zip_truncated');
+    throw new ImportError('The ZIP archive is incomplete: its directory points past the end of the file. Download the file again, or make the archive again.', 'zip_truncated');
   }
 
   const dir = await bytes(blob, directoryOffset, directoryOffset + directorySize);
@@ -90,6 +105,7 @@ export async function readZipDirectory(blob: Blob): Promise<ZipEntry[]> {
     if (dir.getUint32(p, true) !== CENTRAL) throw new ImportError('The ZIP directory is damaged.', 'zip_corrupt');
     const flags = dir.getUint16(p + 8, true);
     const method = dir.getUint16(p + 10, true);
+    let lastModified = dosTime(dir.getUint16(p + 14, true), dir.getUint16(p + 12, true));
     let compressedSize = dir.getUint32(p + 20, true);
     let uncompressedSize = dir.getUint32(p + 24, true);
     const nameLength = dir.getUint16(p + 28, true);
@@ -109,6 +125,9 @@ export async function readZipDirectory(blob: Blob): Promise<ZipEntry[]> {
         if (uncompressedSize === 0xffffffff) { uncompressedSize = u64(dir, q); q += 8; }
         if (compressedSize === 0xffffffff) { compressedSize = u64(dir, q); q += 8; }
         if (localHeaderOffset === 0xffffffff) { localHeaderOffset = u64(dir, q); q += 8; }
+      } else if (id === 0x5455 && len >= 5 && x + 9 <= extraEnd && (dir.getUint8(x + 4) & 1) !== 0) {
+        // Extended timestamp: the modification time in UTC seconds, more exact than the MS-DOS one.
+        lastModified = dir.getUint32(x + 5, true) * 1000;
       }
       x += 4 + len;
     }
@@ -121,6 +140,7 @@ export async function readZipDirectory(blob: Blob): Promise<ZipEntry[]> {
       localHeaderOffset,
       encrypted: (flags & 1) !== 0,
       isDirectory: name.endsWith('/'),
+      lastModified,
     });
     p = extraEnd + commentLength;
   }
@@ -139,15 +159,55 @@ export async function openZipEntry(blob: Blob, entry: ZipEntry): Promise<Readabl
   const dataStart = entry.localHeaderOffset + 30 + header.getUint16(26, true) + header.getUint16(28, true);
   const dataEnd = dataStart + entry.compressedSize;
   if (dataEnd > blob.size) {
-    throw new ImportError(`The ZIP archive ends in the middle of "${entry.name}". Download the export again.`, 'zip_truncated');
+    throw new ImportError(`The ZIP archive ends in the middle of "${entry.name}". Download the file again, or make the archive again.`, 'zip_truncated');
   }
   const raw = blob.slice(dataStart, dataEnd).stream() as ReadableStream<Uint8Array>;
-  if (entry.method === 0) return raw;
+  if (entry.method === 0) return checked(raw, entry);
   if (entry.method === 8) {
-    return raw.pipeThrough(new DecompressionStream('deflate-raw') as unknown as ReadableWritablePair<Uint8Array, Uint8Array>);
+    return checked(raw.pipeThrough(new DecompressionStream('deflate-raw') as unknown as ReadableWritablePair<Uint8Array, Uint8Array>), entry);
   }
-  throw new ImportError(
-    `"${entry.name}" uses a ZIP compression method (${entry.method}) this app cannot read. Extract the archive and import the JSON file instead.`,
+  throw unsupportedMethod(entry);
+}
+
+/** Entries this reader cannot unpack, refused when they are opened. */
+export function unsupportedMethod(entry: ZipEntry): ImportError {
+  return new ImportError(
+    `"${entry.name}" uses a ZIP compression method (${entry.method}) this app cannot read. Extract the archive and choose the extracted files instead.`,
     'zip_unsupported_compression',
   );
+}
+
+/**
+ * The entry's bytes, held to the size the archive's directory gives for it. An entry that unpacks to more or to
+ * less is damaged (or made to look small), and a stream the platform cannot inflate fails with a message that says
+ * which entry it was, not with the platform's own error.
+ */
+function checked(source: ReadableStream<Uint8Array>, entry: ZipEntry): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  let seen = 0;
+  const damaged = (details: string) => new ImportError(`"${entry.name}" in the ZIP archive is damaged and could not be unpacked.`, 'zip_corrupt', details);
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      let next: ReadableStreamReadResult<Uint8Array>;
+      try {
+        next = await reader.read();
+      } catch (error) {
+        throw error instanceof ImportError ? error : damaged(error instanceof Error ? error.message : String(error));
+      }
+      if (next.done) {
+        if (seen !== entry.uncompressedSize) throw damaged(`${seen} bytes unpacked, the archive lists ${entry.uncompressedSize}`);
+        controller.close();
+        return;
+      }
+      seen += next.value.length;
+      if (seen > entry.uncompressedSize) {
+        await reader.cancel().catch(() => undefined);
+        throw damaged(`more than the ${entry.uncompressedSize} bytes the archive lists`);
+      }
+      controller.enqueue(next.value);
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
 }

@@ -189,6 +189,8 @@ export interface ImportFile {
   size: number;
   lastModified?: number;
   blob: Blob;
+  /** For a file read out of a ZIP archive inside the import worker: the archive's name. */
+  archive?: string;
 }
 
 export interface ParseContext {

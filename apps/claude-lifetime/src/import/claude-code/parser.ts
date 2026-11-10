@@ -9,6 +9,7 @@ import {
   type ParseWarning,
   type SyncedFileInfo,
 } from '@/core/types';
+import { importFileName, sameArchive } from '../archive';
 import { aggregateUsage } from './aggregate';
 import { deferInProgress, extractTranscripts, IN_PROGRESS_WINDOW_MS, isTranscriptRow } from './extract';
 import { emptyLedger, LEDGER_FORMAT, LedgerError, ledgerRecords, looksLikeLedger, mergeIntoLedger, parseLedger } from './ledger';
@@ -160,9 +161,13 @@ export const claudeCodeParser: ImportParser = {
       });
     }
     if (c.filesUnreadable > 0) {
+      // A transcript in a ZIP archive does not change; one that cannot be unpacked to the end is damaged.
+      const fromArchive = files.every((f) => f.archive !== undefined);
       warnings.push({
         code: 'unreadable_files',
-        message: `${plural(c.filesUnreadable, 'file', 'files')} could not be read to the end (often because Claude Code was writing to it). What was read is counted; the rest follows with the next import.`,
+        message: fromArchive
+          ? `${plural(c.filesUnreadable, 'file', 'files')} in the ZIP archive could not be unpacked to the end, because the archive is damaged. What was read is counted; make the archive again to read the rest.`
+          : `${plural(c.filesUnreadable, 'file', 'files')} could not be read to the end (often because Claude Code was writing to it). What was read is counted; the rest follows with the next import.`,
         count: c.filesUnreadable,
         sample: extraction.samples.unreadableFile,
       });
@@ -199,7 +204,7 @@ export const claudeCodeParser: ImportParser = {
       formatLabel: 'Claude Code session transcripts',
       parserVersion: CLAUDE_CODE_PARSER_VERSION,
       source: { kind: 'claude_code', label: options.sourceLabel, externalRef: options.sourceRef },
-      fileName: read.length === 1 ? read[0].name : `${read.length} transcript files`,
+      fileName: importFileName(read, sameArchive(files), 'transcript files'),
       fileSize: c.bytesRead,
       contentHash: null,
       recordsSeen: c.usageRows,
@@ -317,7 +322,7 @@ export const claudeCodeLedgerParser: ImportParser = {
       formatLabel: 'Claude Code usage ledger (collector)',
       parserVersion: CLAUDE_CODE_PARSER_VERSION,
       source: { kind: 'claude_code', label: options.sourceLabel, externalRef: options.sourceRef },
-      fileName: read.length === 1 ? read[0].name : `${read.length} ledger files`,
+      fileName: importFileName(read, sameArchive(files), 'ledger files'),
       fileSize: bytesRead,
       contentHash,
       recordsSeen: rowsRead,

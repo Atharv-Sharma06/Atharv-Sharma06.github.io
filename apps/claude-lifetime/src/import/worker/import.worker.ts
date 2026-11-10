@@ -3,15 +3,16 @@ import { ImportError, type ImportParser, type ImportProgress, type ImportSink } 
 import { apiCostReportParser, apiUsageReportParser, consoleCsvParser } from '../api-reports';
 import { claudeCodeLedgerParser, claudeCodeParser } from '../claude-code';
 import { claudeExportParser } from '../claude-export';
-import { detectImport } from '../detect';
 import type { ParserKey } from '../formats';
 import { genericCsvParser, genericJsonParser } from '../generic';
+import { detectSelection, filesToParse } from '../selection';
 import type { StagedBatch } from '../staging';
 import type { FromWorker, ToWorker, WorkerError } from './protocol';
 
 /**
  * Import worker: identifies files and parses them off the main thread, so a
- * gigabyte-sized export never freezes the page. It has no access to the database.
+ * gigabyte-sized export never freezes the page. ZIP archives are opened here too
+ * (see selection.ts). It has no access to the database.
  */
 const PARSERS: Record<ParserKey, ImportParser> = {
   'claude-export': claudeExportParser,
@@ -108,13 +109,14 @@ self.onmessage = async (event: MessageEvent<ToWorker>) => {
   }
   try {
     if (message.type === 'detect') {
-      post({ type: 'detected', id: message.id, detected: await detectImport(message.files) });
+      post({ type: 'detected', id: message.id, detected: await detectSelection(message.files) });
       return;
     }
     const sink = new BatchingSink(message.id);
     sinks.set(message.id, sink);
     const { knownRequestKeys, knownFiles, options } = message.context;
-    const parsed = await PARSERS[message.parser].parse(message.files, sink, {
+    const files = await filesToParse(message.files, message.fileIndexes);
+    const parsed = await PARSERS[message.parser].parse(files, sink, {
       knownRequestKeys: knownRequestKeys ? new Set(knownRequestKeys) : undefined,
       knownFiles: knownFiles ? new Map(knownFiles.map(([path, size, lastModified]) => [path, { size, lastModified }])) : undefined,
       options,

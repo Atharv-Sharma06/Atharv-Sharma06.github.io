@@ -1,4 +1,5 @@
 import { expect } from '@playwright/test';
+import { strToU8, zipSync } from 'fflate';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { chooseFiles, deleteImport, fixture, importFiles, lifetimeTokens, open, test } from './helpers';
 
@@ -83,6 +84,38 @@ test('Claude Code transcripts are imported as exact usage', async ({ page }) => 
   const value = page.getByRole('group', { name: 'Equivalent API value' });
   await expect(value.getByText('Exact', { exact: true })).toBeVisible();
   await expect(value.getByText(/^(\$\d|<\$0\.01)/).first()).toBeVisible();
+});
+
+test('a ZIP of a Claude Code folder is read without being unpacked first', async ({ page }) => {
+  const archive = zipSync({
+    '.claude/settings.json': strToU8('{"theme":"dark"}'),
+    '.claude/projects/-home-alex-demo/11111111-1111-4111-8111-111111111111.jsonl': readFileSync(TRANSCRIPTS[0]),
+    '.claude/projects/-home-alex-demo/11111111-1111-4111-8111-111111111111/subagents/agent-a0000000000000001.jsonl': readFileSync(TRANSCRIPTS[1]),
+  });
+  await open(page, '/import/');
+  await page.getByLabel('Name of this computer').fill('Old laptop');
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Choose a ZIP' }).click();
+  await (await chooser).setFiles({ name: 'claude-backup.zip', mimeType: 'application/zip', buffer: Buffer.from(archive) });
+
+  await expect(page.getByRole('heading', { name: 'Review before saving' })).toBeVisible({ timeout: 60_000 });
+  // The computer's name typed on the card goes with the files chosen through its button.
+  await expect(
+    page.getByText(
+      'Recognised as Claude Code session transcripts: 2 Claude Code transcript files, from the ZIP archive "claude-backup.zip". Will be stored under the source “Claude Code (Old laptop)”.',
+    ),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Save to my history' }).click();
+  await expect(page.getByRole('heading', { name: 'Saved' })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole('row', { name: /claude-backup\.zip \(2 transcript files\)/ })).toBeVisible();
+
+  // The same usage as the loose files gives.
+  await open(page, '/');
+  const fromArchive = await lifetimeTokens(page);
+  await deleteImport(page, /claude-backup\.zip/);
+  await importFiles(page, TRANSCRIPTS);
+  await open(page, '/');
+  expect(await lifetimeTokens(page)).toBe(fromArchive);
 });
 
 test('an API usage report spread over two pages is imported in one go', async ({ page }) => {
