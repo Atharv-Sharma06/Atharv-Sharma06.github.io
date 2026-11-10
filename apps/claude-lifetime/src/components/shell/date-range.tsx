@@ -1,7 +1,7 @@
 'use client';
 
 import { Calendar, Check, ChevronDown } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Button, buttonClass } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/controls';
 import { Popover, Tooltip } from '@/components/ui/overlay';
@@ -17,13 +17,15 @@ export function DateRangePicker({ applies = true }: { applies?: boolean }) {
   const [to, setTo] = useState(resolved.to ?? '');
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (open) {
+  // The custom fields start from the range that is in effect each time the picker opens.
+  const changeOpen = (next: boolean) => {
+    if (next) {
       setFrom(resolved.from ?? '');
       setTo(resolved.to ?? '');
       setError(null);
     }
-  }, [open, resolved.from, resolved.to]);
+    setOpen(next);
+  };
 
   const label = range.preset === 'custom' ? formatDayRange(range.from, range.to) : RANGE_PRESETS.find((p) => p.value === range.preset)?.label ?? 'All time';
 
@@ -55,7 +57,7 @@ export function DateRangePicker({ applies = true }: { applies?: boolean }) {
   return (
     <Popover
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={changeOpen}
       className="w-[min(19rem,calc(100vw-1.5rem))] p-2"
       trigger={
         <Button variant="secondary" aria-label={`Date range: ${label}`} className="max-w-full justify-start">

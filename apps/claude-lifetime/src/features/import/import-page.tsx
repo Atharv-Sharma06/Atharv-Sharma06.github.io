@@ -84,12 +84,22 @@ export function ImportPage() {
   const [syncing, setSyncing] = useState(false);
   const [pickError, setPickError] = useState<string | null>(null);
 
-  const refreshFolder = useCallback(async () => {
-    setFolder(await rememberedFolder());
-    setAuto(await autoSyncEnabled());
-    setSync((await lastSync()) ?? null);
-  }, []);
-  useEffect(() => void refreshFolder(), [refreshFolder]);
+  // What this device remembers about the Claude Code folder lives outside React (IndexedDB); it is read on
+  // mount and again whenever something on this page changes it.
+  const [folderVersion, setFolderVersion] = useState(0);
+  const refreshFolder = useCallback(() => setFolderVersion((v) => v + 1), []);
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([rememberedFolder(), autoSyncEnabled(), lastSync()]).then(([remembered, enabled, outcome]) => {
+      if (cancelled) return;
+      setFolder(remembered);
+      setAuto(enabled);
+      setSync(outcome ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [folderVersion]);
 
   // The webkitdirectory attribute is not in React's typings; it turns the input into a folder picker.
   useEffect(() => folderInput.current?.setAttribute('webkitdirectory', ''), []);
@@ -113,7 +123,7 @@ export function ImportPage() {
     try {
       const picked = await pickClaudeCodeFolder();
       if (!picked) return;
-      await refreshFolder();
+      refreshFolder();
       begin(() => wizard.current?.start(picked.files, claudeCodeOptions()));
     } catch (error) {
       setPickError(
@@ -129,8 +139,8 @@ export function ImportPage() {
     try {
       const outcome = await syncClaudeCodeFolder(app.db, app.userId, true);
       if (outcome && !outcome.problem) app.notifyDataChanged();
-      await refreshFolder();
-      if (!outcome) setSync({ at: Date.now(), added: 0, problem: 'The browser did not grant access to the folder. Choose it again to continue.' });
+      if (outcome) refreshFolder();
+      else setSync({ at: Date.now(), added: 0, problem: 'The browser did not grant access to the folder. Choose it again to continue.' });
     } finally {
       setSyncing(false);
     }
@@ -333,7 +343,7 @@ export function ImportPage() {
                   variant="ghost"
                   onClick={async () => {
                     await forgetFolder();
-                    await refreshFolder();
+                    refreshFolder();
                   }}
                 >
                   Forget this folder

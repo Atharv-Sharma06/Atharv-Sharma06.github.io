@@ -20,6 +20,7 @@ import { bucketLabel } from '@/lib/series';
 import { rangeKey, useApp, useData } from '@/state/app';
 import { useCoverage, usePeriods } from '@/state/queries';
 import { BusiestPeriods } from './busiest-periods';
+import { ExactEstimated } from './exact-estimated';
 import { useMediaQuery, useSettled } from './hooks';
 import {
   categoryChart,
@@ -70,29 +71,9 @@ function Loading() {
   );
 }
 
-function ExactEstimated({ exact, estimated }: { exact: number; estimated: number }) {
-  return (
-    <dl className="flex flex-wrap gap-x-5 gap-y-1">
-      <div className="flex items-baseline gap-1.5">
-        <dt className="inline-flex items-center gap-1.5">
-          <span className="size-2.5 rounded-[3px] bg-accent" aria-hidden="true" />
-          Exact
-        </dt>
-        <dd className="tabular text-ink" title={`${formatInt(exact)} tokens`}>
-          {formatTokens(exact)}
-        </dd>
-      </div>
-      <div className="flex items-baseline gap-1.5">
-        <dt className="inline-flex items-center gap-1.5">
-          <span className="hatch-estimated size-2.5 rounded-[3px] bg-accent/45" aria-hidden="true" />
-          Estimated
-        </dt>
-        <dd className="tabular text-ink" title={`${formatInt(estimated)} tokens`}>
-          {formatTokens(estimated)}
-        </dd>
-      </div>
-    </dl>
-  );
+interface Clipped {
+  start: boolean;
+  end: boolean;
 }
 
 /** Everything the tiles and the table show, read for one range and one bucket size. */
@@ -101,10 +82,18 @@ interface Stats {
   span: DaySpan;
   granularity: Granularity;
   scoped: boolean;
-  /** The selected range reaches beyond the recorded history, so the span is shorter than the range. */
-  clipped: boolean;
+  /** Where the selected range reaches beyond the recorded history, so the span is shorter than the range. */
+  clipped: Clipped;
   /** Buckets with usage at this granularity, largest first, at most ten. */
   ranked: SeriesPoint[];
+}
+
+/** Why the averaged span is shorter than the range that was selected, in words. */
+function clipNote(clipped: Clipped, span: DaySpan): string {
+  if (clipped.start && clipped.end) return ' That is your whole recorded history.';
+  if (clipped.start) return ` Your records start on ${formatDay(span.from)}.`;
+  if (clipped.end) return ` Your records end on ${formatDay(span.to)}.`;
+  return '';
 }
 
 function StatTiles({ stats }: { stats: Stats }) {
@@ -135,7 +124,7 @@ function StatTiles({ stats }: { stats: Stats }) {
         confidenceHint={level === 'estimated' ? 'The average of a total that includes estimated tokens.' : undefined}
       >
         <p>
-          Across {plural(span.days, 'calendar day')}, {formatDayRange(span.from, span.to)}.{stats.clipped ? ' Days outside your recorded history are left out.' : ''}
+          Across {plural(span.days, 'calendar day')}, {formatDayRange(span.from, span.to)}.{clipNote(stats.clipped, span)}
         </p>
         {overview.activeDays > 0 ? (
           <p>
@@ -309,7 +298,7 @@ function UsageContent({
   setGrouping,
 }: {
   span: DaySpan;
-  clipped: boolean;
+  clipped: Clipped;
   view: UsageView;
   setView: (view: UsageView) => void;
   choice: GranularityChoice;
@@ -372,7 +361,8 @@ function UsageContent({
     return <ErrorNote title="The usage figures could not be read from the local database">{failure.message}</ErrorNote>;
   }
   if (!stats.value || !shown) return <Loading />;
-  if (stats.value.ranked.length === 0 && !stats.stale) return <NothingInRange scoped={scoped} onAllTime={showAllTime} />;
+  // An empty range has nothing worth keeping on screen while the next one is read.
+  if (stats.value.ranked.length === 0) return stats.stale ? <Loading /> : <NothingInRange scoped={scoped} onAllTime={showAllTime} />;
 
   const zoomable = !shown.needsPeriods && shown.rows.length > ZOOM_FROM_BUCKETS;
   const zoomed = zoomable && (start > 0 || end < shown.rows.length);
@@ -389,7 +379,7 @@ function UsageContent({
 
       <ChartCard
         title={shown.title}
-        description={shown.description}
+        description={shown.needsPeriods ? 'Your usage over time, split by the plan you were on when it happened.' : shown.description}
         controls={
           <Controls
             view={view}
@@ -470,10 +460,10 @@ function UsageBody({ history }: { history: RecordedHistory }) {
   const [choice, setChoice] = useState<GranularityChoice>('auto');
   const [grouping, setGrouping] = useState<ModelGrouping>('family');
   const span = useMemo(() => recordedSpan({ from, to }, history), [from, to, history]);
+  const clipped = useMemo<Clipped>(() => ({ start: from !== null && from < history.first, end: to !== null && to > history.last }), [from, to, history]);
   const scoped = from !== null || to !== null;
 
   if (!span) return <NothingInRange scoped={scoped} onAllTime={() => setRange(ALL_TIME)} />;
-  const clipped = (from !== null && from < span.from) || (to !== null && to > span.to);
   return (
     <UsageContent
       span={span}

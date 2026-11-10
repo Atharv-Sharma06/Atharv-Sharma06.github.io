@@ -1,5 +1,9 @@
 import { writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, it } from 'vitest';
+import { listConversations } from '@/analytics/conversations';
+import { getModelBreakdown } from '@/analytics/models';
+import { getOverview } from '@/analytics/overview';
+import { getApiValue } from '@/analytics/value';
 import { loadDemoDataset } from '@/import/demo/load';
 import { createTestDb, type TestDb } from '../helpers/db';
 
@@ -11,24 +15,31 @@ beforeAll(async () => {
   await loadDemoDataset(t.db, t.userId, 'UTC', NOW);
 });
 afterAll(async () => {
-  writeFileSync('/tmp/claude-0/-home-user/bb0dfdd4-dd86-5a48-a206-6d561655db66/scratchpad/conv-work/explore2.txt', OUT.join('\n'));
+  writeFileSync('/tmp/claude-0/-home-user/bb0dfdd4-dd86-5a48-a206-6d561655db66/scratchpad/conv-work/explore4.txt', OUT.join('\n'));
   await t.close();
 });
 
-describe('explore', () => {
+describe('timing', () => {
   it('prints', async () => {
-    const q = async (label: string, sql: string) => {
-      const { rows } = await t.db.query(sql);
-      OUT.push(label + ' ' + JSON.stringify(rows));
+    const filter = { userId: t.userId, timezone: 'UTC', basis: 'processed' as const };
+    const time = async (label: string, fn: () => Promise<unknown>) => {
+      const t0 = performance.now();
+      await fn();
+      OUT.push(`${label}: ${Math.round(performance.now() - t0)} ms`);
     };
-    await q('multi-model sessions', `SELECT c.id, c.title, count(DISTINCT u.model_id) AS models, sum(u.input_tokens+u.output_tokens+u.cache_read_tokens+u.cache_write_5m_tokens+u.cache_write_1h_tokens)::bigint AS tok FROM conversations c JOIN usage_records u ON u.conversation_id = c.id GROUP BY 1,2 HAVING count(DISTINCT u.model_id) > 1 ORDER BY tok DESC LIMIT 5`);
-    await q('multi-day sessions', `SELECT c.id, c.title, count(DISTINCT (u.occurred_at AT TIME ZONE 'UTC')::date) AS days FROM conversations c JOIN usage_records u ON u.conversation_id = c.id GROUP BY 1,2 HAVING count(DISTINCT (u.occurred_at AT TIME ZONE 'UTC')::date) > 1 ORDER BY days DESC LIMIT 5`);
-    await q('single-turn chats', `SELECT c.id, c.title, c.message_count FROM conversations c WHERE c.kind = 'chat' AND c.message_count = 2 ORDER BY c.id LIMIT 3`);
-    await q('multi-method chats', `SELECT c.id, c.title, count(DISTINCT e.method_id) AS methods FROM conversations c JOIN token_estimates e ON e.conversation_id = c.id GROUP BY 1,2 HAVING count(DISTINCT e.method_id) > 1 LIMIT 5`);
-    await q('methods used', `SELECT m.method_key, count(*) FROM token_estimates e JOIN estimation_methods m ON m.id = e.method_id GROUP BY 1`);
-    await q('untitled', `SELECT count(*) FROM conversations WHERE title IS NULL OR title = ''`);
-    await q('kinds', `SELECT kind, count(*) FROM conversations GROUP BY 1`);
-    await q('recent chat', `SELECT c.id, c.title, c.created_at, c.message_count FROM conversations c WHERE c.kind='chat' ORDER BY c.created_at DESC LIMIT 3`);
-    await q('multi-day chats', `SELECT c.id, c.title, c.message_count, c.created_at, c.updated_at FROM conversations c WHERE c.kind='chat' AND (c.updated_at AT TIME ZONE 'UTC')::date > (c.created_at AT TIME ZONE 'UTC')::date ORDER BY c.message_count DESC LIMIT 3`);
+    const all = async (tag: string) => {
+      await time(`${tag} list default`, () => listConversations(t.db, filter, { limit: 50 }));
+      await time(`${tag} list sort created`, () => listConversations(t.db, filter, { limit: 50, sort: 'created' }));
+      await time(`${tag} list plan pro`, () => listConversations(t.db, filter, { limit: 50, plan: 'pro' }));
+      await time(`${tag} list unknown model`, () => listConversations(t.db, filter, { limit: 50, model: 'unknown' }));
+      await time(`${tag} list range`, () => listConversations(t.db, filter, { limit: 50, from: '2026-01-01', to: '2026-06-30' }));
+      await time(`${tag} overview`, () => getOverview(t.db, filter));
+      await time(`${tag} breakdown`, () => getModelBreakdown(t.db, filter));
+      await time(`${tag} value`, () => getApiValue(t.db, filter));
+    };
+    await all('before');
+    await time('ANALYZE', () => t.db.exec('ANALYZE'));
+    await all('after');
+    await all('after2');
   });
 });

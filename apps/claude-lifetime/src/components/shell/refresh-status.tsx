@@ -18,7 +18,6 @@ export function RefreshStatus() {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
-  useEffect(() => setNow(Date.now()), [lastRefreshedAt]);
 
   const [syncing, setSyncing] = useState(false);
   const refresh = async () => {
@@ -34,7 +33,7 @@ export function RefreshStatus() {
     }
   };
 
-  const text = fetching || syncing ? 'Refreshing…' : `Updated ${formatRelative(lastRefreshedAt, now)}`;
+  const text = fetching || syncing ? 'Refreshing…' : `Updated ${formatRelative(lastRefreshedAt, Math.max(now, lastRefreshedAt))}`;
   return (
     <Tooltip content="Read every figure again from the database on this device, and check a remembered Claude Code folder for new sessions">
       <button

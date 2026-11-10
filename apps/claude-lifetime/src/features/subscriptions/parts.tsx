@@ -81,9 +81,13 @@ export function BadgedFigure({
 /** A value that is not available: a dash, and the reason in words. Never a zero in its place. */
 export function Unavailable({ children, className }: { children?: ReactNode; className?: string }) {
   return (
-    <span className={cn('text-ink-3', className)}>
-      <span aria-hidden="true">–</span>
-      {children ? <span className="mt-0.5 block text-xs">{children}</span> : <span className="sr-only">Not available</span>}
-    </span>
+    <>
+      {/* The muted colour comes last so that it holds whatever size the caller asks for. */}
+      <span className={cn(className, 'text-ink-3')}>
+        <span aria-hidden="true">–</span>
+        {children ? null : <span className="sr-only">Not available</span>}
+      </span>
+      {children ? <span className="mt-0.5 block text-xs text-ink-3">{children}</span> : null}
+    </>
   );
 }

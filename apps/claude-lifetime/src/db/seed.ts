@@ -20,6 +20,8 @@ export async function ensureSeeded(db: SqlDriver, defaults: { timezone?: string 
 
   await db.transaction(async (tx) => {
     await upsertMethods(tx);
+    // The buckets hold tokens with the methods' factors applied, so new factors mean new buckets.
+    await tx.query(`SELECT refresh_estimate_buckets()`);
     await upsertModels(tx);
     await replaceBuiltinPrices(tx);
     await tx.query(

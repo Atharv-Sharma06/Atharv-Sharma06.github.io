@@ -309,7 +309,9 @@ describe('claude.ai export → database', () => {
   const totals = async () =>
     (
       await t.db.query<Record<string, number>>(
-        `SELECT count(*)::int AS rows, sum(input_tokens)::int AS input, sum(output_tokens)::int AS output, sum(replay_tokens)::int AS replay,
+        // `rows` counts the per-message estimates; the view itself serves them summed into 15-minute buckets
+        `SELECT (SELECT count(*) FROM token_estimates)::int AS rows,
+                sum(input_tokens)::int AS input, sum(output_tokens)::int AS output, sum(replay_tokens)::int AS replay,
                 sum(user_message_count)::int AS user_messages, sum(assistant_message_count)::int AS assistant_messages
            FROM usage_facts WHERE confidence = 'estimated'`,
       )

@@ -18,7 +18,7 @@ describe('migrations', () => {
     const names = rows.map((r) => r.table_name);
     for (const expected of [
       'users', 'data_sources', 'import_batches', 'conversations', 'messages', 'usage_records',
-      'token_estimates', 'estimation_methods', 'reported_costs', 'subscription_periods',
+      'token_estimates', 'estimate_buckets', 'estimation_methods', 'reported_costs', 'subscription_periods',
       'model_catalog', 'pricing_history', 'synced_files',
     ]) {
       expect(names).toContain(expected);

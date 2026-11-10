@@ -2,7 +2,7 @@
 
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { NO_PLAN, type TokenBasis } from '@/analytics/base';
 import { getConversationDetail, type ConversationDetail } from '@/analytics/conversations';
 import { getModelBreakdown, type ModelUsage } from '@/analytics/models';
@@ -20,7 +20,8 @@ import { cn } from '@/lib/cn';
 import { dayInZone, formatInstant, formatInt, formatTokens, formatUsd, plural } from '@/lib/format';
 import { autoGranularity, spanOf } from '@/lib/series';
 import { useApp, useData, type AppReady } from '@/state/app';
-import { GrowthCard, type UsageOverTime } from './growth-card';
+import { turnsOf } from './growth';
+import { MeteredUsageCard, TurnGrowthCard, type UsageOverTime } from './growth-card';
 import { MessageTable } from './message-table';
 import { EstimateNotes, Provenance } from './provenance';
 import { KindIcon, kindLabel, UNTITLED } from './shared';
@@ -36,6 +37,9 @@ interface Loaded {
   usage: UsageOverTime | null;
   models: ModelUsage[] | null;
 }
+
+/** A conversation that exists: its queries all returned. */
+type Present = Loaded & { detail: ConversationDetail; overview: Overview; value: ApiValue };
 
 /**
  * Everything the page shows, read together so the page never mixes figures of two
@@ -81,7 +85,7 @@ function Fact({ label, children, note }: { label: string; children: ReactNode; n
   );
 }
 
-function Composition({ tokens, basis, className }: { tokens: TokenTotals; basis: TokenBasis; className?: string }) {
+function Composition({ tokens, basis, note, className }: { tokens: TokenTotals; basis: TokenBasis; note?: string; className?: string }) {
   // Only categories this conversation has. A chat export knows nothing about the prompt
   // cache, so a row "Cache reads 0" would state as fact what is really unknown.
   const rows = [
@@ -120,6 +124,7 @@ function Composition({ tokens, basis, className }: { tokens: TokenTotals; basis:
             it.
           </p>
         ) : null}
+        {note ? <p className="mt-4 text-[13px] text-ink-2">{note}</p> : null}
       </CardBody>
     </Card>
   );
@@ -261,44 +266,25 @@ function DetailSkeleton() {
   );
 }
 
-export function ConversationDetailView({ id, listState }: { id: number | null; listState: ExplorerState }) {
-  const app = useApp();
-  const { settings } = app;
-  const query = useData(['conversation', id, settings.assumedModelKey], (a) => (id === null ? Promise.resolve(null) : loadConversation(a, id)));
-
-  if (id === null) return <NotFound listState={listState} />;
-  if (query.error) {
-    return (
-      <div>
-        <BackLink listState={listState} />
-        <ErrorNote title="This conversation could not be read from the local database">{query.error.message}</ErrorNote>
-      </div>
-    );
-  }
-  // While another conversation's result is still on screen from a previous view, show the loading state rather than its figures.
-  const loaded = query.data && query.data.id === id ? query.data : null;
-  if (!loaded) {
-    return (
-      <div>
-        <BackLink listState={listState} />
-        <DetailSkeleton />
-      </div>
-    );
-  }
+function DetailContent({ loaded, listState, stale }: { loaded: Present; listState: ExplorerState; stale: boolean }) {
+  const { settings } = useApp();
   const { detail, overview, value, usage, models } = loaded;
-  if (!detail || !overview || !value) return <NotFound listState={listState} />;
+  const turns = useMemo(() => turnsOf(detail.messages), [detail.messages]);
 
   const c = detail.conversation;
   const tz = settings.timezone;
   const title = c.title?.trim() ?? '';
   const tokens = overview.tokens;
+  const estimated = c.estimated > 0;
   const requestLevel = overview.requests === 0 ? 'unavailable' : confidenceOf(tokens.exact, tokens.estimated);
   const otherMessages = Math.max(0, c.messageCount - c.userMessages - c.assistantMessages);
-  const estimated = c.estimated > 0;
   const otherModels = (models ?? []).filter((m) => m.modelKey !== c.modelKey && m.total > 0).length;
+  // Per-message rows exist for chats; sources that only meter usage (Claude Code) have none.
+  const listsMessages = detail.messages.length > 0;
+  const singleTurn = listsMessages && turns.length < 2;
 
   return (
-    <div className={cn('transition-opacity', query.isPlaceholderData && 'opacity-70')}>
+    <div className={cn('transition-opacity', stale && 'opacity-70')}>
       <BackLink listState={listState} />
       <PageHeader title={title ? title : <span className="text-ink-3">{UNTITLED}</span>} className="mb-4" />
 
@@ -387,29 +373,75 @@ export function ConversationDetailView({ id, listState }: { id: number | null; l
           <ValueTile value={value} scenario={settings.costScenario} />
         </div>
 
-        {/* Two columns on wide screens: what the total is and where it came from on the left, how it built up on the right. */}
-        <div className="grid gap-4 lg:grid-cols-3 lg:grid-rows-[auto_1fr]">
-          <Composition tokens={tokens} basis={settings.basis} className="lg:col-start-1 lg:row-start-1" />
-          <div className="flex flex-col gap-4 lg:col-span-2 lg:col-start-2 lg:row-span-2 lg:row-start-1">
-            <GrowthCard
-              detail={detail}
-              overview={overview}
-              usage={usage}
-              models={models}
+        {singleTurn ? (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Composition
+              tokens={tokens}
               basis={settings.basis}
-              scenario={settings.costScenario}
-              timezone={tz}
-              className={detail.messages.length > 0 ? 'flex-1' : undefined}
+              note="This conversation is a single turn: one message from you and one reply. Nothing was said before it, so there is no earlier context to re-read and no growth to chart."
             />
-            {estimated ? null : <EstimateNotes detail={detail} />}
+            <Provenance detail={detail} timezone={tz} />
           </div>
-          <Provenance detail={detail} timezone={tz} className="lg:col-start-1 lg:row-start-2" />
-        </div>
+        ) : (
+          // Two columns on wide screens: what the total is and where it came from on the left, how it built up on the right.
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:grid-rows-[auto_1fr]">
+            <Composition tokens={tokens} basis={settings.basis} className="lg:col-start-1 lg:row-start-1" />
+            <div className="flex min-w-0 flex-col gap-4 lg:col-span-2 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+              {listsMessages ? (
+                <TurnGrowthCard
+                  turns={turns}
+                  tokens={tokens}
+                  basis={settings.basis}
+                  timezone={tz}
+                  listedMessages={detail.messages.length}
+                  truncated={detail.messagesTruncated}
+                  className="flex-1"
+                />
+              ) : (
+                <MeteredUsageCard
+                  usage={usage ?? { granularity: 'day', points: [] }}
+                  models={models ?? []}
+                  session={c.kind === 'code_session'}
+                  scenario={settings.costScenario}
+                />
+              )}
+              {estimated ? null : <EstimateNotes detail={detail} />}
+            </div>
+            <Provenance detail={detail} timezone={tz} className="lg:col-start-1 lg:row-start-2" />
+          </div>
+        )}
 
-        {detail.messages.length > 0 ? <MessageTable detail={detail} basis={settings.basis} timezone={tz} /> : null}
+        {listsMessages ? <MessageTable detail={detail} basis={settings.basis} timezone={tz} /> : null}
 
-        {estimated ? <EstimateNotes detail={detail} /> : null}
+        {estimated || singleTurn ? <EstimateNotes detail={detail} /> : null}
       </div>
     </div>
   );
+}
+
+export function ConversationDetailView({ id, listState }: { id: number | null; listState: ExplorerState }) {
+  const { settings } = useApp();
+  const query = useData(['conversation', id, settings.assumedModelKey], (a) => (id === null ? Promise.resolve(null) : loadConversation(a, id)));
+
+  if (id === null) return <NotFound listState={listState} />;
+  if (query.error) {
+    return (
+      <div>
+        <BackLink listState={listState} />
+        <ErrorNote title="This conversation could not be read from the local database">{query.error.message}</ErrorNote>
+      </div>
+    );
+  }
+  // While another conversation's result is still on screen from a previous view, show the loading state rather than its figures.
+  const loaded = query.data && query.data.id === id ? query.data : null;
+  if (!loaded) {
+    return (
+      <div>
+        <BackLink listState={listState} />
+        <DetailSkeleton />
+      </div>
+    );
+  }
+  if (!loaded.detail || !loaded.overview || !loaded.value) return <NotFound listState={listState} />;
+  return <DetailContent loaded={{ ...loaded, detail: loaded.detail, overview: loaded.overview, value: loaded.value }} listState={listState} stale={query.isPlaceholderData} />;
 }

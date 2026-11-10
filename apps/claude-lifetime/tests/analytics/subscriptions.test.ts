@@ -99,7 +99,7 @@ describe('subscription transitions', () => {
     const ba = await getBeforeAfter(t.db, filter());
     expect(ba.split).toEqual({ at: '2025-02-01T05:00:00.000Z', date: '2025-02-01', planKey: 'pro', label: 'Pro' });
     expect(ba.before).toMatchObject({ tokens: 475, exact: 0, estimated: 475, conversations: 1, messages: 2, activeDays: 1, firstAt: '2025-01-10T15:00:00.000Z', spanDays: 22 });
-    expect(ba.after).toMatchObject({ tokens: 14_913_650, exact: 14_913_500, estimated: 150, conversations: 2, messages: 7, lastAt: '2025-03-09T03:31:00.000Z', spanDays: 36 });
+    expect(ba.after).toMatchObject({ tokens: 14_913_650, exact: 14_913_500, estimated: 150, conversations: 2, messages: 7, lastAt: '2025-03-09T03:30:00.000Z', spanDays: 36 });
     expect(ba.after!.value.exactUsd).toBe('21');
     expect(ba.before!.value.exactUsd).toBe('0');
     expect(ba.before!.tokens + ba.after!.tokens).toBe(14_914_125);

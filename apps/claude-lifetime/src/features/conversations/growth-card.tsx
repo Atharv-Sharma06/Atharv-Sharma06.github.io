@@ -2,9 +2,8 @@
 
 import { useMemo } from 'react';
 import type { Granularity, TokenBasis } from '@/analytics/base';
-import type { ConversationDetail } from '@/analytics/conversations';
 import type { ModelUsage } from '@/analytics/models';
-import type { Overview, SeriesPoint } from '@/analytics/overview';
+import type { SeriesPoint, TokenTotals } from '@/analytics/overview';
 import { ChartCard } from '@/components/charts/chart-card';
 import { ChartLegend, SeriesChart, SeriesTable, SERIES_COLORS, Swatch, type ChartSeries } from '@/components/charts/series-chart';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -12,13 +11,15 @@ import { Table, TableFrame, Td, Th, THead, Tr } from '@/components/ui/table';
 import { formatDay, formatInt, formatShare, formatTokens, formatUsd, plural } from '@/lib/format';
 import { familyColor } from '@/lib/palette';
 import { pivot } from '@/lib/series';
-import { turnsOf } from './growth';
+import type { Turn } from './growth';
 import { TurnChart, TurnTable, type TurnSeries } from './turn-chart';
 
 export interface UsageOverTime {
   granularity: Granularity;
   points: SeriesPoint[];
 }
+
+type CostScenario = 'standard' | 'cached';
 
 /**
  * Token categories keep one colour each wherever a conversation is charted. Every
@@ -31,62 +32,30 @@ const TURN_SERIES: TurnSeries[] = [
   { key: 'replay', label: 'Re-read context', color: SERIES_COLORS[2], estimated: true },
 ];
 
-function Figures({ rows }: { rows: Array<{ label: string; value: string; title?: string }> }) {
-  return (
-    <dl className="grid gap-x-8 gap-y-3 sm:grid-cols-3">
-      {rows.map((r) => (
-        <div key={r.label}>
-          <dt className="text-xs text-ink-3">{r.label}</dt>
-          <dd className="tabular mt-0.5 text-[15px] text-ink" title={r.title}>
-            {r.value}
-          </dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
-function TurnGrowth({
-  detail,
-  overview,
+/** How a chat grew, turn by turn. Only meaningful from the second turn on. */
+export function TurnGrowthCard({
+  turns,
+  tokens,
   basis,
   timezone,
+  listedMessages,
+  truncated,
   className,
 }: {
-  detail: ConversationDetail;
-  overview: Overview;
+  turns: Turn[];
+  tokens: TokenTotals;
   basis: TokenBasis;
   timezone: string;
+  /** How many messages the turns were built from, and whether the conversation has more. */
+  listedMessages: number;
+  truncated: boolean;
   className?: string;
 }) {
-  const turns = useMemo(() => turnsOf(detail.messages), [detail.messages]);
   const series = useMemo(
     () => TURN_SERIES.filter((s) => (basis === 'processed' || s.key !== 'replay') && turns.some((t) => t[s.key] > 0)),
     [turns, basis],
   );
-  const truncated = detail.messagesTruncated ? `Only the first ${formatInt(detail.messages.length)} messages are charted.` : null;
-  const tokens = overview.tokens;
-
-  if (turns.length < 2 || series.length === 0) {
-    const turn = turns[0];
-    return (
-      <Card className={className}>
-        <CardHeader
-          title="How this conversation grew"
-          description="This conversation has a single turn: one message from you and one reply. Nothing was said before it, so there is no earlier context to re-read and no growth to chart."
-        />
-        <CardBody>
-          <Figures
-            rows={[
-              { label: 'Input, estimated', value: formatInt(turn?.input ?? 0) },
-              { label: 'Output, estimated', value: formatInt(turn?.output ?? 0) },
-              { label: 'Model requests', value: formatInt(turn?.requests ?? 0) },
-            ]}
-          />
-        </CardBody>
-      </Card>
-    );
-  }
+  const showShare = basis === 'processed' && tokens.replay > 0 && tokens.total > 0;
 
   return (
     <ChartCard
@@ -99,15 +68,17 @@ function TurnGrowth({
       }
       legend={<ChartLegend series={series} />}
       footer={
-        <>
-          {basis === 'processed' && tokens.replay > 0 && tokens.total > 0 ? (
-            <p>
-              Re-read context makes up <span className="tabular text-ink">{formatShare(tokens.replay / tokens.total)}</span> of the tokens estimated for this conversation.
-              It is modelled from the order of the messages, not measured.
-            </p>
-          ) : null}
-          {truncated ? <p className="mt-1">{truncated}</p> : null}
-        </>
+        showShare || truncated ? (
+          <>
+            {showShare ? (
+              <p>
+                Re-read context makes up <span className="tabular text-ink">{formatShare(tokens.replay / tokens.total)}</span> of the tokens estimated for this
+                conversation. It is modelled from the order of the messages, not measured.
+              </p>
+            ) : null}
+            {truncated ? <p className={showShare ? 'mt-1' : undefined}>Only the first {formatInt(listedMessages)} messages are charted.</p> : null}
+          </>
+        ) : undefined
       }
     >
       {(view) =>
@@ -134,7 +105,7 @@ const STORAGE_NOTE =
  * filed under the model that processed most of its tokens; others may have assisted,
  * and each one's usage is priced at its own rate.
  */
-function ModelSplit({ models, scenario }: { models: ModelUsage[]; scenario: 'standard' | 'cached' }) {
+function ModelSplit({ models, scenario }: { models: ModelUsage[]; scenario: CostScenario }) {
   const total = models.reduce((sum, m) => sum + m.total, 0);
   return (
     <TableFrame>
@@ -154,7 +125,7 @@ function ModelSplit({ models, scenario }: { models: ModelUsage[]; scenario: 'sta
             return (
               <Tr key={m.modelKey ?? 'unknown'}>
                 <Td>
-                  <span className="inline-flex items-center gap-2">
+                  <span className="inline-flex items-center gap-2 whitespace-nowrap">
                     <Swatch series={{ color: familyColor(m.modelKey === null ? 'unknown' : m.family) }} />
                     <span className={m.modelKey === null ? 'text-ink-2' : undefined}>{m.displayName}</span>
                   </span>
@@ -180,7 +151,11 @@ function ModelSplit({ models, scenario }: { models: ModelUsage[]; scenario: 'sta
   );
 }
 
-function UsageByPeriod({
+/**
+ * Usage of a conversation whose source meters it over time instead of listing messages
+ * (Claude Code): by calendar period when it spans several, and by model.
+ */
+export function MeteredUsageCard({
   usage,
   models,
   session,
@@ -190,7 +165,7 @@ function UsageByPeriod({
   usage: UsageOverTime;
   models: ModelUsage[];
   session: boolean;
-  scenario: 'standard' | 'cached';
+  scenario: CostScenario;
   className?: string;
 }) {
   const { granularity } = usage;
@@ -204,30 +179,30 @@ function UsageByPeriod({
   }, [usage.points, granularity]);
   const noun = session ? 'session' : 'conversation';
   const several = models.length > 1;
-  const split =
-    models.length === 0 ? null : (
-      <>
-        <ModelSplit models={models} scenario={scenario} />
-        {session ? <p className="mt-3 text-xs text-ink-3">{STORAGE_NOTE}</p> : null}
-      </>
-    );
+  const storageNote = session ? <p className="text-xs text-ink-3">{STORAGE_NOTE}</p> : null;
 
   // One bucket is one number: a bar chart of it would only restate the total above.
   if (chart.rows.length <= 1) {
     const day = chart.rows[0]?.bucket ?? null;
+    const byModel = several
+      ? `This is how that day splits across the ${models.length} models that worked on it.`
+      : models.length === 1
+        ? `One model, ${models[0].displayName}, handled all of it.`
+        : '';
     return (
       <Card className={className}>
         <CardHeader
           title={`Usage in this ${noun}`}
           description={
             day
-              ? `All of its recorded usage falls on one day, ${formatDay(day, 'weekday')}, so there is no trend over time to chart. ${
-                  several ? `This is how that day splits across the ${models.length} models that worked on it.` : 'This is that day by model.'
-                }`
+              ? `All of its recorded usage falls on one day, ${formatDay(day, 'weekday')}, so there is no trend over time to chart. ${byModel}`
               : `No usage is recorded for this ${noun}.`
           }
         />
-        {split ? <CardBody>{split}</CardBody> : null}
+        <CardBody className="space-y-3">
+          {several ? <ModelSplit models={models} scenario={scenario} /> : null}
+          {storageNote}
+        </CardBody>
       </Card>
     );
   }
@@ -236,8 +211,15 @@ function UsageByPeriod({
     <div className={className}>
       <ChartCard
         title={`Usage over this ${noun}`}
-        description={`Tokens per ${granularity} from the first to the last recorded ${granularity}. Solid bars are metered; hatched bars are reconstructed from text.`}
+        description={`Tokens per ${granularity} from the first to the last recorded ${granularity}. ${
+          chart.series.length > 1
+            ? 'Solid bars are metered; hatched bars are reconstructed from text.'
+            : chart.series[0]?.estimated
+              ? 'All of it is reconstructed from text.'
+              : 'All of it is metered by the source.'
+        }`}
         legend={<ChartLegend series={chart.series} />}
+        footer={session ? <span className="text-xs text-ink-3">{STORAGE_NOTE}</span> : undefined}
       >
         {(view) =>
           view === 'chart' ? (
@@ -247,47 +229,14 @@ function UsageByPeriod({
           )
         }
       </ChartCard>
-      {split ? (
+      {several ? (
         <Card className="mt-4">
-          <CardHeader title={`Models in this ${noun}`} description={several ? `Its usage split across the ${models.length} models that worked on it.` : undefined} />
-          <CardBody>{split}</CardBody>
+          <CardHeader title={`Models in this ${noun}`} description={`Its usage split across the ${models.length} models that worked on it.`} />
+          <CardBody>
+            <ModelSplit models={models} scenario={scenario} />
+          </CardBody>
         </Card>
       ) : null}
     </div>
-  );
-}
-
-/**
- * How the conversation's usage built up: per turn where the source lists messages
- * (chats), per calendar period and model where it only meters usage (Claude Code).
- */
-export function GrowthCard({
-  detail,
-  overview,
-  usage,
-  models,
-  basis,
-  scenario,
-  timezone,
-  className,
-}: {
-  detail: ConversationDetail;
-  overview: Overview;
-  usage: UsageOverTime | null;
-  models: ModelUsage[] | null;
-  basis: TokenBasis;
-  scenario: 'standard' | 'cached';
-  timezone: string;
-  className?: string;
-}) {
-  if (detail.messages.length > 0) return <TurnGrowth detail={detail} overview={overview} basis={basis} timezone={timezone} className={className} />;
-  return (
-    <UsageByPeriod
-      usage={usage ?? { granularity: 'day', points: [] }}
-      models={models ?? []}
-      session={detail.conversation.kind === 'code_session'}
-      scenario={scenario}
-      className={className}
-    />
   );
 }

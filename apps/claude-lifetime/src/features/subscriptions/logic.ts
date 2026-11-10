@@ -301,12 +301,13 @@ export function pricedShare(value: Pick<ValueFigures, 'pricedTokens' | 'unpriced
 
 export type CompareMode = 'total' | 'day' | 'week' | 'month' | 'conversation';
 
-export const COMPARE_MODES: Array<{ value: CompareMode; label: string; unit: string }> = [
-  { value: 'total', label: 'Total usage', unit: 'tokens' },
-  { value: 'day', label: 'Average per day', unit: 'tokens per day' },
-  { value: 'week', label: 'Average per week', unit: 'tokens per week' },
-  { value: 'month', label: 'Average per month', unit: 'tokens per month' },
-  { value: 'conversation', label: 'Per conversation', unit: 'tokens per conversation' },
+/** `short` is the label where space is tight, `heading` names the figure itself, `unit` completes a sentence. */
+export const COMPARE_MODES: Array<{ value: CompareMode; label: string; short: string; heading: string; unit: string }> = [
+  { value: 'total', label: 'Total usage', short: 'Total', heading: 'Total tokens', unit: 'tokens' },
+  { value: 'day', label: 'Average per day', short: 'Per day', heading: 'Average tokens per day', unit: 'tokens per day' },
+  { value: 'week', label: 'Average per week', short: 'Per week', heading: 'Average tokens per week', unit: 'tokens per week' },
+  { value: 'month', label: 'Average per month', short: 'Per month', heading: 'Average tokens per month', unit: 'tokens per month' },
+  { value: 'conversation', label: 'Per conversation', short: 'Per conversation', heading: 'Average tokens per conversation', unit: 'tokens per conversation' },
 ];
 
 const MODE_DAYS: Partial<Record<CompareMode, number>> = { day: 1, week: DAYS_PER_WEEK, month: DAYS_PER_MONTH };

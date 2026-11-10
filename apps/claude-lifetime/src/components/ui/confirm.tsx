@@ -1,25 +1,12 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Button } from './button';
 import { Input } from './controls';
 import { ErrorNote } from './feedback';
 import { Dialog } from './overlay';
 
-/**
- * Confirmation for an action that removes data. It names what will be removed, and
- * for the most destructive actions asks the user to type a word first.
- */
-export function ConfirmDialog({
-  open,
-  onOpenChange,
-  title,
-  children,
-  confirmLabel,
-  onConfirm,
-  typeToConfirm,
-  danger = true,
-}: {
+interface ConfirmProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
@@ -31,52 +18,51 @@ export function ConfirmDialog({
   /** When set, the user must type this word to enable the button. */
   typeToConfirm?: string;
   danger?: boolean;
-}) {
+}
+
+/**
+ * Confirmation for an action that removes data. It names what will be removed, and
+ * for the most destructive actions asks the user to type a word first.
+ */
+export function ConfirmDialog(props: ConfirmProps) {
   const [busy, setBusy] = useState(false);
+  return (
+    <Dialog open={props.open} onOpenChange={(next) => !busy && props.onOpenChange(next)} title={props.title}>
+      {/* The dialog's content only exists while it is open, so this state starts fresh every time. */}
+      <ConfirmBody {...props} busy={busy} setBusy={setBusy} />
+    </Dialog>
+  );
+}
+
+function ConfirmBody({
+  onOpenChange,
+  children,
+  confirmLabel,
+  onConfirm,
+  typeToConfirm,
+  danger = true,
+  busy,
+  setBusy,
+}: ConfirmProps & { busy: boolean; setBusy: (busy: boolean) => void }) {
   const [typed, setTyped] = useState('');
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (open) {
-      setTyped('');
-      setError(null);
-    }
-  }, [open]);
-
   const blocked = typeToConfirm !== undefined && typed.trim().toLowerCase() !== typeToConfirm.toLowerCase();
 
+  const confirm = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await onConfirm();
+      setBusy(false);
+      onOpenChange(false);
+    } catch (e) {
+      setBusy(false);
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => !busy && onOpenChange(next)}
-      title={title}
-      footer={
-        <>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
-            Cancel
-          </Button>
-          <Button
-            variant={danger ? 'danger' : 'primary'}
-            loading={busy}
-            disabled={blocked}
-            onClick={async () => {
-              setBusy(true);
-              setError(null);
-              try {
-                await onConfirm();
-                onOpenChange(false);
-              } catch (e) {
-                setError(e instanceof Error ? e.message : String(e));
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            {confirmLabel}
-          </Button>
-        </>
-      }
-    >
+    <>
       <div className="space-y-3 text-ink-2">{children}</div>
       {typeToConfirm !== undefined ? (
         <label className="mt-4 flex flex-col gap-1.5">
@@ -91,6 +77,14 @@ export function ConfirmDialog({
           {error}
         </ErrorNote>
       ) : null}
-    </Dialog>
+      <div className="-mx-5 -mb-4 mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-line px-5 py-3">
+        <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
+          Cancel
+        </Button>
+        <Button variant={danger ? 'danger' : 'primary'} loading={busy} disabled={blocked} onClick={() => void confirm()}>
+          {confirmLabel}
+        </Button>
+      </div>
+    </>
   );
 }

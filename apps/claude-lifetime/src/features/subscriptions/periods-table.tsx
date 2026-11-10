@@ -1,6 +1,6 @@
 'use client';
 
-import { Plus } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import type { SegmentStats, SubscriptionPeriod } from '@/analytics/subscriptions';
 import { confidenceOf } from '@/components/data/confidence';
 import { Button } from '@/components/ui/button';
@@ -25,7 +25,14 @@ export interface PeriodsTableProps {
   onAddPeriod: (dates: { startDate: string; lastDate: string | null }) => void;
 }
 
-const CELL = 'px-2.5 py-2.5 align-top';
+const HEAD = 'px-2';
+const CELL = 'px-2 py-2.5 align-top';
+/** Rows for time without a recorded plan sit a shade lower than the periods. Opaque, because the pinned cell covers what scrolls under it. */
+const GAP_ROW = 'bg-[color-mix(in_srgb,var(--color-page)_55%,var(--color-surface))]';
+/** On wide screens the actions stay in view while the other columns scroll. */
+const PINNED = 'lg:sticky lg:right-0';
+/** A hairline along the pinned column, drawn only while columns really scroll under it. */
+const PINNED_EDGE = 'lg:shadow-[inset_1px_0_0_var(--color-line-strong)]';
 
 /**
  * Everything the timeline shows, as a table: one row per period and per stretch with no
@@ -37,51 +44,65 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
   const today = dayInZone(now, timezone);
   const byId = new Map(periods.map((period) => [period.id, period]));
 
+  const body = useRef<HTMLTableSectionElement | null>(null);
+  const [scrolls, setScrolls] = useState(false);
+  useEffect(() => {
+    const table = body.current?.closest('table');
+    const frame = table?.parentElement;
+    if (!table || !frame) return;
+    const observer = new ResizeObserver(() => setScrolls(frame.scrollWidth > frame.clientWidth + 1));
+    observer.observe(frame);
+    observer.observe(table);
+    return () => observer.disconnect();
+  }, []);
+  const pinned = cn(PINNED, scrolls && PINNED_EDGE);
+
   return (
     <TableFrame className="rounded-none border-x-0 border-b-0">
-      <Table className={hasUsage ? 'min-w-[66rem]' : 'min-w-[40rem]'}>
+      <Table>
         <THead>
           <tr>
-            <Th className="py-2 pl-5 pr-2.5">Plan</Th>
-            <Th className="px-2.5">Start</Th>
-            <Th className="px-2.5">End</Th>
-            <Th align="right" className="px-2.5">
+            <Th className="py-2 pl-5 pr-2">Plan</Th>
+            <Th className={HEAD}>Start</Th>
+            <Th className={HEAD}>End</Th>
+            <Th align="right" className={HEAD}>
               Length
             </Th>
             {hasUsage ? (
               <>
-                <Th align="right" className="px-2.5">
+                <Th align="right" className={HEAD}>
+                  {/* Over the figures, not over the badges that follow them. */}
                   <span className="mr-[6.25rem]">Tokens</span>
                 </Th>
-                <Th align="right" className="px-2.5 leading-tight">
+                <Th align="right" className={cn(HEAD, 'leading-tight')}>
                   Average
                   <br />
                   per day
                 </Th>
-                <Th align="right" className="px-2.5">
+                <Th align="right" className={HEAD}>
                   Conversations
                 </Th>
-                <Th align="right" className="px-2.5">
+                <Th align="right" className={HEAD}>
                   Messages
                 </Th>
-                <Th align="right" className="px-2.5 leading-tight">
+                <Th align="right" className={cn(HEAD, 'leading-tight')}>
                   Equivalent
                   <br />
                   API value
                 </Th>
               </>
             ) : null}
-            <Th align="right" className="px-2.5 leading-tight">
+            <Th align="right" className={cn(HEAD, 'leading-tight')}>
               Monthly
               <br />
               price
             </Th>
-            <Th className="py-2 pl-2.5 pr-5">
+            <Th className={cn('bg-raised py-2 pl-2 pr-5', pinned)}>
               <span className="sr-only">Actions</span>
             </Th>
           </tr>
         </THead>
-        <tbody>
+        <tbody ref={body}>
           {segments.map((segment, index) => {
             const period = segment.periodId === null ? undefined : byId.get(segment.periodId);
             const isGap = segment.kind === 'gap';
@@ -95,8 +116,8 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
             const share = pricedShare(segment.value);
 
             return (
-              <Tr key={`${segment.kind}:${segment.periodId ?? index}:${segment.start}`} className={cn(isGap && 'bg-page/60')}>
-                <th scope="row" className="py-2.5 pl-5 pr-2.5 text-left align-top font-normal">
+              <Tr key={`${segment.kind}:${segment.periodId ?? index}:${segment.start}`} className={cn(isGap && GAP_ROW)}>
+                <th scope="row" className="py-2.5 pl-5 pr-2 text-left align-top font-normal">
                   <span className="flex items-center gap-2">
                     <PlanSwatch planKey={segment.planKey} />
                     <span className={cn('whitespace-nowrap', isGap ? 'text-ink-2' : 'text-ink')}>{segment.label}</span>
@@ -134,7 +155,8 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
                 {hasUsage ? (
                   recorded ? (
                     <>
-                      <Td align="right" className={CELL}>
+                      {/* The badge is taller than a line of text; one pixel less on top keeps the figure on the row's baseline. */}
+                      <Td align="right" className={cn(CELL, 'pt-[9px]')}>
                         <BadgedFigure column level={confidenceOf(segment.exact, segment.estimated)} title={`${formatInt(segment.tokens)} tokens`}>
                           {formatTokens(segment.tokens)}
                         </BadgedFigure>
@@ -155,7 +177,7 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
                           </span>
                         ) : (
                           <>
-                            {formatUsd(leadingUsd(segment.value, scenario))}
+                            {formatUsd(leadingUsd(segment.value, scenario), { cents: true })}
                             {share !== null && share < 1 ? (
                               <span
                                 className="mt-0.5 block text-xs text-ink-3"
@@ -188,7 +210,7 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
                 <Td numeric className={cn(CELL, 'whitespace-nowrap')}>
                   {period ? period.monthlyPrice ? formatMoney(period.monthlyPrice, period.currency) : <Unavailable>Not entered</Unavailable> : null}
                 </Td>
-                <Td align="right" className="whitespace-nowrap py-1 pl-2.5 pr-3 align-top">
+                <Td align="right" className={cn('whitespace-nowrap py-1 pl-2 align-top', pinned, isGap ? cn(GAP_ROW, 'pr-5') : 'bg-surface pr-3')}>
                   {period ? (
                     <span className="inline-flex gap-0.5">
                       <Button variant="ghost" size="sm" onClick={() => onEdit(period)} aria-label={`Edit ${segment.label}, ${datesText}`}>
@@ -198,12 +220,11 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
                         Delete
                       </Button>
                     </span>
-                  ) : (
-                    <Button variant="secondary" size="sm" className="mr-2" onClick={() => onAddPeriod(dates)} aria-label={`Add period for ${datesText}`}>
-                      <Plus className="size-3.5" aria-hidden="true" />
+                  ) : isGap ? (
+                    <Button variant="secondary" size="sm" onClick={() => onAddPeriod(dates)} aria-label={`Add period for ${datesText}`}>
                       Add period
                     </Button>
-                  )}
+                  ) : null}
                 </Td>
               </Tr>
             );

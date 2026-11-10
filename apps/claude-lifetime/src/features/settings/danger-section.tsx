@@ -57,6 +57,7 @@ function DeleteImportedRow() {
   const sources = coverage.data?.sources ?? [];
   const conversations = sources.reduce((sum, s) => sum + s.conversations, 0);
   const ownPeriods = periods.data ? periods.data.filter((p) => !p.isSynthetic).length : null;
+  const demoPeriods = periods.data ? periods.data.some((p) => p.isSynthetic) : false;
   const ownPrices = prices.data ? prices.data.filter((p) => !p.isBuiltin).length : null;
 
   return (
@@ -116,7 +117,13 @@ function DeleteImportedRow() {
           <CheckboxRow
             checked={subscriptions}
             onChange={setSubscriptions}
-            hint={ownPeriods === null ? undefined : ownPeriods === 0 ? 'You have not entered any.' : `${plural(ownPeriods, 'period')} you entered.`}
+            hint={
+              ownPeriods === null
+                ? undefined
+                : `${ownPeriods === 0 ? 'You have not entered any.' : `${plural(ownPeriods, 'period')} you entered.`}${
+                    demoPeriods ? ' The demo’s periods are removed either way.' : ''
+                  }`
+            }
           >
             Also delete my subscription history
           </CheckboxRow>

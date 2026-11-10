@@ -8,7 +8,7 @@ import { SOURCE_KIND_LABEL } from '@/components/shell/coverage-indicator';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { LIMITATION_TEXT } from '@/core/limitations';
 import { cn } from '@/lib/cn';
-import { formatDay, formatInstant, formatInt, formatTokens, formatUsd, plural } from '@/lib/format';
+import { formatDay, formatInstant, formatInt, formatShare, formatTokens, formatUsd, plural } from '@/lib/format';
 import { useApp } from '@/state/app';
 
 function Group({ icon, tone, title, children }: { icon: typeof CircleCheck; tone: string; title: string; children: ReactNode }) {
@@ -38,6 +38,7 @@ export function CoveragePanel({ coverage }: { coverage: Coverage }) {
   const hasExact = coverage.exactTokens > 0;
   const hasEstimated = coverage.estimatedTokens > 0;
   const conversations = counted.reduce((sum, s) => sum + s.conversations, 0);
+  const total = coverage.exactTokens + coverage.estimatedTokens;
   const topLimits = coverage.limitations.filter((l) => l.name !== 'MODEL_UNKNOWN').slice(0, 4);
   const meteredBy = new Intl.ListFormat('en', { type: 'conjunction' }).format(
     [
@@ -53,7 +54,23 @@ export function CoveragePanel({ coverage }: { coverage: Coverage }) {
         title="What We Know About Your Claude History"
         description="Every figure in this app is computed from the files you imported. This is what those files establish, what is reconstructed from them, and what none of them can tell."
       />
-      <CardBody className="grid gap-x-10 gap-y-7 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+      <CardBody>
+        <dl className="mb-6 grid gap-x-8 gap-y-4 rounded-[var(--radius-control)] border border-line px-4 py-3.5 text-[13px] sm:grid-cols-2 lg:grid-cols-5">
+          <Summary label="Earliest record" value={coverage.earliestRecordAt ? formatInstant(coverage.earliestRecordAt, tz) : '–'} />
+          <Summary label="Latest record" value={coverage.latestRecordAt ? formatInstant(coverage.latestRecordAt, tz) : '–'} />
+          <Summary label="Sources counted" value={`${counted.length} of ${coverage.sources.length}`} detail={plural(coverage.importCount, 'import')} />
+          <Summary
+            label="Exact usage"
+            value={hasExact ? 'Present' : 'None'}
+            detail={total > 0 ? `${formatShare(coverage.exactTokens / total)} of imported tokens` : undefined}
+          />
+          <Summary
+            label="Model recorded"
+            value={coverage.tokensWithModel > 0 ? (coverage.tokensWithoutModel > 0 ? 'In part' : 'Yes') : 'No'}
+            detail={total > 0 ? `for ${formatShare(coverage.tokensWithModel / total)} of imported tokens` : undefined}
+          />
+        </dl>
+        <div className="grid gap-x-10 gap-y-7 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
         <div className="min-w-0">
           <div className="scrollbar-thin overflow-x-auto rounded-[var(--radius-control)] border border-line">
             <table className="w-full min-w-[34rem] border-collapse text-[13px]">
@@ -173,7 +190,18 @@ export function CoveragePanel({ coverage }: { coverage: Coverage }) {
             </Link>
           </p>
         </div>
+        </div>
       </CardBody>
     </Card>
+  );
+}
+
+function Summary({ label, value, detail }: { label: string; value: string; detail?: string }) {
+  return (
+    <div>
+      <dt className="text-xs text-ink-2">{label}</dt>
+      <dd className="mt-0.5 text-sm text-ink">{value}</dd>
+      {detail ? <dd className="text-xs text-ink-3">{detail}</dd> : null}
+    </div>
   );
 }

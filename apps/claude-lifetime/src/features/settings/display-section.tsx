@@ -5,7 +5,7 @@ import { useCallback, useId, useMemo, useRef, useState, type ReactNode } from 'r
 import type { TokenBasis } from '@/analytics/base';
 import type { AppSettings } from '@/analytics/settings';
 import { getOverview } from '@/analytics/overview';
-import { getApiValue } from '@/analytics/value';
+import { getApiValue, type ApiValue } from '@/analytics/value';
 import { ConfidenceBadge, confidenceOf, type ConfidenceLevel } from '@/components/data/confidence';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -48,6 +48,17 @@ function useLifetimeValue(assumedModelKey: string | null) {
   return useData(['settings', 'lifetime-value', assumedModelKey], (a) => getApiValue(a.db, a.lifetime, { assumedModelKey }));
 }
 
+/**
+ * While a new result loads, the previous one stays on screen. That is fine for the same
+ * question asked again, but a result worked out for another assumed model would state
+ * the wrong thing about the current one, so it is held back until its replacement is in.
+ */
+function currentValue(value: { data: ApiValue | undefined; isPlaceholderData: boolean }, assumedModelKey: string | null): ApiValue | undefined {
+  if (!value.data) return undefined;
+  if (value.isPlaceholderData && (value.data.assumedModel?.modelKey ?? null) !== assumedModelKey) return undefined;
+  return value.data;
+}
+
 /** Lifetime totals under one token basis, whichever basis is selected. */
 function useLifetimeTokens(basis: TokenBasis) {
   return useData(['settings', 'lifetime-tokens', basis], (a) => getOverview(a.db, { ...a.lifetime, basis }));
@@ -80,6 +91,9 @@ function TimezoneSetting() {
   const save = useSaveState();
   const listId = useId();
   const hintId = useId();
+  // Entering the field selects the current name, so typing replaces it and the suggestions are not narrowed to it.
+  // The click that put the focus there must not undo that selection when the mouse button comes up.
+  const keepSelection = useRef(false);
 
   // The stored zone changed (saved here, in another tab, or by a restore): the field follows it.
   if (shownFor !== saved) {
@@ -138,14 +152,23 @@ function TimezoneSetting() {
           autoCorrect="off"
           spellCheck={false}
           placeholder="For example Europe/Berlin"
-          onFocus={(e) => e.currentTarget.select()}
+          onFocus={(e) => {
+            e.currentTarget.select();
+            keepSelection.current = true;
+          }}
+          onMouseUp={(e) => {
+            if (keepSelection.current) e.preventDefault();
+            keepSelection.current = false;
+          }}
           onChange={(e) => {
+            keepSelection.current = false;
             const next = e.target.value;
             setDraft(next);
             setProblem(null);
             if (zones.includes(next) && isWholeValueInput((e.nativeEvent as InputEvent).inputType)) void commit(next);
           }}
           onBlur={() => {
+            keepSelection.current = false;
             if (draft.trim() === '') {
               setDraft(saved);
               setProblem(null);
@@ -227,7 +250,8 @@ function BasisSetting() {
       title="Token basis"
       description={
         <p>
-          Which tokens every total, chart and table counts. This is the same switch as the one in the top bar; changing either changes both.
+          Which tokens every total, chart and table counts. On wider screens the same switch sits in the top bar; changing either one changes
+          both.
         </p>
       }
     >
@@ -263,15 +287,16 @@ function CostScenarioSetting() {
   const persist = useCallback((costScenario: CostScenario) => saveSettings({ costScenario }), [saveSettings]);
   const scenario = useSetting(settings.costScenario, persist);
   const coverage = useCoverage();
-  const value = useLifetimeValue(settings.assumedModelKey);
+  const query = useLifetimeValue(settings.assumedModelKey);
+  const value = currentValue(query, settings.assumedModelKey);
 
   let effect: ReactNode = <Skeleton className="mt-3 h-5 w-80 max-w-full" />;
-  const failure = value.error ?? coverage.error;
+  const failure = query.error ?? coverage.error;
   if (failure) {
     effect = <Effect>The effect on your figures could not be read: {failure.message}</Effect>;
-  } else if (value.data && coverage.data) {
-    const standard = Decimal.from(value.data.estimatedStandardUsd);
-    const cached = Decimal.from(value.data.estimatedCachedUsd);
+  } else if (value && coverage.data) {
+    const standard = Decimal.from(value.estimatedStandardUsd);
+    const cached = Decimal.from(value.estimatedCachedUsd);
     if (!coverage.data.hasData) {
       effect = null;
     } else if (coverage.data.estimatedTokens === 0) {
@@ -285,9 +310,9 @@ function CostScenarioSetting() {
       );
     } else {
       effect = (
-        <Effect level="estimated" stale={value.isPlaceholderData}>
-          At list prices, your estimated usage comes to <Figure>{formatUsd(value.data.estimatedStandardUsd)}</Figure> without prompt caching and{' '}
-          <Figure>{formatUsd(value.data.estimatedCachedUsd)}</Figure> with a 5-minute cache, over your whole history.
+        <Effect level="estimated" stale={query.isPlaceholderData}>
+          At list prices, your estimated usage comes to <Figure>{formatUsd(value.estimatedStandardUsd)}</Figure> without prompt caching and{' '}
+          <Figure>{formatUsd(value.estimatedCachedUsd)}</Figure> with a 5-minute cache, over your whole history.
         </Effect>
       );
     }
@@ -326,7 +351,7 @@ function CostScenarioSetting() {
           },
         ]}
       />
-      <div aria-busy={!failure && !(value.data && coverage.data) ? true : undefined}>{effect}</div>
+      <div aria-busy={!failure && !(value && coverage.data) ? true : undefined}>{effect}</div>
       <SaveError state={scenario.state} className="mt-2" />
     </SettingRow>
   );
@@ -342,7 +367,8 @@ function AssumedModelSetting() {
   const choice = useSetting(settings.assumedModelKey ?? NO_MODEL, persist);
   const models = useCatalogModels();
   const coverage = useCoverage();
-  const value = useLifetimeValue(settings.assumedModelKey);
+  const query = useLifetimeValue(settings.assumedModelKey);
+  const value = currentValue(query, settings.assumedModelKey);
   // The same history priced with nothing assumed: the difference is what the assumption adds.
   const baseline = useLifetimeValue(null);
 
@@ -360,9 +386,9 @@ function AssumedModelSetting() {
   const withoutModel = coverage.data?.tokensWithoutModel ?? null;
 
   let added: string | null = null;
-  if (value.data && baseline.data && stored !== null) {
-    const pick = (v: { totalStandardUsd: string; totalCachedUsd: string }) => (settings.costScenario === 'cached' ? v.totalCachedUsd : v.totalStandardUsd);
-    added = Decimal.from(pick(value.data)).sub(pick(baseline.data)).toString(6);
+  if (value && baseline.data && stored !== null) {
+    const pick = (v: ApiValue) => (settings.costScenario === 'cached' ? v.totalCachedUsd : v.totalStandardUsd);
+    added = Decimal.from(pick(value)).sub(pick(baseline.data)).toString(6);
   }
 
   return (
@@ -379,19 +405,20 @@ function AssumedModelSetting() {
         </>
       }
     >
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <div className="flex items-center gap-2.5">
         {models.data ? (
           <Select
             label="Assumed model for usage with no recorded model"
-            className="w-full sm:w-[19rem]"
+            className="min-w-0 flex-1 sm:w-[19rem] sm:flex-none"
             value={choice.value}
             onChange={(next) => void choice.change(next)}
             options={options}
           />
         ) : (
-          <Skeleton className="h-9 w-full sm:w-[19rem]" />
+          <Skeleton className="h-9 min-w-0 flex-1 sm:w-[19rem] sm:flex-none" />
         )}
-        <SaveNote state={choice.state} />
+        {/* On a phone the mark has a fixed slot, so the field does not change width when it appears. */}
+        <SaveNote state={choice.state} compact className="max-sm:w-4" />
       </div>
       <SaveError state={choice.state} className="mt-2" />
       {models.error ? (
@@ -427,11 +454,13 @@ function AssumedModelSetting() {
               {assumedName} has no standard price on file at the moment, so this usage is still unpriced. Choose another model, or add a price for
               it under Prices.
             </p>
-          ) : value.data ? (
-            <p className={value.isPlaceholderData ? 'mt-1.5 opacity-70 transition-opacity' : 'mt-1.5 transition-opacity'}>
-              {value.data.assumedTokens > 0 ? (
+          ) : query.error ? (
+            <p className="mt-1.5">How much usage this prices could not be read: {query.error.message}</p>
+          ) : value ? (
+            <p className={cn('mt-1.5 transition-opacity', query.isPlaceholderData && 'opacity-70')}>
+              {value.assumedTokens > 0 ? (
                 <>
-                  Right now it prices <Figure>{formatTokens(value.data.assumedTokens)}</Figure> processed tokens
+                  Right now it prices <Figure>{formatTokens(value.assumedTokens)}</Figure> processed tokens
                   {added !== null ? (
                     <>
                       {' '}
@@ -444,7 +473,11 @@ function AssumedModelSetting() {
                 'Right now none of your usage lacks a model, so it changes no figure.'
               )}
             </p>
-          ) : null}
+          ) : (
+            <div aria-busy="true">
+              <Skeleton className="mt-2.5 h-4 w-80 max-w-full" />
+            </div>
+          )}
         </div>
       )}
     </SettingRow>

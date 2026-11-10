@@ -20,9 +20,9 @@ import { useApp } from '@/state/app';
 import { useCoverage } from '@/state/queries';
 import { SaveError, SaveNote, SettingsSection, Tag, useSaveState } from './parts';
 
-function Fact({ label, children, title }: { label: string; children: ReactNode; title?: string }) {
+function Fact({ label, children, title, className }: { label: string; children: ReactNode; title?: string; className?: string }) {
   return (
-    <div className="min-w-0">
+    <div className={cn('min-w-0', className)}>
       <dt className="text-xs text-ink-3">{label}</dt>
       <dd className="tabular mt-0.5 text-ink" title={title}>
         {children}
@@ -101,18 +101,20 @@ function SourceItem({ source, lastSynthetic }: { source: SourceCoverage; lastSyn
   const app = useApp();
   const tz = app.settings.timezone;
   const save = useSaveState();
-  const [pending, setPending] = useState<boolean | null>(null);
+  const [pending, setPending] = useState<{ include: boolean; reason: string | null } | null>(null);
   const [excluding, setExcluding] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  // The switch shows the new position until the re-read list confirms it, so it never flips back in between.
-  if (pending !== null && pending === source.includeInTotals) setPending(null);
-  const included = pending ?? source.includeInTotals;
+  // What was just saved is shown until the re-read list confirms it, so the row never falls back to the old state in between.
+  if (pending !== null && pending.include === source.includeInTotals && pending.reason === source.exclusionReason) setPending(null);
+  const included = pending ? pending.include : source.includeInTotals;
+  const reason = pending ? pending.reason : source.exclusionReason;
   const tokens = source.exactTokens + source.estimatedTokens;
 
-  const setIncluded = async (include: boolean, reason?: string) => {
-    setPending(include);
+  const setIncluded = async (include: boolean, why?: string) => {
+    // Stored the way setSourceIncluded stores it: trimmed, empty as none, and dropped when the source counts again.
+    setPending({ include, reason: include ? null : why?.trim() || null });
     try {
-      await setSourceIncluded(app.db, app.userId, source.id, include, reason);
+      await setSourceIncluded(app.db, app.userId, source.id, include, why);
     } catch (error) {
       setPending(null);
       throw error;
@@ -135,7 +137,8 @@ function SourceItem({ source, lastSynthetic }: { source: SourceCoverage; lastSyn
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <SaveNote state={save.state} />
+          {/* A fixed slot in front of the switch on wide screens, the end of the line on narrow ones: the controls never move when it appears. */}
+          <SaveNote state={save.state} className="order-last sm:order-first sm:w-16 sm:justify-end" />
           <label className="flex h-8 cursor-pointer items-center gap-2.5 text-[13px] text-ink-2">
             Count in totals
             <Switch
@@ -155,7 +158,7 @@ function SourceItem({ source, lastSynthetic }: { source: SourceCoverage; lastSyn
       </div>
 
       <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 text-[13px] sm:grid-cols-3 lg:grid-cols-[minmax(0,1.7fr)_repeat(4,minmax(0,1fr))]">
-        <Fact label="Records dated">
+        <Fact label="Records dated" className="col-span-2 sm:col-span-1">
           {source.firstRecordAt ? `${formatInstant(source.firstRecordAt, tz)} – ${formatInstant(source.lastRecordAt, tz)}` : NONE}
         </Fact>
         <Fact label="Conversations">{source.conversations > 0 ? formatInt(source.conversations) : NONE}</Fact>
@@ -170,15 +173,15 @@ function SourceItem({ source, lastSynthetic }: { source: SourceCoverage; lastSyn
 
       {!included ? (
         <p className="mt-3 text-[13px] text-ink-2">
-          {source.exclusionReason ? (
+          {reason ? (
             <>
-              Left out because: <span className="text-ink">{source.exclusionReason}</span>
+              Left out because: <span className="text-ink">{reason}</span>
             </>
           ) : (
             'No reason was noted for leaving it out.'
           )}{' '}
-          <button type="button" onClick={() => setExcluding(true)} className="rounded text-accent-soft underline-offset-4 hover:underline">
-            {source.exclusionReason ? 'Edit reason' : 'Add a reason'}
+          <button type="button" onClick={() => setExcluding(true)} className="ml-1.5 rounded text-accent-soft underline-offset-4 hover:underline">
+            {reason ? 'Edit reason' : 'Add a reason'}
           </button>
         </p>
       ) : null}
@@ -186,7 +189,7 @@ function SourceItem({ source, lastSynthetic }: { source: SourceCoverage; lastSyn
 
       {excluding ? (
         <ExcludeDialog
-          source={source}
+          source={{ ...source, includeInTotals: included, exclusionReason: reason }}
           onClose={() => setExcluding(false)}
           onSave={async (reason) => {
             await setIncluded(false, reason);
@@ -213,7 +216,13 @@ function SourceItem({ source, lastSynthetic }: { source: SourceCoverage; lastSyn
         <p>This removes the source from this device together with everything that was imported into it:</p>
         <ul className="list-disc space-y-1 pl-5">
           <li>{source.imports === 1 ? 'its import' : `all ${formatInt(source.imports)} of its imports`}</li>
-          {source.conversations > 0 ? <li>{plural(source.conversations, 'conversation')} and their message records</li> : null}
+          {source.conversations > 0 ? (
+            <li>
+              {source.kind === 'claude_code'
+                ? plural(source.conversations, 'Claude Code session')
+                : `${plural(source.conversations, 'conversation')} and their message records`}
+            </li>
+          ) : null}
           <li>{tokens > 0 ? `its usage records, ${formatTokens(tokens)} processed tokens in all` : 'its usage records'}</li>
           {source.reportedCostUsd !== null ? <li>the {formatUsd(source.reportedCostUsd)} of billed cost it reported</li> : null}
           {lastSynthetic ? <li>the demo’s subscription periods, since this is the last demo source</li> : null}

@@ -1,10 +1,10 @@
 'use client';
 
 import { ChevronRight, Plus } from 'lucide-react';
+import { Tooltip as RTooltip } from 'radix-ui';
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { isPaidPlan, type SegmentStats } from '@/analytics/subscriptions';
 import { confidenceOf } from '@/components/data/confidence';
-import { Tooltip } from '@/components/ui/overlay';
 import { cn } from '@/lib/cn';
 import { dayInZone, formatDay, formatSpan, formatTokens, formatUsd, plural } from '@/lib/format';
 import { planColor } from '@/lib/palette';
@@ -97,6 +97,30 @@ function TextProbes({ probes, onMeasure }: { probes: Probe[]; onMeasure: (widths
   );
 }
 
+/**
+ * The shared Tooltip keeps a tooltip open while the pointer travels towards it, and holds
+ * back the tooltips of other triggers meanwhile. Along a row of adjacent blocks that makes
+ * a narrow block easy to miss, so here a tooltip closes as soon as its block is left and
+ * the next one opens at once. Its content has nothing to click, so nothing is lost.
+ */
+function BlockTooltip({ content, children }: { content: ReactNode; children: ReactNode }) {
+  return (
+    <RTooltip.Root disableHoverableContent>
+      <RTooltip.Trigger asChild>{children}</RTooltip.Trigger>
+      <RTooltip.Portal>
+        <RTooltip.Content
+          side="top"
+          sideOffset={6}
+          collisionPadding={8}
+          className="z-50 max-w-[18rem] animate-[fade-in_100ms_ease-out] rounded-md border border-line-strong bg-raised px-2.5 py-1.5 text-xs text-ink shadow-lg"
+        >
+          {content}
+        </RTooltip.Content>
+      </RTooltip.Portal>
+    </RTooltip.Root>
+  );
+}
+
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-5">
@@ -141,7 +165,7 @@ function SegmentDetails({
             </DetailRow>
             <DetailRow label="Average per day">{average === null ? '–' : formatTokens(average)}</DetailRow>
             <DetailRow label="Equivalent API value">
-              {valueLevel(segment.value) === 'unavailable' ? <span className="text-ink-2">Not priced</span> : formatUsd(leadingUsd(segment.value, scenario))}
+              {valueLevel(segment.value) === 'unavailable' ? <span className="text-ink-2">Not priced</span> : formatUsd(leadingUsd(segment.value, scenario), { cents: true })}
             </DetailRow>
           </>
         ) : null}
@@ -253,7 +277,7 @@ export function Timeline({ segments, now, timezone, scenario, hasUsage, onEditPe
               const offersAdd = isGap && addLabelWidth + 2 * LABEL_PADDING <= block.width;
               return (
                 <li key={item.key} className="absolute inset-y-0" style={{ left: block.x, width: block.width }}>
-                  <Tooltip content={<SegmentDetails segment={segment} datesText={item.datesText} nowMs={nowMs} scenario={scenario} hasUsage={hasUsage} />}>
+                  <BlockTooltip content={<SegmentDetails segment={segment} datesText={item.datesText} nowMs={nowMs} scenario={scenario} hasUsage={hasUsage} />}>
                     <button
                       type="button"
                       onClick={item.activate}
@@ -283,7 +307,7 @@ export function Timeline({ segments, now, timezone, scenario, hasUsage, onEditPe
                         </span>
                       ) : null}
                     </button>
-                  </Tooltip>
+                  </BlockTooltip>
                 </li>
               );
             })}

@@ -61,7 +61,10 @@ function SplitBar({ exact, estimated }: { exact: number; estimated: number }) {
         ) : null}
         {exact === 0 || estimated === 0 ? (
           <div className="text-ink-3">{exact === 0 ? 'No source in this range meters tokens.' : 'Nothing in this range is estimated.'}</div>
-        ) : null}
+        ) : (
+          // A share of what was imported, which is a known quantity. It says nothing about usage that was never imported.
+          <div className="text-ink-3">{formatShare(exactShare)} of these tokens are exact.</div>
+        )}
       </dl>
     </div>
   );
@@ -103,12 +106,14 @@ function Hero({
   basis,
   scoped,
   rangeLabel,
+  timezone,
   className,
 }: {
   overview: Overview;
   basis: 'processed' | 'new';
   scoped: boolean;
   rangeLabel: string;
+  timezone: string;
   className?: string;
 }) {
   const t = overview.tokens;
@@ -148,9 +153,11 @@ function Hero({
       </div>
       <div className="min-w-0 border-line md:border-l md:pl-8">
         <Composition tokens={t} basis={basis} />
-        {overview.firstUsageAt ? (
+        {overview.firstUsageAt && overview.lastUsageAt ? (
           <p className="mt-5 text-[13px] text-ink-2">
-            {plural(overview.activeDays, 'active day')} with recorded usage{overview.requests > 0 ? `, ${formatInt(overview.requests)} model requests` : ''}.
+            Records from {formatDay(dayInZone(overview.firstUsageAt, timezone))} to {formatDay(dayInZone(overview.lastUsageAt, timezone))}:{' '}
+            {plural(overview.activeDays, 'active day')}
+            {overview.requests > 0 ? `, ${formatInt(overview.requests)} model requests` : ''}.
           </p>
         ) : null}
       </div>
@@ -158,7 +165,19 @@ function Hero({
   );
 }
 
-function SubscriptionSide({ label, side, data, scoped }: { label: string; side: 'before' | 'after'; data: BeforeAfter; scoped: boolean }) {
+function SubscriptionSide({
+  label,
+  side,
+  data,
+  scoped,
+  timezone,
+}: {
+  label: string;
+  side: 'before' | 'after';
+  data: BeforeAfter;
+  scoped: boolean;
+  timezone: string;
+}) {
   if (!data.split) {
     return (
       <MetricCard
@@ -199,11 +218,30 @@ function SubscriptionSide({ label, side, data, scoped }: { label: string; side: 
       <p>
         {side === 'before' ? 'Before' : 'Since'} {data.split.label} started on {splitDay}.
       </p>
-      {perDay !== null ? (
-        <p>
-          <span className="tabular text-ink">{formatTokens(perDay)}</span> a day over {formatSpan(stats.spanDays)}.
-        </p>
-      ) : null}
+      <dl className="mt-3 space-y-1.5 border-t border-line pt-3">
+        <div className="flex justify-between gap-3">
+          <dt>Records</dt>
+          <dd className="tabular text-right text-ink">
+            {stats.firstAt && stats.lastAt ? `${formatDay(dayInZone(stats.firstAt, timezone))} – ${formatDay(dayInZone(stats.lastAt, timezone))}` : '–'}
+          </dd>
+        </div>
+        <div className="flex justify-between gap-3">
+          <dt>Conversations</dt>
+          <dd className="tabular text-ink">{formatInt(stats.conversations)}</dd>
+        </div>
+        <div className="flex justify-between gap-3">
+          <dt>Messages</dt>
+          <dd className="tabular text-ink">{formatInt(stats.messages)}</dd>
+        </div>
+        {perDay !== null ? (
+          <div className="flex justify-between gap-3">
+            <dt>Tokens per day</dt>
+            <dd className="tabular text-ink" title={`Over ${formatSpan(stats.spanDays)}`}>
+              {formatTokens(perDay)}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
     </MetricCard>
   );
 }
@@ -292,7 +330,7 @@ export function OverviewPage() {
       ) : (
         <div className={cn('space-y-4 transition-opacity', overview.isPlaceholderData && 'opacity-70')}>
           <div className="grid gap-4 lg:grid-cols-3">
-            <Hero overview={overview.data} basis={settings.basis} scoped={scoped} rangeLabel={rangeLabel} className="lg:col-span-2" />
+            <Hero overview={overview.data} basis={settings.basis} scoped={scoped} rangeLabel={rangeLabel} timezone={settings.timezone} className="lg:col-span-2" />
             <MetricCard
               label="Total conversations"
               value={formatInt(overview.data.conversations.total)}
@@ -343,8 +381,8 @@ export function OverviewPage() {
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {beforeAfter.data ? (
               <>
-                <SubscriptionSide label="Before subscription" side="before" data={beforeAfter.data} scoped={scoped} />
-                <SubscriptionSide label="After subscription" side="after" data={beforeAfter.data} scoped={scoped} />
+                <SubscriptionSide label="Before subscription" side="before" data={beforeAfter.data} scoped={scoped} timezone={settings.timezone} />
+                <SubscriptionSide label="After subscription" side="after" data={beforeAfter.data} scoped={scoped} timezone={settings.timezone} />
               </>
             ) : (
               <>

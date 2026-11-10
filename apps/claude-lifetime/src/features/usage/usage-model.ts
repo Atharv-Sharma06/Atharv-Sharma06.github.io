@@ -347,8 +347,9 @@ export function describeChart(
       return {
         title: `Input and output per ${unit}`,
         description:
-          `${tokens} per ${unit} by category, ${dates}. Re-read context is modelled for chat exports, so it is hatched.` +
-          (basis === 'new' ? ' Cache reads and re-read context are not part of the new-token total and are left out.' : ''),
+          basis === 'new'
+            ? `${tokens} per ${unit} by category, ${dates}. Cache reads and re-read context are not new tokens, so this view leaves them out.`
+            : `${tokens} per ${unit} by category, ${dates}. Re-read context only exists as a model of chat exports, so it is hatched; input and output also include tokens estimated from chat text.`,
         ariaLabel: `${tokens} per ${unit} by token category, ${dates}`,
       };
     case 'models': {

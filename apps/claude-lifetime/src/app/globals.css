@@ -25,7 +25,8 @@
 
   --color-ink: #f4f4f6;
   --color-ink-2: #a9a9b4;
-  --color-ink-3: #777783;
+  /* muted text: 4.8:1 on raised, 5.0:1 on surface, 5.3:1 on page (WCAG AA for small text) */
+  --color-ink-3: #83838f;
 
   --color-accent: #9085e9;
   --color-accent-soft: #b9b1f5;

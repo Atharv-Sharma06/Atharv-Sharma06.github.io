@@ -80,6 +80,7 @@ model User {
   conversations       Conversation[]
   usageRecords        UsageRecord[]
   tokenEstimates      TokenEstimate[]
+  estimateBuckets EstimateBucket[]
   reportedCosts       ReportedCost[]
   subscriptionPeriods SubscriptionPeriod[]
 
@@ -110,6 +111,7 @@ model DataSource {
   conversations  Conversation[]
   usageRecords   UsageRecord[]
   tokenEstimates TokenEstimate[]
+  estimateBuckets EstimateBucket[]
   reportedCosts  ReportedCost[]
   syncedFiles    SyncedFile[]
 
@@ -150,6 +152,7 @@ model ImportBatch {
   messages       Message[]
   usageRecords   UsageRecord[]
   tokenEstimates TokenEstimate[]
+  estimateBuckets EstimateBucket[]
   reportedCosts  ReportedCost[]
 
   @@index([sourceId])
@@ -185,6 +188,7 @@ model Conversation {
   messages       Message[]
   usageRecords   UsageRecord[]
   tokenEstimates TokenEstimate[]
+  estimateBuckets EstimateBucket[]
 
   @@unique([userId, dedupKey])
   @@index([userId, createdAt])
@@ -313,6 +317,47 @@ model TokenEstimate {
   @@map("token_estimates")
 }
 
+/// ESTIMATED usage, pre-aggregated: the token_estimates of one import, summed into
+/// 15-minute buckets per conversation and estimation method, with the method's factor
+/// already applied to each message (so totals equal the per-message figures exactly).
+///
+/// This table is a derived copy kept for speed: analytics read it through the
+/// usage_facts view instead of scanning one row per message. It is filled by the SQL
+/// function refresh_estimate_buckets() after an import and whenever a method's factor
+/// changes, and it disappears with its import, conversation or source through the
+/// cascading foreign keys. Fifteen minutes is the widest bucket that never straddles a
+/// local midnight: every timezone offset in use is a multiple of 15 minutes.
+model EstimateBucket {
+  id                    Int      @id @default(autoincrement())
+  userId                Int      @map("user_id")
+  sourceId              Int      @map("source_id")
+  batchId               Int      @map("batch_id")
+  conversationId        Int      @map("conversation_id")
+  modelId               Int?     @map("model_id")
+  methodId              Int      @map("method_id")
+  /// Start of the 15-minute bucket (UTC).
+  occurredAt            DateTime @map("occurred_at") @db.Timestamptz(3)
+  inputTokens           BigInt   @default(0) @map("input_tokens")
+  outputTokens          BigInt   @default(0) @map("output_tokens")
+  replayTokens          BigInt   @default(0) @map("replay_tokens")
+  replayCachedTokens    BigInt   @default(0) @map("replay_cached_tokens")
+  requestCount          Int      @default(0) @map("request_count")
+  userMessageCount      Int      @default(0) @map("user_message_count")
+  assistantMessageCount Int      @default(0) @map("assistant_message_count")
+
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source       DataSource       @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  batch        ImportBatch      @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  conversation Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  model        ModelCatalog?    @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  method       EstimationMethod @relation(fields: [methodId], references: [id])
+
+  @@index([userId, occurredAt])
+  @@index([conversationId])
+  @@index([batchId])
+  @@map("estimate_buckets")
+}
+
 /// How an estimate was produced and how far off it may be. Estimates are never
 /// presented as official Anthropic accounting figures.
 model EstimationMethod {
@@ -333,6 +378,8 @@ model EstimationMethod {
   calibrationNote String?   @map("calibration_note")
 
   tokenEstimates TokenEstimate[]
+
+  estimateBuckets EstimateBucket[]
 
   @@map("estimation_methods")
 }
@@ -413,6 +460,7 @@ model ModelCatalog {
   messages       Message[]
   usageRecords   UsageRecord[]
   tokenEstimates TokenEstimate[]
+  estimateBuckets EstimateBucket[]
   reportedCosts  ReportedCost[]
 
   @@map("model_catalog")

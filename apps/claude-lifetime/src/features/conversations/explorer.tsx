@@ -22,6 +22,7 @@ import { formatDayRange, formatInstant, formatInt, formatTokens } from '@/lib/fo
 import { rangeKey, useApp, useData } from '@/state/app';
 import { useCoverage, usePeriods } from '@/state/queries';
 import { ConfidenceMark } from './confidence-mark';
+import { ensurePlannerStatistics } from './planner-statistics';
 import { KindIcon, shortProject, UNTITLED } from './shared';
 import {
   clearFilters,
@@ -195,7 +196,7 @@ export function Explorer({ state }: { state: ExplorerState }) {
   // figures; the date range selects conversations by the day they were created.
   const page = useData(
     ['conversations', rangeKey(app), state.search, state.model, state.source, state.plan, state.sort, state.direction, state.page],
-    (a) => listConversations(a.db, a.lifetime, toQuery(state, a.resolved)),
+    (a) => ensurePlannerStatistics(a.db, a.dataVersion).then(() => listConversations(a.db, a.lifetime, toQuery(state, a.resolved))),
   );
 
   // The latest state for callbacks that must not change identity on every keystroke.

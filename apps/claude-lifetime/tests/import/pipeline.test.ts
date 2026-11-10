@@ -99,8 +99,9 @@ describe('import pipeline', () => {
     expect(await count('token_estimates')).toBe(2);
     const byConfidence = Object.fromEntries((await facts()).map((r) => [r.confidence, r]));
     expect(byConfidence.exact).toMatchObject({ rows: 2, tokens: 49000 });
-    // base units x 1.25, rounded per category: 125 + (250 + 188)
-    expect(byConfidence.estimated).toMatchObject({ rows: 2, tokens: 563 });
+    // base units x 1.25, rounded per category: 125 + (250 + 188). The two messages are one minute apart,
+    // so the view serves them as a single 15-minute bucket.
+    expect(byConfidence.estimated).toMatchObject({ rows: 1, tokens: 563 });
   });
 
   it('stores unknown model identifiers verbatim and never invents one', async () => {

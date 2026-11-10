@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowUpRight, Plus, Search, X } from 'lucide-react';
+import { ArrowUpRight, Plus, Search, Trash, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { deleteUserPrice, listPrices, saveUserPrice, type CatalogModelRow, type PriceRow, type UserPriceInput } from '@/analytics/settings';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm';
 import { Field, Input, Select, Textarea } from '@/components/ui/controls';
 import { EmptyState, ErrorNote, Skeleton } from '@/components/ui/feedback';
-import { Dialog, InfoTip } from '@/components/ui/overlay';
+import { Dialog, InfoTip, Tooltip } from '@/components/ui/overlay';
 import { Table, TableFrame, Td, Th, THead, Tr } from '@/components/ui/table';
 import { RETRIEVED_ON, SOURCES, WEB_SEARCH_USD_PER_1000 } from '@/core/catalog';
 import { cn } from '@/lib/cn';
@@ -35,12 +35,19 @@ import { usePrices } from './queries';
 
 const EXTERNAL_LINK = 'inline-flex items-center gap-0.5 text-accent-soft underline-offset-4 hover:underline';
 
-function replacementText(replacement: Replacement): string {
-  if (replacement.scope === 'all') return 'replaced by your price';
-  return replacement.from ? `replaced from ${formatDay(replacement.from)}` : 'partly replaced by your price';
+/** The short note under "Built-in", and the full sentence for its tooltip. The dates themselves stand in the user's own row. */
+function replacementText(replacement: Replacement): { short: string; full: string } {
+  if (replacement.scope === 'all') return { short: 'replaced by yours', full: 'Your price for this model and tier applies instead.' };
+  return {
+    short: 'partly replaced',
+    full: replacement.from ? `Your price applies instead from ${formatDay(replacement.from)}.` : 'Your prices apply instead for part of this time.',
+  };
 }
 
 // ── Add a price ─────────────────────────────────────────────────────────────────
+
+/** The fields of the form from top to bottom, to find the first one that needs attention. */
+const FIELD_ORDER: Array<keyof PriceFormValues> = ['modelKey', 'effectiveFrom', 'input', 'output', 'cacheRead', 'cacheWrite5m', 'cacheWrite1h', 'sourceUrl'];
 
 function AddPriceDialog({
   models,
@@ -74,7 +81,8 @@ function AddPriceDialog({
     setFailure(null);
     if (!check.input) {
       // Take the user to the first field that needs attention.
-      window.requestAnimationFrame(() => formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus());
+      const first = FIELD_ORDER.find((key) => check.errors[key]);
+      window.requestAnimationFrame(() => formRef.current?.querySelector<HTMLElement>(`[data-field="${first}"] :is(input, button, textarea)`)?.focus());
       return;
     }
     setBusy(true);
@@ -88,18 +96,20 @@ function AddPriceDialog({
     }
   };
 
-  const priceField = (key: 'input' | 'output' | 'cacheRead' | 'cacheWrite5m' | 'cacheWrite1h', label: string, placeholder: string) => (
-    <Field label={label} error={errors[key]}>
-      <Input
-        value={values[key]}
-        onChange={(e) => set(key)(e.target.value)}
-        inputMode="decimal"
-        autoComplete="off"
-        placeholder={placeholder}
-        aria-invalid={errors[key] ? true : undefined}
-        className="tabular"
-      />
-    </Field>
+  const priceField = (key: 'input' | 'output' | 'cacheRead' | 'cacheWrite5m' | 'cacheWrite1h', label: string, span: string) => (
+    <div data-field={key} className={span}>
+      <Field label={label} error={errors[key]}>
+        <Input
+          value={values[key]}
+          onChange={(e) => set(key)(e.target.value)}
+          inputMode="decimal"
+          autoComplete="off"
+          placeholder="0.00"
+          aria-invalid={errors[key] ? true : undefined}
+          className="tabular"
+        />
+      </Field>
+    </div>
   );
 
   return (
@@ -130,15 +140,17 @@ function AddPriceDialog({
           void submit();
         }}
       >
-        <Field label="Model" error={errors.modelKey} className="sm:col-span-4">
-          <Select
-            label="Model"
-            placeholder="Choose a model"
-            value={values.modelKey === '' ? undefined : values.modelKey}
-            onChange={set('modelKey')}
-            options={models.map((m) => ({ value: m.modelKey, label: m.displayName, hint: m.hasStandardPrice ? undefined : 'no price on file' }))}
-          />
-        </Field>
+        <div data-field="modelKey" className="sm:col-span-4">
+          <Field label="Model" error={errors.modelKey}>
+            <Select
+              label="Model"
+              placeholder="Choose a model"
+              value={values.modelKey === '' ? undefined : values.modelKey}
+              onChange={set('modelKey')}
+              options={models.map((m) => ({ value: m.modelKey, label: m.displayName, hint: m.hasStandardPrice ? undefined : 'no price on file' }))}
+            />
+          </Field>
+        </div>
         <Field label="Tier" className="sm:col-span-2">
           <Select label="Price tier" value={values.priceTier} onChange={set('priceTier')} options={PRICE_TIERS} />
         </Field>
@@ -156,46 +168,44 @@ function AddPriceDialog({
           </p>
         ) : null}
 
-        <Field
-          label="In effect from (optional)"
-          hint="Leave empty if the price applies from the model’s launch."
-          error={errors.effectiveFrom}
-          className="sm:col-span-3"
-        >
-          <Input
-            type="date"
-            value={values.effectiveFrom}
-            onChange={(e) => set('effectiveFrom')(e.target.value)}
-            aria-invalid={errors.effectiveFrom ? true : undefined}
-          />
-        </Field>
+        <div data-field="effectiveFrom" className="sm:col-span-3">
+          <Field label="In effect from (optional)" hint="Leave empty if the price applies from the model’s launch." error={errors.effectiveFrom}>
+            <Input
+              type="date"
+              value={values.effectiveFrom}
+              onChange={(e) => set('effectiveFrom')(e.target.value)}
+              aria-invalid={errors.effectiveFrom ? true : undefined}
+            />
+          </Field>
+        </div>
 
         <fieldset className="grid gap-x-3 gap-y-3 sm:col-span-6 sm:grid-cols-6">
           <legend className="mb-2 text-[13px] font-medium text-ink">Price per million tokens, in US dollars</legend>
-          <div className="sm:col-span-3">{priceField('input', 'Input', 'For example 3')}</div>
-          <div className="sm:col-span-3">{priceField('output', 'Output', 'For example 15')}</div>
-          <div className="sm:col-span-2">{priceField('cacheRead', 'Cache read (optional)', '0.30')}</div>
-          <div className="sm:col-span-2">{priceField('cacheWrite5m', 'Cache write, 5 min (optional)', '3.75')}</div>
-          <div className="sm:col-span-2">{priceField('cacheWrite1h', 'Cache write, 1 h (optional)', '6')}</div>
+          {priceField('input', 'Input', 'sm:col-span-3')}
+          {priceField('output', 'Output', 'sm:col-span-3')}
+          {priceField('cacheRead', 'Cache read (optional)', 'sm:col-span-2')}
+          {priceField('cacheWrite5m', 'Cache write, 5 min (optional)', 'sm:col-span-2')}
+          {priceField('cacheWrite1h', 'Cache write, 1 h (optional)', 'sm:col-span-2')}
           <p className="text-xs text-ink-3 sm:col-span-6">A cache price you leave empty is charged at the input price.</p>
         </fieldset>
 
-        <Field
-          label="Source"
-          hint="The web address where you found the price. It is shown next to it, so the figure stays traceable."
-          error={errors.sourceUrl}
-          className="sm:col-span-6"
-        >
-          <Input
-            type="url"
-            value={values.sourceUrl}
-            onChange={(e) => set('sourceUrl')(e.target.value)}
-            placeholder="https://"
-            autoComplete="off"
-            spellCheck={false}
-            aria-invalid={errors.sourceUrl ? true : undefined}
-          />
-        </Field>
+        <div data-field="sourceUrl" className="sm:col-span-6">
+          <Field
+            label="Source"
+            hint="The web address where you found the price. It is shown next to it, so the figure stays traceable."
+            error={errors.sourceUrl}
+          >
+            <Input
+              type="url"
+              value={values.sourceUrl}
+              onChange={(e) => set('sourceUrl')(e.target.value)}
+              placeholder="https://"
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={errors.sourceUrl ? true : undefined}
+            />
+          </Field>
+        </div>
         <Field label="Note (optional)" className="sm:col-span-6">
           <Textarea
             value={values.sourceNote}
@@ -217,9 +227,15 @@ function AddPriceDialog({
 
 // ── Table ───────────────────────────────────────────────────────────────────────
 
-// Header cells stay in view while the rows scroll; the inset line stands in for the row border, which does not travel with a sticky cell.
-const HEAD = 'sticky top-0 z-[1] bg-raised px-2.5 align-bottom shadow-[inset_0_-1px_0_var(--color-line)]';
-const CELL = 'whitespace-nowrap px-2.5 py-1.5';
+/*
+  The table scrolls inside its frame in both directions. The header row stays at the top
+  and the model column at the left, so a price can always be read against its model.
+  Sticky cells lose collapsed borders, so this table draws its lines on the cells
+  (separate borders, no spacing) and gives every cell an opaque background.
+*/
+const HEAD = 'sticky top-0 z-[2] bg-raised px-2 align-bottom first:pl-3 last:pr-3 shadow-[inset_0_-1px_0_var(--color-line)]';
+const CELL = 'whitespace-nowrap border-line bg-surface px-2 py-1.5 first:pl-3 last:pr-3 transition-colors duration-700';
+const JUST_ADDED = 'bg-[color-mix(in_srgb,var(--color-accent)_14%,var(--color-surface))]';
 
 function PriceTable({
   rows,
@@ -234,14 +250,31 @@ function PriceTable({
   onDelete: (row: PriceRow) => void;
   frameId: string;
 }) {
+  // Once the table is scrolled sideways, a line marks where the pinned model column ends.
+  const [pinned, setPinned] = useState(false);
   return (
-    <TableFrame id={frameId} className="max-h-[30rem] overflow-y-auto" tabIndex={0} role="group" aria-label="Price table, scrollable">
-      <Table className="min-w-[60rem]">
+    <TableFrame
+      id={frameId}
+      className="max-h-[30rem] overflow-y-auto"
+      tabIndex={0}
+      role="group"
+      aria-label="Price table, scrollable"
+      onScroll={(e) => setPinned(e.currentTarget.scrollLeft > 0)}
+    >
+      <Table className="min-w-[60rem] border-separate border-spacing-0">
         <caption className="sr-only">Prices in US dollars per million tokens</caption>
         <THead>
           <tr>
-            <Th className={HEAD}>Model</Th>
-            <Th className={HEAD}>Tier</Th>
+            <Th
+              className={cn(
+                HEAD,
+                'left-0 z-[3]',
+                pinned && 'shadow-[inset_0_-1px_0_var(--color-line),inset_-1px_0_0_var(--color-line-strong)]',
+              )}
+            >
+              Model
+            </Th>
+            <Th className={cn(HEAD, 'max-sm:hidden')}>Tier</Th>
             <Th className={HEAD}>In effect</Th>
             <Th align="right" className={HEAD}>
               Input
@@ -266,35 +299,41 @@ function PriceTable({
           </tr>
         </THead>
         <tbody>
-          {rows.map((p) => {
+          {rows.map((p, index) => {
             const replacement = replaced.get(p.id);
+            const cell = cn(CELL, index > 0 && 'border-t', highlight === p.id && JUST_ADDED);
             return (
-              <Tr key={p.id} data-price-id={p.id} className={cn('transition-colors duration-700', highlight === p.id && 'bg-accent-wash')}>
-                <th scope="row" className={cn(CELL, 'text-left font-normal text-ink')}>
+              <Tr key={p.id} data-price-id={p.id}>
+                <th
+                  scope="row"
+                  className={cn(cell, 'sticky left-0 z-[1] text-left font-normal text-ink', pinned && 'shadow-[inset_-1px_0_0_var(--color-line-strong)]')}
+                >
                   {p.displayName}
+                  {/* On a phone the tier rides along in the pinned column, so a row still says what it is when scrolled sideways. */}
+                  <span className="block text-xs text-ink-3 sm:hidden">{tierLabel(p.priceTier)}</span>
                 </th>
-                <Td className={cn(CELL, 'text-ink-2')}>{tierLabel(p.priceTier)}</Td>
-                <Td className={cn(CELL, 'text-ink-2')}>{effectiveLabel(p.effectiveFrom, p.effectiveTo)}</Td>
-                <Td numeric className={CELL}>
+                <Td className={cn(cell, 'text-ink-2 max-sm:hidden')}>{tierLabel(p.priceTier)}</Td>
+                <Td className={cn(cell, 'text-ink-2')}>{effectiveLabel(p.effectiveFrom, p.effectiveTo)}</Td>
+                <Td numeric className={cell}>
                   {formatPrice(p.input)}
                 </Td>
-                <Td numeric className={CELL}>
+                <Td numeric className={cell}>
                   {formatPrice(p.output)}
                 </Td>
-                <Td numeric className={cn(CELL, p.cacheRead === null && 'text-ink-3')}>
+                <Td numeric className={cn(cell, p.cacheRead === null && 'text-ink-3')}>
                   {formatPrice(p.cacheRead)}
                 </Td>
-                <Td numeric className={cn(CELL, p.cacheWrite5m === null && 'text-ink-3')}>
+                <Td numeric className={cn(cell, p.cacheWrite5m === null && 'text-ink-3')}>
                   {formatPrice(p.cacheWrite5m)}
                 </Td>
-                <Td numeric className={cn(CELL, p.cacheWrite1h === null && 'text-ink-3')}>
+                <Td numeric className={cn(cell, p.cacheWrite1h === null && 'text-ink-3')}>
                   {formatPrice(p.cacheWrite1h)}
                 </Td>
-                <Td className={cn(CELL, 'py-0')}>
+                <Td className={cn(cell, 'py-0')}>
                   <span className="inline-flex items-center gap-1">
                     <a href={p.sourceUrl} target="_blank" rel="noreferrer" title={p.sourceUrl} className={EXTERNAL_LINK}>
                       {sourceHost(p.sourceUrl)}
-                      <ArrowUpRight className="size-3.5" aria-hidden="true" />
+                      <span className="sr-only"> (opens in a new tab)</span>
                     </a>
                     {p.sourceNote ? (
                       <InfoTip label={`Note on the ${tierLabel(p.priceTier).toLowerCase()} price of ${p.displayName}`} align="end">
@@ -303,25 +342,31 @@ function PriceTable({
                     ) : null}
                   </span>
                 </Td>
-                <Td className={cn(CELL, 'tabular text-ink-2')}>{formatDay(p.sourceRetrievedOn)}</Td>
-                <Td className={cn(CELL, p.isBuiltin ? 'text-ink-2' : 'py-0')}>
+                <Td className={cn(cell, 'tabular text-ink-2')}>{formatDay(p.sourceRetrievedOn)}</Td>
+                <Td className={cn(cell, p.isBuiltin ? 'text-ink-2' : 'py-0')}>
                   {p.isBuiltin ? (
                     <>
                       Built-in
-                      {replacement ? <span className="block text-xs text-ink-3">{replacementText(replacement)}</span> : null}
+                      {replacement ? (
+                        <span className="block text-xs text-ink-3" title={replacementText(replacement).full}>
+                          {replacementText(replacement).short}
+                        </span>
+                      ) : null}
                     </>
                   ) : (
-                    <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1">
                       <Tag className="border-accent/40 text-ink">Yours</Tag>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="px-2"
-                        aria-label={`Delete your ${tierLabel(p.priceTier).toLowerCase()} price for ${p.displayName}`}
-                        onClick={() => onDelete(p)}
-                      >
-                        Delete
-                      </Button>
+                      <Tooltip content="Delete this price">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-8 px-0"
+                          aria-label={`Delete your ${tierLabel(p.priceTier).toLowerCase()} price for ${p.displayName}`}
+                          onClick={() => onDelete(p)}
+                        >
+                          <Trash className="size-3.5" aria-hidden="true" />
+                        </Button>
+                      </Tooltip>
                     </span>
                   )}
                 </Td>

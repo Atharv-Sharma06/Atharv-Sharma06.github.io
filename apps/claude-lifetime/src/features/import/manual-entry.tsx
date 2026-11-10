@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { addManualUsage, SettingsError } from '@/analytics/settings';
 import { Button } from '@/components/ui/button';
 import { Field, Input, Segmented } from '@/components/ui/controls';
@@ -18,9 +18,25 @@ const tokens = (text: string): number | undefined => {
 
 /** One day of usage typed in by hand, for figures the user has from somewhere else. */
 export function ManualEntryDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => !busy && onOpenChange(next)}
+      title="Add usage by hand"
+      description="For a figure you have from somewhere else, such as a usage page you can read but not export. It is stored as its own import, so you can delete it again."
+      size="lg"
+    >
+      {/* The form only exists while the dialog is open, so it starts empty every time. */}
+      <ManualEntryForm busy={busy} setBusy={setBusy} close={() => onOpenChange(false)} />
+    </Dialog>
+  );
+}
+
+function ManualEntryForm({ busy, setBusy, close }: { busy: boolean; setBusy: (busy: boolean) => void; close: () => void }) {
   const app = useApp();
   const models = useCatalogModels();
-  const [date, setDate] = useState('');
+  const [date, setDate] = useState(() => todayInZone(app.settings.timezone));
   const [model, setModel] = useState('');
   const [input, setInput] = useState('');
   const [output, setOutput] = useState('');
@@ -28,21 +44,7 @@ export function ManualEntryDialog({ open, onOpenChange }: { open: boolean; onOpe
   const [cacheWrite, setCacheWrite] = useState('');
   const [confidence, setConfidence] = useState<'exact' | 'estimated'>('estimated');
   const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    setDate(todayInZone(app.settings.timezone));
-    setModel('');
-    setInput('');
-    setOutput('');
-    setCacheRead('');
-    setCacheWrite('');
-    setConfidence('estimated');
-    setNote('');
-    setError(null);
-  }, [open, app.settings.timezone]);
 
   const save = async () => {
     setBusy(true);
@@ -59,39 +61,22 @@ export function ManualEntryDialog({ open, onOpenChange }: { open: boolean; onOpe
         note: note.trim() || null,
       });
       app.notifyDataChanged();
-      onOpenChange(false);
-    } catch (e) {
-      setError(e instanceof SettingsError || e instanceof Error ? e.message : String(e));
-    } finally {
       setBusy(false);
+      close();
+    } catch (e) {
+      setBusy(false);
+      setError(e instanceof SettingsError || e instanceof Error ? e.message : String(e));
     }
   };
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => !busy && onOpenChange(next)}
-      title="Add usage by hand"
-      description="For a figure you have from somewhere else, such as a usage page you can read but not export. It is stored as its own import, so you can delete it again."
-      size="lg"
-      footer={
-        <>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
-            Cancel
-          </Button>
-          <Button variant="primary" loading={busy} onClick={save}>
-            Save entry
-          </Button>
-        </>
-      }
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void save();
+      }}
     >
-      <form
-        className="grid gap-4 sm:grid-cols-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void save();
-        }}
-      >
+      <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Day">
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
         </Field>
@@ -134,14 +119,20 @@ export function ManualEntryDialog({ open, onOpenChange }: { open: boolean; onOpe
         <Field label="Note" hint="Optional. Shown in the import history." className="sm:col-span-2">
           <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={120} placeholder="Where the figure is from" />
         </Field>
-        {/* Lets Enter submit the form from any field. */}
-        <button type="submit" hidden />
-      </form>
+      </div>
       {error ? (
         <ErrorNote title="The entry was not saved" className="mt-4">
           {error}
         </ErrorNote>
       ) : null}
-    </Dialog>
+      <div className="-mx-5 -mb-4 mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-line px-5 py-3">
+        <Button variant="ghost" onClick={close} disabled={busy}>
+          Cancel
+        </Button>
+        <Button type="submit" variant="primary" loading={busy}>
+          Save entry
+        </Button>
+      </div>
+    </form>
   );
 }

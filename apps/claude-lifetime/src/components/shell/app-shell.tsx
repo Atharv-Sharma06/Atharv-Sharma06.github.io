@@ -18,6 +18,9 @@ import { DateRangePicker } from './date-range';
 import { isActive, NAV, NAV_SECONDARY, type NavItem } from './nav';
 import { RefreshStatus } from './refresh-status';
 
+/** The portfolio this app is a sub-page of: the root of the same site. */
+const PORTFOLIO_HOME = '/';
+
 /** Pages whose figures follow the date range. The others always cover the whole history. */
 const RANGE_ROUTES = ['/', '/usage/', '/conversations/', '/models/'];
 
@@ -101,8 +104,8 @@ function SidebarContent({ pathname, onNavigate }: { pathname: string; onNavigate
           <HardDrive className="mt-px size-3.5 shrink-0" aria-hidden="true" />
           <span>Your data stays in this browser. Nothing is uploaded.</span>
         </p>
-        {/* A plain link on purpose: the portfolio is a separate site outside this app. */}
-        <a href="/" className="mt-2.5 inline-flex items-center gap-1 text-ink-2 hover:text-ink">
+        {/* A plain link on purpose: the portfolio is a separate site outside this app's router and base path. */}
+        <a href={PORTFOLIO_HOME} className="mt-2.5 inline-flex items-center gap-1 text-ink-2 hover:text-ink">
           Atharv Sharma&rsquo;s portfolio
           <ArrowUpRight className="size-3.5" aria-hidden="true" />
         </a>
@@ -183,8 +186,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const state = useAppState();
   const [menuOpen, setMenuOpen] = useState(false);
   const ready = state.status === 'ready';
-
-  useEffect(() => setMenuOpen(false), [pathname]);
 
   return (
     <TooltipProvider>

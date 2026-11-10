@@ -367,6 +367,9 @@ export async function commitImport(
       [userId, batchId, sourceId],
     );
 
+    // Analytics read estimated usage from 15-minute buckets, not from one row per message.
+    await tx.query(`SELECT refresh_estimate_buckets($1::int)`, [batchId]);
+
     const stagedUsage = await one<{ n: number }>(tx, `SELECT count(*)::int AS n FROM stg_usage`);
     const use = await tx.query(
       `INSERT INTO usage_records (user_id, source_id, batch_id, conversation_id, model_id, occurred_at, bucket_seconds, price_tier,

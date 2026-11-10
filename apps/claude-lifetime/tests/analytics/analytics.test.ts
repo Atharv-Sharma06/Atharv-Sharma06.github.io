@@ -54,7 +54,8 @@ describe('lifetime totals', () => {
     expect(o.averageConversationLength).toBe(3);
     expect(o.requests).toBe(2 + 10 + 2 + 1 + 1);
     expect(o.firstUsageAt).toBe('2025-01-10T15:00:00.000Z');
-    expect(o.lastUsageAt).toBe('2025-03-09T03:31:00.000Z');
+    // usage facts are 15-minute buckets: the last message, at 03:31, lies in the bucket that starts at 03:30
+    expect(o.lastUsageAt).toBe('2025-03-09T03:30:00.000Z');
     expect(o.activeDays).toBe(5);
     expect(o.mostActiveDay).toEqual({
       day: '2025-02-01',
@@ -279,7 +280,7 @@ describe('coverage', () => {
     const c = await getCoverage(t.db, t.userId, 'America/New_York');
     expect(c).toMatchObject({
       hasData: true, hasSyntheticData: false, importCount: 3,
-      earliestRecordAt: '2025-01-10T15:00:00.000Z', latestRecordAt: '2025-03-09T03:31:00.000Z',
+      earliestRecordAt: '2025-01-10T15:00:00.000Z', latestRecordAt: '2025-03-09T03:30:00.000Z',
       exactTokens: EXPECTED.processed.exact, estimatedTokens: 625,
       tokensWithModel: 13_700_000 + 1_100_000 + 1500 + 110_000, tokensWithoutModel: 2625,
       estimatedMessages: 4,

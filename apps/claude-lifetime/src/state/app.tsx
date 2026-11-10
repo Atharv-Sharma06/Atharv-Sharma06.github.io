@@ -80,6 +80,8 @@ const AppContext = createContext<AppState>({ status: 'booting', phase: 'starting
 
 const RANGE_KEY = 'claude-lifetime:range';
 
+const ALL_TIME: DateRange = { preset: 'all', from: null, to: null };
+
 function loadRange(): DateRange {
   try {
     const raw = window.localStorage.getItem(RANGE_KEY);
@@ -94,7 +96,7 @@ function loadRange(): DateRange {
   } catch {
     // storage can be unavailable (private windows); the default range is used
   }
-  return { preset: 'all', from: null, to: null };
+  return ALL_TIME;
 }
 
 function AppStateProvider({ children }: { children: ReactNode }) {
@@ -103,14 +105,15 @@ function AppStateProvider({ children }: { children: ReactNode }) {
   const [attempt, setAttempt] = useState(0);
   const [core, setCore] = useState<{ db: SqlDriver; userId: number; exportBackup(): Promise<Blob> } | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [range, setRangeState] = useState<DateRange>({ preset: 'all', from: null, to: null });
+  // Read once on the client. Nothing that depends on the range is rendered before the database is open, so the
+  // server-rendered markup and the first client render still match.
+  const [range, setRangeState] = useState<DateRange>(() => (typeof window === 'undefined' ? ALL_TIME : loadRange()));
   const [dataVersion, setDataVersion] = useState(0);
   const [lastRefreshedAt, setLastRefreshedAt] = useState(() => Date.now());
   const channel = useRef<BroadcastChannel | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setError(null);
     openDatabase((p) => !cancelled && setPhase(p))
       .then(async (database) => {
         const s = await getSettings(database.db, database.userId);
@@ -125,10 +128,6 @@ function AppStateProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [attempt]);
-
-  useEffect(() => {
-    setRangeState(loadRange());
-  }, []);
 
   // Other tabs share the same database: when one of them writes, this one re-reads.
   useEffect(() => {
@@ -186,7 +185,16 @@ function AppStateProvider({ children }: { children: ReactNode }) {
   );
 
   const state = useMemo<AppState>(() => {
-    if (error) return { status: 'error', error, retry: () => setAttempt((n) => n + 1) };
+    if (error) {
+      return {
+        status: 'error',
+        error,
+        retry: () => {
+          setError(null);
+          setAttempt((n) => n + 1);
+        },
+      };
+    }
     if (!core || !settings) return { status: 'booting', phase };
     const resolved = resolveRange(range, settings.timezone);
     const lifetime: AnalyticsFilter = { userId: core.userId, timezone: settings.timezone, basis: settings.basis };
