@@ -12,22 +12,7 @@
 // Do not edit; change the sources and rebuild.
 
 // src/import/claude-code/collector.ts
-import {
-  closeSync,
-  copyFileSync,
-  existsSync,
-  fsyncSync,
-  mkdirSync,
-  openAsBlob,
-  openSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeSync
-} from "node:fs";
+import * as fs from "node:fs";
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -35,25 +20,37 @@ import { basename, dirname, join, resolve } from "node:path";
 async function* readLines(stream, onBytes) {
   const decoder = new TextDecoder("utf-8");
   const reader = stream.getReader();
-  let pending = "";
+  let pieces = [];
+  const line = (last) => {
+    let text2 = last;
+    if (pieces.length > 0) {
+      pieces.push(last);
+      text2 = pieces.join("");
+      pieces = [];
+    }
+    return text2.endsWith("\r") ? text2.slice(0, -1) : text2;
+  };
   try {
     for (; ; ) {
       const { done, value } = await reader.read();
       if (done) break;
       onBytes?.(value);
-      pending += decoder.decode(value, { stream: true });
+      const text2 = decoder.decode(value, { stream: true });
       let start = 0;
       for (; ; ) {
-        const nl = pending.indexOf("\n", start);
+        const nl = text2.indexOf("\n", start);
         if (nl === -1) break;
-        const end = nl > start && pending.charCodeAt(nl - 1) === 13 ? nl - 1 : nl;
-        yield pending.slice(start, end);
+        yield line(text2.slice(start, nl));
         start = nl + 1;
       }
-      if (start > 0) pending = pending.slice(start);
+      if (start < text2.length) pieces.push(start === 0 ? text2 : text2.slice(start));
     }
-    pending += decoder.decode();
-    if (pending.length > 0) yield pending.endsWith("\r") ? pending.slice(0, -1) : pending;
+    const tail = decoder.decode();
+    if (tail.length > 0) pieces.push(tail);
+    if (pieces.length > 0) {
+      const rest = line("");
+      if (rest.length > 0) yield rest;
+    }
   } finally {
     reader.releaseLock();
   }
@@ -74,9 +71,9 @@ var ResponseFlag = {
   HAS_SPEED: 16,
   /** Cache-write tokens without a 5-minute / 1-hour breakdown; they are held in the 5-minute column. */
   CACHE_TTL_UNKNOWN: 32,
-  /** The row has no `requestId`; the key is scoped to the session instead. */
+  /** No row of the response carries a `requestId` (usual behind gateways, and for rows Claude Code copied into another transcript). */
   NO_REQUEST_ID: 64,
-  /** The row has no `message.id`; it can only be recognised again by its row uuid. */
+  /** The response has no `message.id`; its lines were recognised by standing together in the file. */
   NO_MESSAGE_ID: 128,
   /** The row had no usable timestamp; the nearest one in the same file was used. */
   TIMESTAMP_INFERRED: 256,
@@ -84,10 +81,10 @@ var ResponseFlag = {
   UNMETERED: 512,
   /** Claude Code marked the row `isVirtual` (meaning unverified; counted and reported). */
   VIRTUAL: 1024,
-  /** The same message id was seen with another request id on the main thread; both were counted. */
+  /** The same message id was seen with another request id on the main thread; it is one response and counted once. */
   MESSAGE_ID_REUSED: 2048
 };
-var GROUP_FLAGS = ResponseFlag.TOOL_USE | ResponseFlag.TIMESTAMP_INFERRED | ResponseFlag.UNMETERED | ResponseFlag.VIRTUAL;
+var GROUP_FLAGS = ResponseFlag.TOOL_USE | ResponseFlag.TIMESTAMP_INFERRED | ResponseFlag.UNMETERED | ResponseFlag.VIRTUAL | ResponseFlag.MESSAGE_ID_REUSED;
 var PromptKind = { TYPED: 0, COMMAND: 1, SHELL: 2 };
 var isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 var text = (v) => typeof v === "string" && v !== "" ? v : null;
@@ -234,6 +231,14 @@ function classifyUserRow(row, inSubagentFile = false) {
   if (origin !== void 0 && origin !== null && !(isObject(origin) && origin.kind === "human")) return { excluded: "origin" };
   return { prompt: kind };
 }
+var countsOf = (t) => ({
+  input: t.input,
+  output: t.output,
+  cacheRead: t.cacheRead,
+  cacheWrite5m: t.cacheWrite5m,
+  cacheWrite1h: t.cacheWrite1h
+});
+var sameCounts = (a, b) => a.input === b.input && a.output === b.output && a.cacheRead === b.cacheRead && a.cacheWrite5m === b.cacheWrite5m && a.cacheWrite1h === b.cacheWrite1h;
 var REPORT_EVERY_BYTES = 1024 * 1024;
 var TITLE_MAX_CHARS = 200;
 var cleanTitle = (v) => {
@@ -258,7 +263,6 @@ var TranscriptReader = class {
     transcriptFiles: 0,
     filesRead: 0,
     filesSkippedUnchanged: 0,
-    filesRereadForContext: 0,
     filesUnreadable: 0,
     subagentFiles: 0,
     bytesRead: 0,
@@ -289,17 +293,11 @@ var TranscriptReader = class {
   groups = /* @__PURE__ */ new Map();
   prompts = /* @__PURE__ */ new Map();
   sessions = /* @__PURE__ */ new Map();
-  /** First response seen for a message id, and the ids that turned up under a second key. */
-  firstByMessage = /* @__PURE__ */ new Map();
-  sameMessage = /* @__PURE__ */ new Map();
   /** Main-thread row uuid -> session, to attach `summary` rows (which only name a leaf uuid). */
   uuidSession = /* @__PURE__ */ new Map();
   summaries = [];
   reportedAt = 0;
   cancelled = false;
-  hasSidechainUsage(sessionId) {
-    return sessionId !== null && this.sessions.get(sessionId)?.sidechainUsage === true;
-  }
   skip(source, info) {
     this.files.push({
       path: source.path ?? source.name,
@@ -326,7 +324,9 @@ var TranscriptReader = class {
       session: info.sessionId ?? (info.stem !== "" ? info.stem : info.base),
       lastModified: source.lastModified,
       lastRawTime: void 0,
-      waiting: []
+      waiting: [],
+      gatewayRun: null,
+      wrappedRuns: /* @__PURE__ */ new Map()
     };
     this.files.push(report);
     this.counters.filesRead++;
@@ -343,8 +343,9 @@ var TranscriptReader = class {
           next = await lines.next();
         } catch (err) {
           report.status = "unreadable";
+          report.error = err instanceof Error ? err.message : String(err);
           this.counters.filesUnreadable++;
-          this.samples.unreadableFile ??= `${info.base}: ${err instanceof Error ? err.message : String(err)}`;
+          this.samples.unreadableFile ??= `${info.base}: ${report.error}`;
           lines = null;
           break;
         }
@@ -560,47 +561,80 @@ var TranscriptReader = class {
     if (readTokens(usage, rec)) rec.flags |= ResponseFlag.CACHE_TTL_UNKNOWN;
     const messageId = text(message.id);
     const requestId = text(env.requestId);
-    const uuid = text(env.uuid) ?? (outer !== null ? text(outer.uuid) : null);
+    const ownUuid = text(env.uuid);
+    const outerUuid = outer !== null ? text(outer.uuid) : null;
+    const named = messageId !== null && isAnthropicMessageId(messageId);
+    let run;
+    if (outer === null) {
+      run = named ? null : this.joinRun(f.gatewayRun, session.id, messageId, requestId, rec);
+      f.gatewayRun = run;
+    } else if (named) {
+      run = null;
+    } else {
+      const key = `${session.id}\0${messageId ?? ""}`;
+      const idless = `${session.id}\0`;
+      if (key !== idless) f.wrappedRuns.delete(idless);
+      run = this.joinRun(f.wrappedRuns.get(key) ?? null, session.id, messageId, requestId, rec);
+      f.wrappedRuns.set(key, run);
+    }
     const rawTime = outer !== null && Number.isNaN(timeOf(env.timestamp)) ? outer.timestamp : env.timestamp;
     this.withTime(rawTime, f, (ts, inferred) => {
       rec.ts = ts;
       rec.lastTs = ts;
       if (inferred) rec.flags |= ResponseFlag.TIMESTAMP_INFERRED;
-      if (messageId === null) {
-        rec.flags |= ResponseFlag.NO_MESSAGE_ID;
-        rec.key = uuid !== null ? `u:${uuid}` : `line:${f.base}:${lineNo}`;
-      } else if (requestId !== null) {
-        rec.key = `mr:${messageId}:${requestId}`;
+      if (requestId === null) rec.flags |= ResponseFlag.NO_REQUEST_ID;
+      if (messageId === null) rec.flags |= ResponseFlag.NO_MESSAGE_ID;
+      if (run === null) {
+        rec.key = `m:${messageId}`;
       } else {
-        rec.flags |= ResponseFlag.NO_REQUEST_ID;
-        rec.key = isAnthropicMessageId(messageId) ? `ms:${session.id}:${messageId}` : `mst:${session.id}:${messageId}:${ts}`;
+        run.key ??= ownUuid !== null ? `u:${ownUuid}` : !inferred ? `mst:${session.id}:${messageId ?? ""}:${ts}` : outerUuid !== null ? `u:${outerUuid}` : `line:${f.base}:${lineNo}`;
+        rec.key = run.key;
       }
-      this.admit(rec, messageId, f.index);
+      this.admit(rec, requestId, f.index);
       if ((rec.flags & ResponseFlag.SIDECHAIN) !== 0) session.sidechainUsage = true;
     });
   }
-  admit(rec, messageId, file) {
+  /** The run of lines this usage row belongs to: the open one it continues, or a new one (see GatewayRun). */
+  joinRun(open, session, messageId, requestId, rec) {
+    const partial = (rec.flags & ResponseFlag.PARTIAL) !== 0;
+    if (open !== null && open.session === session && open.messageId === messageId) {
+      const sameResponse = open.requestId !== null && requestId !== null ? open.requestId === requestId : open.partial || partial || sameCounts(open.usage, rec);
+      if (sameResponse) {
+        open.requestId ??= requestId;
+        if (!partial) {
+          open.partial = false;
+          open.usage = countsOf(rec);
+        }
+        return open;
+      }
+    }
+    return { session, messageId, requestId, usage: countsOf(rec), partial, key: null };
+  }
+  admit(rec, requestId, file) {
     const g = this.groups.get(rec.key);
     if (g === void 0) {
-      const created = { rec, messageId, keptTs: rec.ts, file, moreFiles: null, dropped: false };
-      this.groups.set(rec.key, created);
-      if (messageId !== null && isAnthropicMessageId(messageId)) {
-        const first = this.firstByMessage.get(messageId);
-        if (first === void 0) this.firstByMessage.set(messageId, created);
-        else {
-          const list = this.sameMessage.get(messageId);
-          if (list === void 0) this.sameMessage.set(messageId, [first, created]);
-          else list.push(created);
-        }
-      }
+      this.groups.set(rec.key, { rec, keptTs: rec.ts, file, moreFiles: null, requestId, replayId: null });
       return;
     }
     this.counters.duplicateLines++;
     addFile(g, file);
     const kept = g.rec;
+    if (requestId !== null) {
+      if (g.requestId === null) g.requestId = requestId;
+      else if (requestId !== g.requestId && requestId !== g.replayId) {
+        g.replayId = requestId;
+        if (((kept.flags | rec.flags) & ResponseFlag.SIDECHAIN) !== 0) this.counters.sidechainReplaysDropped++;
+        else {
+          this.counters.messageIdsReused++;
+          kept.flags |= ResponseFlag.MESSAGE_ID_REUSED;
+          rec.flags |= ResponseFlag.MESSAGE_ID_REUSED;
+        }
+      }
+    }
     const ts = Math.min(kept.ts, rec.ts);
     const lastTs = Math.max(kept.lastTs, rec.lastTs);
     const groupFlags = (kept.flags | rec.flags) & GROUP_FLAGS;
+    const noRequestId = kept.flags & rec.flags & ResponseFlag.NO_REQUEST_ID;
     if (outranks(rec, kept) || !outranks(kept, rec) && rec.ts < g.keptTs) {
       g.keptTs = rec.ts;
       rec.key = kept.key;
@@ -608,10 +642,11 @@ var TranscriptReader = class {
     }
     g.rec.ts = ts;
     g.rec.lastTs = lastTs;
-    g.rec.flags = g.rec.flags & ~GROUP_FLAGS | groupFlags;
+    g.rec.flags = g.rec.flags & ~(GROUP_FLAGS | ResponseFlag.NO_REQUEST_ID) | groupFlags | noRequestId;
   }
   userRow(row, f) {
     this.counters.userRows++;
+    f.gatewayRun = null;
     const verdict = classifyUserRow(row, f.subagent);
     if (verdict.excluded !== void 0) {
       const c = this.counters;
@@ -639,50 +674,13 @@ var TranscriptReader = class {
       this.prompts.set(key, { rec: { key, sessionId: session.id, ts, kind }, file: f.index, moreFiles: null });
     });
   }
-  /**
-   * A sidechain file can replay a parent message under a new request id (seen with
-   * `/btw` side questions); the normal key does not catch that. When responses of one
-   * session share a message id and a sidechain copy is among them, the parent's row
-   * is the one that was billed as part of the conversation and the copies are dropped.
-   */
-  dropSidechainReplays() {
-    for (const list of this.sameMessage.values()) {
-      const bySession = /* @__PURE__ */ new Map();
-      for (const g of list) {
-        const same = bySession.get(g.rec.sessionId);
-        if (same === void 0) bySession.set(g.rec.sessionId, [g]);
-        else same.push(g);
-      }
-      for (const same of bySession.values()) {
-        if (same.length < 2) continue;
-        const main = same.filter((g) => (g.rec.flags & ResponseFlag.SIDECHAIN) === 0);
-        const side = same.filter((g) => (g.rec.flags & ResponseFlag.SIDECHAIN) !== 0);
-        if (main.length > 1) {
-          this.counters.messageIdsReused++;
-          for (const g of main) g.rec.flags |= ResponseFlag.MESSAGE_ID_REUSED;
-        }
-        if (side.length === 0) continue;
-        let keep = null;
-        if (main.length === 0) {
-          keep = side[0];
-          for (const g of side) if (outranks(g.rec, keep.rec)) keep = g;
-        }
-        for (const g of side) {
-          if (g === keep) continue;
-          g.dropped = true;
-          this.counters.sidechainReplaysDropped++;
-        }
-      }
-    }
-  }
   finish() {
     for (const { leaf, title } of this.summaries) {
       const owner = this.uuidSession.get(leaf);
       if (owner === void 0) this.counters.summariesUnresolved++;
       else this.session(owner).summaryTitle = title;
     }
-    this.dropSidechainReplays();
-    const groups = [...this.groups.values()].filter((g) => !g.dropped);
+    const groups = [...this.groups.values()];
     groups.sort((a, b) => a.rec.ts - b.rec.ts || (a.rec.key < b.rec.key ? -1 : a.rec.key > b.rec.key ? 1 : 0));
     const prompts = [...this.prompts.values()];
     prompts.sort((a, b) => a.rec.ts - b.rec.ts || (a.rec.key < b.rec.key ? -1 : a.rec.key > b.rec.key ? 1 : 0));
@@ -743,14 +741,8 @@ async function extractTranscripts(files, options = {}) {
   reader.totalBytes = toRead.reduce((sum, e) => sum + e.source.size, 0);
   for (const e of toRead) await reader.read(e.source, e.info);
   for (const e of skipped) {
-    if (!e.info.isSubagent && reader.hasSidechainUsage(e.info.sessionId)) {
-      reader.totalBytes += e.source.size;
-      reader.counters.filesRereadForContext++;
-      await reader.read(e.source, e.info);
-    } else {
-      reader.counters.filesSkippedUnchanged++;
-      reader.skip(e.source, e.info);
-    }
+    reader.counters.filesSkippedUnchanged++;
+    reader.skip(e.source, e.info);
   }
   reader.report();
   return reader.finish();
@@ -824,7 +816,7 @@ function emptyLedger() {
   return { generatedAt: null, machine: "", collector: null, responses: /* @__PURE__ */ new Map(), prompts: /* @__PURE__ */ new Map(), sessions: /* @__PURE__ */ new Map() };
 }
 function looksLikeLedger(head) {
-  return /"format"\s*:\s*"claude-lifetime\/claude-code-ledger"/.test(head);
+  return /^\uFEFF?\s*\{\s*"format"\s*:\s*"claude-lifetime\/claude-code-ledger"/.test(head);
 }
 var isObject2 = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 var isCount = (v) => typeof v === "number" && Number.isInteger(v) && v >= 0;
@@ -1071,9 +1063,10 @@ function mergeIntoLedger(ledger, fresh) {
     }
     const ts = Math.min(held.ts, r.ts);
     const sticky = (held.flags | r.flags) & STICKY_FLAGS;
+    const noRequestId = held.flags & r.flags & ResponseFlag.NO_REQUEST_ID;
     const better = outranks(r, held);
     const kept = better ? r : held;
-    const flags = kept.flags & ~STICKY_FLAGS | sticky;
+    const flags = kept.flags & ~(STICKY_FLAGS | ResponseFlag.NO_REQUEST_ID) | sticky | noRequestId;
     if (better) {
       ledger.responses.set(r.key, { ...r, ts, lastTs: Math.max(held.lastTs, r.lastTs), flags });
       report.responsesImproved++;
@@ -1105,6 +1098,8 @@ function mergeIntoLedger(ledger, fresh) {
 }
 
 // src/import/claude-code/collector.ts
+var { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeSync } = fs;
+var openAsBlob2 = fs.openAsBlob;
 var COLLECTOR_VERSION = "1.0.0";
 var CollectError = class extends Error {
   constructor(message, code) {
@@ -1164,19 +1159,21 @@ If Claude Code keeps its files elsewhere, pass that folder with --dir.`,
   return roots;
 }
 var SKIP_DIRS = /* @__PURE__ */ new Set(["tool-results", "mcp-tasks"]);
-function scan(dir, rel, out, visited) {
+function reasonOf(err) {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.replace(/, \w+ '.*'$/, "");
+}
+var isMissing = (err) => err?.code === "ENOENT";
+function scan(dir, rel, out, visited, unreadable) {
   let real;
-  try {
-    real = realpathSync(dir);
-  } catch {
-    return;
-  }
-  if (visited.has(real)) return;
-  visited.add(real);
   let entries;
   try {
+    real = realpathSync(dir);
+    if (visited.has(real)) return;
+    visited.add(real);
     entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
+  } catch (err) {
+    if (!isMissing(err)) unreadable.push({ path: dir, reason: reasonOf(err) });
     return;
   }
   for (const entry of entries) {
@@ -1185,11 +1182,12 @@ function scan(dir, rel, out, visited) {
     let stat;
     try {
       stat = statSync(abs);
-    } catch {
+    } catch (err) {
+      if (!isMissing(err)) unreadable.push({ path: abs, reason: reasonOf(err) });
       continue;
     }
     if (stat.isDirectory()) {
-      if (!SKIP_DIRS.has(entry.name)) scan(abs, childRel, out, visited);
+      if (!SKIP_DIRS.has(entry.name)) scan(abs, childRel, out, visited, unreadable);
     } else if (stat.isFile() && transcriptPathInfo(childRel).isTranscript) {
       out.push({ abs, rel: childRel, size: stat.size, mtimeMs: stat.mtimeMs });
     }
@@ -1208,7 +1206,7 @@ function appendTolerantSource(path, size) {
             if (offset >= size) return controller.close();
             try {
               if (reader === null) {
-                const blob = await openAsBlob(path);
+                const blob = await openAsBlob2(path);
                 reader = blob.slice(offset, size).stream().getReader();
               }
               const { done, value } = await reader.read();
@@ -1219,6 +1217,7 @@ function appendTolerantSource(path, size) {
               reader = null;
               const refused = err instanceof Error && err.name === "NotReadableError";
               if (!refused || ++reopens > MAX_REOPENS) throw err;
+              closeSync(openSync(path, "r"));
             }
           }
         },
@@ -1275,20 +1274,87 @@ It was left untouched. Move it out of the way (or pass another file with --ledge
     );
   }
 }
+var FILES_FORMAT = "claude-lifetime/collector-files";
+var FILES_VERSION = 1;
+function readFilesPath(ledgerPath) {
+  return `${ledgerPath.replace(/\.json$/i, "")}.files.json`;
+}
+function loadReadFiles(path, ledger) {
+  const known = /* @__PURE__ */ new Map();
+  if (ledger === null || ledger.generatedAt === null) return known;
+  try {
+    const doc = JSON.parse(readFileSync(path, "utf8"));
+    if (doc.format !== FILES_FORMAT || doc.version !== FILES_VERSION) return known;
+    if (doc.collector !== COLLECTOR_VERSION || doc.ledgerGeneratedAt !== ledger.generatedAt) return known;
+    const files = doc.files;
+    if (typeof files !== "object" || files === null) return known;
+    for (const [file, value] of Object.entries(files)) {
+      if (Array.isArray(value) && typeof value[0] === "number" && typeof value[1] === "number") known.set(file, { size: value[0], mtimeMs: value[1] });
+    }
+  } catch {
+    known.clear();
+  }
+  return known;
+}
+function* serialiseReadFiles(known, ledgerGeneratedAt) {
+  yield `{
+"format": ${JSON.stringify(FILES_FORMAT)},
+"version": ${FILES_VERSION},
+"collector": ${JSON.stringify(COLLECTOR_VERSION)},
+"ledgerGeneratedAt": ${JSON.stringify(ledgerGeneratedAt)},
+"files": {
+`;
+  let i = 0;
+  for (const [file, { size, mtimeMs }] of known) yield `${i++ > 0 ? ",\n" : ""}${JSON.stringify(file)}: [${size}, ${mtimeMs}]`;
+  yield "\n}\n}\n";
+}
+function removeStaleTemporaryFiles(targets, now) {
+  for (const target of targets) {
+    const dir = dirname(target);
+    const prefix = `.${basename(target)}.`;
+    let names;
+    try {
+      names = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue;
+      try {
+        const file = join(dir, name);
+        if (now - statSync(file).mtimeMs > IN_PROGRESS_WINDOW_MS) rmSync(file, { force: true });
+      } catch {
+      }
+    }
+  }
+}
+var DEFAULT_CHECKPOINT_BYTES = 512 * 1024 * 1024;
+function sessionOf(rel) {
+  const info = transcriptPathInfo(rel);
+  const project = rel.includes("/") ? rel.slice(0, rel.indexOf("/")) : "";
+  return `${project}/${info.sessionId ?? info.stem}`;
+}
 async function collect(options = {}) {
   const env = options.env ?? process.env;
   const home = options.homeDir ?? homedir();
   const now = options.now ?? Date.now();
   const ledgerPath = resolve(options.ledgerPath ?? defaultLedgerPath(home));
+  const filesPath = readFilesPath(ledgerPath);
   const outPath = options.outPath !== void 0 ? resolve(options.outPath) : null;
-  if (outPath !== null && outPath === ledgerPath) throw new CollectError("--out must name a different file than the ledger.", "bad_arguments");
+  if (outPath !== null && (outPath === ledgerPath || outPath === filesPath)) {
+    throw new CollectError("--out must name a different file than the ledger.", "bad_arguments");
+  }
+  const checkpointBytes = options.checkpointBytes ?? DEFAULT_CHECKPOINT_BYTES;
   const roots = findProjectsDirs(options.dirs, env, home);
   const found = [];
+  const foldersUnreadable = [];
   const visited = /* @__PURE__ */ new Set();
-  for (const root of roots) scan(root, "", found, visited);
+  for (const root of roots) scan(root, "", found, visited, foldersUnreadable);
   if (found.length === 0) {
+    const blocked = foldersUnreadable.length > 0 ? `
+Could not open: ${foldersUnreadable.map((u) => `${u.path} (${u.reason})`).join(", ")}.` : "";
     throw new CollectError(
-      `No transcripts (.jsonl files) found under ${roots.join(", ")}.
+      `No transcripts (.jsonl files) found under ${roots.join(", ")}.${blocked}
 Claude Code deletes transcripts after 30 days by default; an existing ledger is left as it is.`,
       "nothing_found"
     );
@@ -1296,41 +1362,98 @@ Claude Code deletes transcripts after 30 days by default; an existing ledger is 
   const existing = loadLedger(ledgerPath);
   const ledger = existing ?? emptyLedger();
   const before = { responses: ledger.responses.size, prompts: ledger.prompts.size };
-  const sources = found.map((f) => ({
-    name: basename(f.abs),
-    path: f.rel,
-    size: f.size,
-    lastModified: f.mtimeMs,
-    blob: appendTolerantSource(f.abs, f.size)
-  }));
-  const extraction = await extractTranscripts(sources, {
-    onProgress: options.onProgress ? (p) => options.onProgress?.({ bytesRead: p.bytesRead, totalBytes: p.totalBytes }) : void 0
-  });
-  const deferral = deferInProgress(extraction, now);
-  if (existing === null && deferral.responses.length === 0 && deferral.prompts.length === 0) {
+  const readFiles = loadReadFiles(filesPath, existing);
+  removeStaleTemporaryFiles([ledgerPath, filesPath], now);
+  const unchanged = (f) => {
+    const known = readFiles.get(f.abs);
+    return known !== void 0 && known.size === f.size && known.mtimeMs === f.mtimeMs;
+  };
+  const toRead = found.filter((f) => !unchanged(f)).sort((a, b) => a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0);
+  const present = new Set(found.map((f) => f.abs));
+  let listChanged = false;
+  for (const file of [...readFiles.keys()]) if (!present.has(file) && readFiles.delete(file)) listChanged = true;
+  for (const f of toRead) if (readFiles.delete(f.abs)) listChanged = true;
+  const totalBytes = toRead.reduce((sum, f) => sum + f.size, 0);
+  const header = { generatedAt: new Date(now).toISOString(), machine: options.machine ?? hostname(), collector: COLLECTOR_VERSION };
+  let ledgerGeneratedAt = existing?.generatedAt ?? null;
+  let listFor = readFiles.size > 0 ? ledgerGeneratedAt : null;
+  let ledgerChanged = existing === null;
+  let written = false;
+  let ledgerBytes = 0;
+  const save = () => {
+    if (ledgerChanged) {
+      ledgerBytes = writeAtomic(ledgerPath, serialiseLedger(ledger, header));
+      ledgerGeneratedAt = header.generatedAt;
+      ledgerChanged = false;
+      written = true;
+    }
+    if (ledgerGeneratedAt !== null && (listChanged || listFor !== ledgerGeneratedAt)) {
+      writeAtomic(filesPath, serialiseReadFiles(readFiles, ledgerGeneratedAt));
+      listChanged = false;
+      listFor = ledgerGeneratedAt;
+    }
+  };
+  const filesUnreadable = [];
+  const responsesFound = /* @__PURE__ */ new Set();
+  const promptsFound = /* @__PURE__ */ new Set();
+  const totals = { bytesRead: 0, malformedLines: 0, deferred: 0, responsesAdded: 0, responsesImproved: 0, promptsAdded: 0, partialAdded: 0 };
+  const readBatch = async (batch2) => {
+    const bytesBefore = totals.bytesRead;
+    const extraction = await extractTranscripts(
+      batch2.map((f) => ({ name: basename(f.abs), path: f.rel, size: f.size, lastModified: f.mtimeMs, blob: appendTolerantSource(f.abs, f.size) })),
+      { onProgress: options.onProgress ? (p) => options.onProgress?.({ bytesRead: bytesBefore + p.bytesRead, totalBytes }) : void 0 }
+    );
+    const deferral = deferInProgress(extraction, now);
+    for (const r of deferral.responses) {
+      responsesFound.add(r.key);
+      if ((r.flags & ResponseFlag.PARTIAL) !== 0 && !ledger.responses.has(r.key)) totals.partialAdded++;
+    }
+    for (const p of deferral.prompts) promptsFound.add(p.key);
+    const merged = mergeIntoLedger(ledger, { responses: deferral.responses, prompts: deferral.prompts, sessions: extraction.sessions });
+    if (ledger.responses.size < before.responses || ledger.prompts.size < before.prompts) {
+      throw new Error("Internal error: the updated ledger would hold fewer records than before. Nothing was written.");
+    }
+    if (merged.changed) ledgerChanged = true;
+    totals.bytesRead += extraction.counters.bytesRead;
+    totals.malformedLines += extraction.counters.malformedLines;
+    totals.deferred += deferral.deferredResponses;
+    totals.responsesAdded += merged.responsesAdded;
+    totals.responsesImproved += merged.responsesImproved;
+    totals.promptsAdded += merged.promptsAdded;
+    if (extraction.files.length !== batch2.length || extraction.files.some((file, i) => file.path !== batch2[i].rel)) {
+      throw new Error("Internal error: the transcripts were not read in the expected order. Nothing was written.");
+    }
+    extraction.files.forEach((file, i) => {
+      const f = batch2[i];
+      if (file.status === "unreadable") filesUnreadable.push({ path: f.abs, reason: reasonOf(file.error ?? "could not be read") });
+      else if (file.status === "read" && now - f.mtimeMs >= IN_PROGRESS_WINDOW_MS && !deferral.hotFiles.has(i)) {
+        readFiles.set(f.abs, { size: f.size, mtimeMs: f.mtimeMs });
+        listChanged = true;
+      }
+    });
+  };
+  let batch = [];
+  let batchBytes = 0;
+  for (let i = 0; i < toRead.length; i++) {
+    batch.push(toRead[i]);
+    batchBytes += toRead[i].size;
+    const last2 = i === toRead.length - 1;
+    if (last2 || batchBytes >= checkpointBytes && sessionOf(toRead[i + 1].rel) !== sessionOf(toRead[i].rel)) {
+      await readBatch(batch);
+      batch = [];
+      batchBytes = 0;
+      if (!last2 && ledger.responses.size + ledger.prompts.size > 0) save();
+    }
+  }
+  if (existing === null && ledger.responses.size === 0 && ledger.prompts.size === 0) {
+    const blocked = filesUnreadable.length > 0 ? ` ${things(filesUnreadable.length, "file")} could not be read: ${filesUnreadable[0].path} (${filesUnreadable[0].reason}).` : "";
     throw new CollectError(
-      `No Claude Code usage found in the ${found.length} transcript file(s) under ${roots.join(", ")}.`,
+      `No Claude Code usage found in the ${found.length} transcript file(s) under ${roots.join(", ")}.${blocked}`,
       "nothing_found"
     );
   }
-  let partialAdded = 0;
-  for (const r of deferral.responses) {
-    if ((r.flags & ResponseFlag.PARTIAL) !== 0 && !ledger.responses.has(r.key)) partialAdded++;
-  }
-  const merged = mergeIntoLedger(ledger, { responses: deferral.responses, prompts: deferral.prompts, sessions: extraction.sessions });
-  if (ledger.responses.size < before.responses || ledger.prompts.size < before.prompts) {
-    throw new Error("Internal error: the updated ledger would hold fewer records than before. Nothing was written.");
-  }
-  let ledgerBytes;
-  const written = existing === null || merged.changed;
-  if (written) {
-    ledgerBytes = writeAtomic(
-      ledgerPath,
-      serialiseLedger(ledger, { generatedAt: new Date(now).toISOString(), machine: options.machine ?? hostname(), collector: COLLECTOR_VERSION })
-    );
-  } else {
-    ledgerBytes = statSync(ledgerPath).size;
-  }
+  save();
+  if (!written) ledgerBytes = statSync(ledgerPath).size;
   if (outPath !== null) copyAtomic(ledgerPath, outPath);
   let first = Infinity;
   let last = -Infinity;
@@ -1348,16 +1471,19 @@ Claude Code deletes transcripts after 30 days by default; an existing ledger is 
   return {
     roots,
     transcriptFiles: found.length,
-    filesUnreadable: extraction.counters.filesUnreadable,
-    bytesRead: extraction.counters.bytesRead,
-    malformedLines: extraction.counters.malformedLines,
-    responsesFound: deferral.responses.length,
-    promptsFound: deferral.prompts.length,
-    deferredInProgress: deferral.deferredResponses,
-    responsesAdded: merged.responsesAdded,
-    responsesImproved: merged.responsesImproved,
-    promptsAdded: merged.promptsAdded,
-    partialAdded,
+    filesRead: toRead.length,
+    filesUnchanged: found.length - toRead.length,
+    foldersUnreadable,
+    filesUnreadable,
+    bytesRead: totals.bytesRead,
+    malformedLines: totals.malformedLines,
+    responsesFound: responsesFound.size,
+    promptsFound: promptsFound.size,
+    deferredInProgress: totals.deferred,
+    responsesAdded: totals.responsesAdded,
+    responsesImproved: totals.responsesImproved,
+    promptsAdded: totals.promptsAdded,
+    partialAdded: totals.partialAdded,
     responses: ledger.responses.size,
     prompts: ledger.prompts.size,
     sessions: sessions.size,
@@ -1378,7 +1504,10 @@ run this regularly.
 
 Nothing leaves this computer, and no message text is stored: the ledger holds ids,
 timestamps, model names and token counts, plus each session's title, folder and
-git branch.
+git branch. Next to the ledger the tool keeps a list of the transcripts it has read
+(their paths, sizes and dates), so that a later run only reads what is new. The first
+run reads everything, which can take minutes when there are gigabytes of transcripts;
+it saves as it goes, so a run that is stopped early is continued by the next one.
 
 Usage:
   node claude-lifetime-collect.mjs [options]
@@ -1393,7 +1522,8 @@ Options:
   --help              Show this help.
   --version           Show the version.
 
-Exit status: 0 when the ledger is up to date, 1 when nothing was found or on an error.
+Exit status: 0 when the ledger is up to date; 1 when nothing was found or on an error;
+3 when the ledger was updated but a folder or a transcript could not be read.
 `;
 function parseArgs(argv) {
   const args = { dirs: [], quiet: false, help: false, version: false };
@@ -1422,9 +1552,29 @@ function megabytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 var things = (n, one) => `${num(n)} ${one}${n === 1 ? "" : "s"}`;
+var EXIT_INCOMPLETE = 3;
+var LISTED = 5;
+function formatProblems(r) {
+  const lines = [];
+  const list = (items, what) => {
+    if (items.length === 0) return;
+    lines.push(what);
+    for (const u of items.slice(0, LISTED)) lines.push(`  ${u.path}: ${u.reason}`);
+    if (items.length > LISTED) lines.push(`  and ${num(items.length - LISTED)} more`);
+  };
+  list(
+    r.foldersUnreadable,
+    `${things(r.foldersUnreadable.length, "folder")} could not be opened, so the usage in ${r.foldersUnreadable.length === 1 ? "it" : "them"} was not collected:`
+  );
+  list(
+    r.filesUnreadable,
+    `${things(r.filesUnreadable.length, "transcript")} could not be read to the end; what was read is in the ledger, the rest is tried again by the next run:`
+  );
+  return lines;
+}
 function formatSummary(r) {
   const lines = [
-    `Read       ${things(r.transcriptFiles, "transcript file")} (${megabytes(r.bytesRead)}) under ${r.roots.join(", ")}`,
+    `Read       ${things(r.filesRead, "transcript file")} (${megabytes(r.bytesRead)}) under ${r.roots.join(", ")}` + (r.filesUnchanged > 0 ? `; ${num(r.filesUnchanged)} unchanged since an earlier run` : ""),
     `Found      ${things(r.responsesFound, "response")} and ${things(r.promptsFound, "prompt")} in them`,
     `New        ${things(r.responsesAdded, "response")} and ${things(r.promptsAdded, "prompt")} since the last run` + (r.responsesImproved > 0 ? ` (${things(r.responsesImproved, "earlier record")} completed)` : ""),
     `Ledger     ${things(r.responses, "response")}, ${things(r.prompts, "prompt")}, ${things(r.sessions, "session")}`,
@@ -1436,8 +1586,9 @@ function formatSummary(r) {
   if (r.deferredInProgress > 0) notes.push(`${things(r.deferredInProgress, "response")} still being written: left for the next run`);
   if (r.partialAdded > 0) notes.push(`${things(r.partialAdded, "response")} only recorded as a streaming snapshot: output tokens may be undercounted`);
   if (r.malformedLines > 0) notes.push(`${things(r.malformedLines, "unreadable line")} skipped (a cut-off last line is normal while a session runs)`);
-  if (r.filesUnreadable > 0) notes.push(`${things(r.filesUnreadable, "file")} could not be read to the end and will be read again next time`);
   for (const note of notes) lines.push(`Note       ${note}`);
+  const problems = formatProblems(r);
+  if (problems.length > 0) lines.push("", `Incomplete ${problems[0]}`, ...problems.slice(1));
   return `${lines.join("\n")}
 `;
 }
@@ -1460,8 +1611,9 @@ ${USAGE}`);
 `);
     return 0;
   }
-  if (typeof openAsBlob !== "function") {
-    io.err("This tool needs Node.js 20 or newer.\n");
+  if (typeof openAsBlob2 !== "function") {
+    io.err(`This tool needs Node.js 20 or newer; this is Node.js ${process.versions.node}.
+`);
     return 1;
   }
   try {
@@ -1475,7 +1627,10 @@ ${USAGE}`);
     });
     progress?.("");
     if (!args.quiet) io.out(formatSummary(result));
-    return 0;
+    const incomplete = result.foldersUnreadable.length + result.filesUnreadable.length > 0;
+    if (incomplete && args.quiet) io.err(`${formatProblems(result).join("\n")}
+`);
+    return incomplete ? EXIT_INCOMPLETE : 0;
   } catch (err) {
     io.progress?.("");
     if (err instanceof CollectError) io.err(`${err.message}
