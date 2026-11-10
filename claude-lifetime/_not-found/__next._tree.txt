@@ -1,4 +1,4 @@
 :HL["/claude-lifetime/_next/static/chunks/0e-zc6xm-7f3u.css","style"]
 2:[["children",{"s":"__PAGE__","h":160}]]
 1:[["children",{"s":"/_not-found","h":96,"c":"$Q2"}]]
-0:{"b":"Hp2uGCn4MkvtgdAeN0OPT","t":{"t":{"s":"","h":80,"c":"$Q1"}}}
+0:{"b":"r7-rKp1mlwVtQjhYFwTkI","t":{"t":{"s":"","h":80,"c":"$Q1"}}}
