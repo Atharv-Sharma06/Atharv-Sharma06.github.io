@@ -410,17 +410,20 @@ model ReportedCost {
   @@map("reported_costs")
 }
 
-/// A stretch of time on one plan. Entered by the user; never inferred.
-/// Overlaps are rejected by the application and by an exclusion constraint (0002 migration).
+/// A stretch of calendar days on one plan. Entered by the user; never inferred.
+/// Stored as the days that were entered, so the periods do not move when the timezone
+/// setting changes. Overlaps are rejected by the application and by an exclusion
+/// constraint (period_dates migration).
 model SubscriptionPeriod {
   id           Int       @id @default(autoincrement())
   userId       Int       @map("user_id")
   /// free | pro | max_5x | max_20x | max | team | enterprise | other ...
   planKey      String    @map("plan_key")
   label        String?
-  startedAt    DateTime  @map("started_at") @db.Timestamptz(3)
-  /// NULL while the plan is still active.
-  endedAt      DateTime? @map("ended_at") @db.Timestamptz(3)
+  /// First day on the plan.
+  startDate    DateTime  @map("start_date") @db.Date
+  /// Last day on the plan, inclusive. NULL while the plan is still active.
+  lastDate     DateTime? @map("last_date") @db.Date
   /// What the user actually paid per month, if they choose to record it.
   monthlyPrice Decimal?  @map("monthly_price") @db.Decimal(10, 2)
   currency     String    @default("USD")
@@ -432,7 +435,7 @@ model SubscriptionPeriod {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId, startedAt])
+  @@index([userId, startDate])
   @@map("subscription_periods")
 }
 

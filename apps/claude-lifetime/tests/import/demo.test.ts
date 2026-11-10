@@ -86,7 +86,7 @@ describe('synthetic demo dataset', () => {
   it('keeps subscription periods the user entered', async () => {
     await deleteAllData(t.db, t.userId);
     await t.db.query(
-      `INSERT INTO subscription_periods (user_id, plan_key, started_at) VALUES ($1, 'pro', '2025-01-01T00:00:00Z')`,
+      `INSERT INTO subscription_periods (user_id, plan_key, start_date) VALUES ($1, 'pro', '2025-01-01')`,
       [t.userId],
     );
     const res = await loadDemoDataset(t.db, t.userId, 'UTC', NOW);

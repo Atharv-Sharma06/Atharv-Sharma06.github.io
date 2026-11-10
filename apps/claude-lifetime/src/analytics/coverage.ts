@@ -103,12 +103,18 @@ export async function getCoverage(db: SqlExecutor, userId: number, timezone: str
 
   const gaps = (
     await db.query<{ from_day: string; to_day: string; days: number }>(
+      // A row that adds up more than a day (a monthly line of a CSV, a report bucket for a whole range) covers
+      // every day up to its end, not only the day it starts on.
       `WITH days AS (
-         SELECT DISTINCT ${day} AS d FROM usage_facts f JOIN data_sources s ON s.id = f.source_id
-          WHERE f.user_id = $1 AND s.include_in_totals),
-       g AS (SELECT d, lead(d) OVER (ORDER BY d) AS next FROM days)
-       SELECT (d + 1)::text AS from_day, (next - 1)::text AS to_day, (next - d - 1)::int AS days
-         FROM g WHERE next - d - 1 >= $3 ORDER BY days DESC, d LIMIT 12`,
+         SELECT ${day} AS d,
+                max(CASE WHEN f.bucket_seconds > 86400
+                         THEN ((f.occurred_at + make_interval(secs => f.bucket_seconds - 1)) AT TIME ZONE 'UTC')::date
+                         ELSE ${day} END) AS last_covered
+           FROM usage_facts f JOIN data_sources s ON s.id = f.source_id
+          WHERE f.user_id = $1 AND s.include_in_totals GROUP BY 1),
+       g AS (SELECT max(last_covered) OVER (ORDER BY d) AS covered, lead(d) OVER (ORDER BY d) AS next FROM days)
+       SELECT (covered + 1)::text AS from_day, (next - 1)::text AS to_day, (next - covered - 1)::int AS days
+         FROM g WHERE next - covered - 1 >= $3 ORDER BY days DESC, covered LIMIT 12`,
       [userId, timezone, gapDays],
     )
   ).rows;

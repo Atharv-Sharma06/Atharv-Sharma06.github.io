@@ -39,12 +39,16 @@ export async function deleteBatch(db: SqlDriver, userId: number, batchId: number
     if (ids.length > 0) {
       await refreshConversationCounters(tx, userId, `c.id IN (${ids.map((n) => Number(n)).join(',')})`);
     }
-    // A source with no imports left has nothing to show.
-    await tx.query(
-      `DELETE FROM data_sources s WHERE s.user_id = $1
-          AND NOT EXISTS (SELECT 1 FROM import_batches b WHERE b.source_id = s.id)`,
+    // A source with no imports left has nothing to show. Conversations it started that another source
+    // has added to are handed to that source first, so they are not removed along with it.
+    const empty = await tx.query<{ id: number }>(
+      `SELECT s.id FROM data_sources s WHERE s.user_id = $1 AND NOT EXISTS (SELECT 1 FROM import_batches b WHERE b.source_id = s.id)`,
       [userId],
     );
+    for (const source of empty.rows) {
+      await handOverSharedConversations(tx, userId, source.id);
+      await tx.query(`DELETE FROM data_sources WHERE id = $1 AND user_id = $2`, [source.id, userId]);
+    }
     await removeOrphanedDemoPeriods(tx, userId);
     return { deleted: true, conversationsRemoved: orphans.affectedRows ?? 0 };
   });
@@ -56,14 +60,62 @@ export async function deleteBatch(db: SqlDriver, userId: number, batchId: number
 /** Removes a data source with all of its imports, conversations and usage. */
 export async function deleteSource(db: SqlDriver, userId: number, sourceId: number): Promise<DeleteResult> {
   const result = await db.transaction(async (tx) => {
+    // Conversations of other sources that this source added records to lose those records, and nothing else.
+    const visited = await tx.query<{ id: number }>(
+      `SELECT c.id FROM conversations c
+        WHERE c.user_id = $1 AND c.source_id <> $2
+          AND (EXISTS (SELECT 1 FROM usage_records u WHERE u.conversation_id = c.id AND u.source_id = $2)
+            OR EXISTS (SELECT 1 FROM messages m JOIN import_batches b ON b.id = m.batch_id WHERE m.conversation_id = c.id AND b.source_id = $2))`,
+      [userId, sourceId],
+    );
+    // Conversations this source started that another source has added to stay, with that source's records.
+    const kept = await handOverSharedConversations(tx, userId, sourceId);
     const conv = await tx.query<{ n: number }>(`SELECT count(*)::int AS n FROM conversations WHERE source_id = $1 AND user_id = $2`, [sourceId, userId]);
     const del = await tx.query(`DELETE FROM data_sources WHERE id = $1 AND user_id = $2`, [sourceId, userId]);
+    const touched = [...visited.rows.map((r) => r.id), ...kept];
+    if (touched.length > 0) {
+      await tx.query(
+        `DELETE FROM conversations c
+          WHERE c.user_id = $1 AND c.id = ANY($2::int[])
+            AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id)
+            AND NOT EXISTS (SELECT 1 FROM usage_records u WHERE u.conversation_id = c.id)`,
+        [userId, touched],
+      );
+      await refreshConversationCounters(tx, userId, `c.id IN (${touched.map((n) => Number(n)).join(',')})`);
+    }
     await removeOrphanedDemoPeriods(tx, userId);
     return { deleted: (del.affectedRows ?? 0) > 0, conversationsRemoved: conv.rows[0].n };
   });
   if (result.deleted) await refreshStatistics(db);
   await db.flush();
   return result;
+}
+
+/**
+ * A conversation belongs to the source that imported it first, but another source can
+ * add records to it later: the same Claude Code session read under two computer names,
+ * or one claude.ai account imported with and without its account id. Before a source
+ * is removed, the conversations it started that hold records of another source are
+ * handed to that source. Left alone, they would be deleted with their source and take
+ * the other source's records with them. Returns the conversations that were handed over.
+ */
+async function handOverSharedConversations(tx: SqlExecutor, userId: number, sourceId: number): Promise<number[]> {
+  const { rows } = await tx.query<{ id: number }>(
+    `UPDATE conversations c SET source_id = keep.source_id
+       FROM (
+         SELECT mine.id,
+                (SELECT min(other.source_id) FROM (
+                   SELECT u.source_id FROM usage_records u WHERE u.conversation_id = mine.id AND u.source_id <> $2
+                   UNION ALL
+                   SELECT b.source_id FROM messages m JOIN import_batches b ON b.id = m.batch_id WHERE m.conversation_id = mine.id AND b.source_id <> $2
+                 ) other) AS source_id
+           FROM conversations mine WHERE mine.user_id = $1 AND mine.source_id = $2
+       ) keep
+      WHERE c.id = keep.id AND keep.source_id IS NOT NULL
+      RETURNING c.id`,
+    [userId, sourceId],
+  );
+  return rows.map((r) => r.id);
 }
 
 /**

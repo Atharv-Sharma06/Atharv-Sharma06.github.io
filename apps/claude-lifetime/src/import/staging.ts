@@ -42,11 +42,29 @@ CREATE TEMP TABLE IF NOT EXISTS stg_usage (
 CREATE TEMP TABLE IF NOT EXISTS stg_costs (
   model_key text, occurred_at timestamptz NOT NULL, bucket_seconds int NOT NULL, cost_type text, token_type text,
   description text, amount_usd numeric(18,6) NOT NULL, dedup_key text NOT NULL
-);`;
+);
+CREATE TEMP TABLE IF NOT EXISTS stg_owner (token text NOT NULL);`;
 
-export async function resetStaging(db: SqlExecutor): Promise<void> {
+/**
+ * Empties the staging tables and returns a token that stands for whatever is staged
+ * from now on. Every reset makes a new one, so a commit that presents its token (see
+ * commitImport) can tell whether the records it previewed are still the ones staged.
+ */
+export async function resetStaging(db: SqlExecutor): Promise<string> {
+  // Hex digits and dashes only, so it can be written into the statement as it is.
+  const token = globalThis.crypto.randomUUID();
   await db.exec(STAGING_DDL);
-  await db.exec('TRUNCATE stg_models, stg_conversations, stg_messages, stg_usage, stg_costs;');
+  await db.exec(`TRUNCATE stg_models, stg_conversations, stg_messages, stg_usage, stg_costs, stg_owner; INSERT INTO stg_owner (token) VALUES ('${token}');`);
+  return token;
+}
+
+/** The token of the records that are staged right now, or null when nothing was ever staged in this session. */
+export async function stagingToken(db: SqlExecutor): Promise<string | null> {
+  // The tables are session-local: they are gone when the tab that hosted the database was closed and another took over.
+  const present = await db.query<{ present: boolean }>(`SELECT to_regclass('pg_temp.stg_owner') IS NOT NULL AS present`);
+  if (present.rows[0]?.present !== true) return null;
+  const { rows } = await db.query<{ token: string }>(`SELECT token FROM stg_owner LIMIT 1`);
+  return rows[0]?.token ?? null;
 }
 
 const BATCH = 4000;

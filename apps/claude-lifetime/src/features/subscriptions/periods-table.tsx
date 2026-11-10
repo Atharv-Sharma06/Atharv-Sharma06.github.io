@@ -111,7 +111,7 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
             const length = lengthDays(segment, nowMs);
             const elapsed = elapsedDays(segment, nowMs);
             const recorded = hasRecords(segment);
-            const average = averagePerDay(segment, nowMs);
+            const average = averagePerDay(segment);
             const level = valueLevel(segment.value);
             const share = pricedShare(segment.value);
 
@@ -163,8 +163,18 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
                           {formatTokens(segment.tokens)}
                         </BadgedFigure>
                       </Td>
-                      <Td numeric className={CELL}>
-                        {average === null ? <Unavailable /> : <span title={`${formatInt(average)} tokens per day`}>{formatTokens(average)}</span>}
+                      <Td numeric className={cn(CELL, 'whitespace-nowrap')}>
+                        {average === null ? (
+                          <Unavailable />
+                        ) : (
+                          <>
+                            <span title={`${formatInt(average)} tokens per day, over the ${plural(segment.recordedDays, 'day')} of this period between your first and last imported record`}>
+                              {formatTokens(average)}
+                            </span>
+                            {/* Days outside the imported history are unknown, not empty, so they are not averaged in. */}
+                            {segment.recordedDays < elapsed ? <span className="mt-0.5 block text-xs text-ink-3">over {plural(segment.recordedDays, 'day')}</span> : null}
+                          </>
+                        )}
                       </Td>
                       <Td numeric className={CELL}>
                         {segment.conversations > 0 ? formatInt(segment.conversations) : <Unavailable />}

@@ -1,6 +1,7 @@
 import { ImportError } from '@/core/types';
 import type { SqlDriver } from '@/db/driver';
 import { commitImport } from '../commit';
+import { asOnlyImport } from '../lock';
 import { resetStaging, StagingWriter } from '../staging';
 import { buildDemoDataset } from './generate';
 
@@ -28,18 +29,21 @@ export async function loadDemoDataset(db: SqlDriver, userId: number, timezone: s
 
   const dataset = buildDemoDataset(now);
   const result: DemoLoadResult = { conversations: 0, messages: 0, usageRows: 0, costRows: 0, periodsAdded: false };
-  for (const part of dataset.parts) {
+  // The parts go through the shared staging tables like any import, so no other import may be under way.
+  await asOnlyImport(async () => {
+    for (const part of dataset.parts) {
+      const staging = await resetStaging(db);
+      const writer = new StagingWriter(db);
+      await part.write(writer);
+      await writer.finish();
+      const committed = await commitImport(db, userId, part.parsed, { staging });
+      result.conversations += committed.inserted.conversations;
+      result.messages += committed.inserted.messages;
+      result.usageRows += committed.inserted.usageRows;
+      result.costRows += committed.inserted.costRows;
+    }
     await resetStaging(db);
-    const writer = new StagingWriter(db);
-    await part.write(writer);
-    await writer.finish();
-    const committed = await commitImport(db, userId, part.parsed);
-    result.conversations += committed.inserted.conversations;
-    result.messages += committed.inserted.messages;
-    result.usageRows += committed.inserted.usageRows;
-    result.costRows += committed.inserted.costRows;
-  }
-  await resetStaging(db);
+  });
 
   // Demo subscription periods are only added when the user has entered none of their own.
   const own = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM subscription_periods WHERE user_id = $1`, [userId]);
@@ -47,11 +51,9 @@ export async function loadDemoDataset(db: SqlDriver, userId: number, timezone: s
     await db.transaction(async (tx) => {
       for (const p of dataset.periods) {
         await tx.query(
-          `INSERT INTO subscription_periods (user_id, plan_key, started_at, ended_at, monthly_price, currency, notes, is_synthetic)
-           VALUES ($1, $2, ($3::date)::timestamp AT TIME ZONE $5::text,
-                   CASE WHEN $4::date IS NULL THEN NULL ELSE (($4::date + 1))::timestamp AT TIME ZONE $5::text END,
-                   $6::numeric, 'USD', 'Synthetic demo period', true)`,
-          [userId, p.planKey, p.startDate, p.lastDate, timezone, p.monthlyPrice],
+          `INSERT INTO subscription_periods (user_id, plan_key, start_date, last_date, monthly_price, currency, notes, is_synthetic)
+           VALUES ($1, $2, $3::date, $4::date, $5::numeric, 'USD', 'Synthetic demo period', true)`,
+          [userId, p.planKey, p.startDate, p.lastDate, p.monthlyPrice],
         );
       }
     });

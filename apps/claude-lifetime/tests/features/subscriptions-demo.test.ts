@@ -132,14 +132,25 @@ describe('periods table of the demo history', () => {
     expect(segments.reduce((sum, s) => sum + s.tokens, 0)).toBe((await direct(null, null)).tokens);
   });
 
-  it('averages the tokens of a period over its days', async () => {
+  it('averages the tokens of a period over its days inside the recorded history', async () => {
+    // The recorded history, straight from the view: the first and the last day with a record (UTC here).
+    const all = await direct(null, null);
+    const dayOf = (ms: number) => Math.floor(ms / DAY_MS);
+    const [historyFirst, historyLast] = [dayOf(all.first!), dayOf(all.last!)];
     for (const segment of segments) {
       const d = await direct(segment.start, segment.end);
-      const days = Math.max(1, Math.round(((segment.end ? Date.parse(segment.end) : NOW.getTime()) - Date.parse(segment.start)) / DAY_MS));
+      const first = dayOf(Date.parse(segment.start));
+      // the last day of the segment: the day before its exclusive end, or today while it runs
+      const last = segment.end ? dayOf(Date.parse(segment.end)) - 1 : dayOf(NOW.getTime());
+      const days = last - first + 1;
       expect(lengthDays(segment, NOW.getTime())).toBe(days);
-      expect(elapsedDays(segment, NOW.getTime())).toBe(days);
-      expect(averagePerDay(segment, NOW.getTime())).toBeCloseTo(d.tokens / days, 6);
-      expect(averagePerDay(segment, NOW.getTime())).toBe(segment.averageDailyTokens);
+      expect(segment.elapsedDays).toBe(days);
+      expect(Math.abs(elapsedDays(segment, NOW.getTime()) - days)).toBeLessThanOrEqual(1);
+      const recorded = Math.min(last, historyLast) - Math.max(first, historyFirst) + 1;
+      expect(recorded).toBeGreaterThan(0);
+      expect(segment.recordedDays).toBe(recorded);
+      expect(averagePerDay(segment)).toBeCloseTo(d.tokens / recorded, 6);
+      expect(averagePerDay(segment)).toBe(segment.averageDailyTokens);
     }
   });
 
@@ -164,10 +175,14 @@ describe('before vs. after the first paid plan, on the demo history', () => {
     const split = sides.split!.at;
     const before = await direct(null, split);
     const after = await direct(split, null);
-    // the span of a side: from its first record to the split, or from the split to its last record, in started days
-    const beforeDays = Math.ceil((Date.parse(split) - before.first!) / DAY_MS);
-    const afterDays = Math.ceil((after.last! - Date.parse(split)) / DAY_MS);
+    // the span of a side in calendar days: from the day of its first record to the day before the split, or from the
+    // split day to the day of its last record
+    const dayOf = (ms: number) => Math.floor(ms / DAY_MS);
+    const beforeDays = dayOf(Date.parse(split)) - dayOf(before.first!);
+    const afterDays = dayOf(after.last!) - dayOf(Date.parse(split)) + 1;
     expect([sides.before!.spanDays, sides.after!.spanDays]).toEqual([beforeDays, afterDays]);
+    expect([sides.before!.spanFrom, sides.before!.spanTo]).toEqual([new Date(before.first!).toISOString().slice(0, 10), new Date(Date.parse(split) - DAY_MS).toISOString().slice(0, 10)]);
+    expect([sides.after!.spanFrom, sides.after!.spanTo]).toEqual([split.slice(0, 10), new Date(after.last!).toISOString().slice(0, 10)]);
     expect([sides.before!.tokens, sides.after!.tokens]).toEqual([before.tokens, after.tokens]);
 
     for (const [stats, d, days] of [[sides.before!, before, beforeDays], [sides.after!, after, afterDays]] as const) {

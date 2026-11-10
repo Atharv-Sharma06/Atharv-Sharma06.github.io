@@ -1,22 +1,31 @@
 import { toIso, toNumber, type SqlDriver, type SqlExecutor } from '@/db/driver';
+import { addDays, dayInZone, daysBetween } from '@/lib/format';
 import { factsFrom, NO_PLAN, Params, tokenExpr, type AnalyticsFilter } from './base';
 import { getApiValueBy, ZERO_FIGURES, type ValueFigures, type ValueOptions } from './value';
 
 /**
  * Subscription history is entered by the user and stored on its own. Usage rows never
  * carry a plan: which plan a fact belongs to is derived here, at query time, from the
- * fact's timestamp. Editing a period therefore re-classifies all usage instantly.
+ * fact's calendar day. Editing a period therefore re-classifies all usage instantly.
+ *
+ * A period is a range of calendar days, stored as the days that were entered. Usage is
+ * matched to it by day, the same day every chart files that usage under, so a record
+ * that only knows its date (a daily report bucket, a manual entry) lands in the plan
+ * that was active on that date in every timezone.
  */
 export interface SubscriptionPeriod {
   id: number;
   planKey: string;
   label: string | null;
-  /** Instants (UTC). `endedAt` is exclusive; null while the plan is active. */
-  startedAt: string;
-  endedAt: string | null;
-  /** The same in the user's timezone: first and last day on the plan. */
+  /** First and last day on the plan, as entered. `lastDate` is null while the plan is active. */
   startDate: string;
   lastDate: string | null;
+  /**
+   * The same as instants in the current timezone: the start of the first day, and the
+   * start of the day after the last (exclusive). Derived for display, never stored.
+   */
+  startedAt: string;
+  endedAt: string | null;
   monthlyPrice: string | null;
   currency: string;
   notes: string | null;
@@ -70,9 +79,9 @@ export class SubscriptionError extends Error {
 }
 
 const SELECT_PERIOD = (tz: string) => `
-  sp.id, sp.plan_key, sp.label, sp.started_at, sp.ended_at,
-  (sp.started_at AT TIME ZONE ${tz})::date::text AS start_date,
-  ((sp.ended_at AT TIME ZONE ${tz}) - interval '1 microsecond')::date::text AS last_date,
+  sp.id, sp.plan_key, sp.label, sp.start_date::text AS start_date, sp.last_date::text AS last_date,
+  (sp.start_date::timestamp AT TIME ZONE ${tz}) AS started_at,
+  ((sp.last_date + 1)::timestamp AT TIME ZONE ${tz}) AS ended_at,
   sp.monthly_price::text AS monthly_price, sp.currency, sp.notes, sp.is_synthetic`;
 
 function readPeriod(r: Record<string, unknown>): SubscriptionPeriod {
@@ -93,7 +102,7 @@ function readPeriod(r: Record<string, unknown>): SubscriptionPeriod {
 
 export async function listPeriods(db: SqlExecutor, userId: number, timezone: string): Promise<SubscriptionPeriod[]> {
   const { rows } = await db.query<Record<string, unknown>>(
-    `SELECT ${SELECT_PERIOD('$2::text')} FROM subscription_periods sp WHERE sp.user_id = $1 ORDER BY sp.started_at`,
+    `SELECT ${SELECT_PERIOD('$2::text')} FROM subscription_periods sp WHERE sp.user_id = $1 ORDER BY sp.start_date`,
     [userId, timezone],
   );
   return rows.map(readPeriod);
@@ -128,21 +137,13 @@ export async function savePeriod(db: SqlDriver, userId: number, timezone: string
   if (!/^[A-Z]{3}$/.test(currency)) throw new SubscriptionError('Use a three-letter currency code such as USD.', 'invalid');
 
   const saved = await db.transaction(async (tx) => {
-    const bounds = (
-      await tx.query<{ s: Date; e: Date | null }>(
-        `SELECT ($1::date)::timestamp AT TIME ZONE $3::text AS s,
-                CASE WHEN $2::date IS NULL THEN NULL ELSE (($2::date + 1))::timestamp AT TIME ZONE $3::text END AS e`,
-        [input.startDate, lastDate, timezone],
-      )
-    ).rows[0];
-
     const conflict = (
       await tx.query<Record<string, unknown>>(
         `SELECT ${SELECT_PERIOD('$5::text')} FROM subscription_periods sp
           WHERE sp.user_id = $1 AND sp.id <> COALESCE($2::int, -1)
-            AND tstzrange(sp.started_at, sp.ended_at, '[)') && tstzrange($3::timestamptz, $4::timestamptz, '[)')
-          ORDER BY sp.started_at LIMIT 1`,
-        [userId, input.id ?? null, bounds.s, bounds.e, timezone],
+            AND daterange(sp.start_date, sp.last_date, '[]') && daterange($3::date, $4::date, '[]')
+          ORDER BY sp.start_date LIMIT 1`,
+        [userId, input.id ?? null, input.startDate, lastDate, timezone],
       )
     ).rows[0];
     if (conflict) {
@@ -155,10 +156,10 @@ export async function savePeriod(db: SqlDriver, userId: number, timezone: string
       );
     }
 
-    const values = [userId, planKey, input.label?.trim() || null, bounds.s, bounds.e, price, currency, input.notes?.trim() || null];
+    const values = [userId, planKey, input.label?.trim() || null, input.startDate, lastDate, price, currency, input.notes?.trim() || null];
     if (input.id) {
       const res = await tx.query<{ id: number }>(
-        `UPDATE subscription_periods SET plan_key = $2, label = $3, started_at = $4, ended_at = $5, monthly_price = $6::numeric,
+        `UPDATE subscription_periods SET plan_key = $2, label = $3, start_date = $4::date, last_date = $5::date, monthly_price = $6::numeric,
                 currency = $7, notes = $8, is_synthetic = false, updated_at = now()
           WHERE user_id = $1 AND id = $9 RETURNING id`,
         [...values, input.id],
@@ -167,8 +168,8 @@ export async function savePeriod(db: SqlDriver, userId: number, timezone: string
       return res.rows[0].id;
     }
     const res = await tx.query<{ id: number }>(
-      `INSERT INTO subscription_periods (user_id, plan_key, label, started_at, ended_at, monthly_price, currency, notes)
-       VALUES ($1, $2, $3, $4, $5, $6::numeric, $7, $8) RETURNING id`,
+      `INSERT INTO subscription_periods (user_id, plan_key, label, start_date, last_date, monthly_price, currency, notes)
+       VALUES ($1, $2, $3, $4::date, $5::date, $6::numeric, $7, $8) RETURNING id`,
       values,
     );
     return res.rows[0].id;
@@ -191,64 +192,115 @@ export interface SegmentRange {
   periodId: number | null;
   planKey: string;
   label: string;
-  /** ISO instants; `end` is exclusive and null when the segment is still running. */
+  /** First day of the segment and the day after its last (exclusive); `endDate` is null while the segment is running. */
+  startDate: string;
+  endDate: string | null;
+  /** The same as instants in the current timezone, for placing the segment on a time axis. */
   start: string;
   end: string | null;
 }
 
 /**
- * The entered periods in order, with the uncovered time between them made explicit.
+ * The entered periods in order, with the uncovered days between them made explicit.
  * Nothing is assumed about uncovered time: it is labelled "No subscription recorded".
- * A leading gap is only added when imported usage starts before the first period.
+ * A leading gap is only added when imported usage starts before the first period;
+ * `firstUsage` is the first day with a record and the instant that day begins.
  */
-export function buildSegments(periods: SubscriptionPeriod[], firstUsageAt: string | null, nowIso: string): SegmentRange[] {
-  const sorted = [...periods].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+export function buildSegments(periods: SubscriptionPeriod[], firstUsage: { day: string; at: string } | null, today: string): SegmentRange[] {
+  const sorted = [...periods].sort((a, b) => a.startDate.localeCompare(b.startDate));
   if (sorted.length === 0) return [];
   const out: SegmentRange[] = [];
-  const gap = (start: string, end: string | null): SegmentRange => ({ kind: 'gap', periodId: null, planKey: NO_PLAN, label: planLabel(NO_PLAN), start, end });
-  if (firstUsageAt && firstUsageAt < sorted[0].startedAt) out.push(gap(firstUsageAt, sorted[0].startedAt));
+  const gap = (startDate: string, start: string, endDate: string | null, end: string | null): SegmentRange => ({
+    kind: 'gap',
+    periodId: null,
+    planKey: NO_PLAN,
+    label: planLabel(NO_PLAN),
+    startDate,
+    endDate,
+    start,
+    end,
+  });
+  if (firstUsage && firstUsage.day < sorted[0].startDate) out.push(gap(firstUsage.day, firstUsage.at, sorted[0].startDate, sorted[0].startedAt));
   sorted.forEach((p, i) => {
-    out.push({ kind: 'period', periodId: p.id, planKey: p.planKey, label: planLabel(p.planKey, p.label), start: p.startedAt, end: p.endedAt });
+    const endDate = p.lastDate === null ? null : addDays(p.lastDate, 1);
+    out.push({ kind: 'period', periodId: p.id, planKey: p.planKey, label: planLabel(p.planKey, p.label), startDate: p.startDate, endDate, start: p.startedAt, end: p.endedAt });
     const next = sorted[i + 1];
-    if (p.endedAt === null) return;
-    if (next && p.endedAt < next.startedAt) out.push(gap(p.endedAt, next.startedAt));
-    if (!next && p.endedAt < nowIso) out.push(gap(p.endedAt, null));
+    if (endDate === null || p.endedAt === null || p.lastDate === null) return;
+    if (next && endDate < next.startDate) out.push(gap(endDate, p.endedAt, next.startDate, next.startedAt));
+    if (!next && p.lastDate < today) out.push(gap(endDate, p.endedAt, null, null));
   });
   return out;
 }
 
 export interface SegmentStats extends SegmentRange {
-  /** Length of the segment in days as entered (up to now for a running segment). */
+  /** Length of the segment in days as entered (up to today for a running segment). */
   days: number;
   /** Days of the segment that have already passed: less than `days` for a period that ends in the future, 0 before it starts. */
   elapsedDays: number;
+  /**
+   * Days of the segment that lie inside the recorded history (first to last imported
+   * record). Nothing is known about the other days, so averages do not count them.
+   */
+  recordedDays: number;
   tokens: number;
   exact: number;
   estimated: number;
   conversations: number;
   messages: number;
   activeDays: number;
-  /** Tokens divided by the days of the segment that have passed. */
+  /** Tokens divided by `recordedDays`. */
   averageDailyTokens: number | null;
   value: ValueFigures;
 }
 
-const DAY_MS = 86_400_000;
+/** Number of days two inclusive ranges of days share. A null bound is open. */
+function sharedDays(a: [string | null, string | null], b: [string | null, string | null]): number {
+  const from = a[0] !== null && (b[0] === null || a[0] > b[0]) ? a[0] : b[0];
+  const to = a[1] !== null && (b[1] === null || a[1] < b[1]) ? a[1] : b[1];
+  if (from === null || to === null || from > to) return 0;
+  return daysBetween(from, to);
+}
+
+/**
+ * The recorded history under a filter: the first and last calendar day with any record
+ * of the filter's sources, whatever date range is selected. Days outside it are days
+ * nothing was imported for, which is not the same as days without usage.
+ */
+async function recordedHistory(db: SqlExecutor, filter: AnalyticsFilter): Promise<{ first: string; last: string; firstAt: string } | null> {
+  const p = new Params();
+  const f = factsFrom({ ...filter, from: null, to: null }, p);
+  const row = (
+    await db.query<{ first_day: string | null; last_day: string | null; first_at: unknown }>(
+      `SELECT min(${f.day})::text AS first_day, max(${f.day})::text AS last_day,
+              (min(${f.day})::timestamp AT TIME ZONE ${f.tz}) AS first_at
+         FROM ${f.from} WHERE ${f.where}`,
+      p.values,
+    )
+  ).rows[0];
+  if (!row?.first_day || !row.last_day) return null;
+  return { first: row.first_day, last: row.last_day, firstAt: toIso(row.first_at)! };
+}
+
+/** The part of the recorded history the filter's date range leaves in scope, as inclusive days. */
+function scopeOf(history: { first: string; last: string }, filter: AnalyticsFilter): [string, string] {
+  return [filter.from && filter.from > history.first ? filter.from : history.first, filter.to && filter.to < history.last ? filter.to : history.last];
+}
 
 async function aggregateRanges(
   db: SqlExecutor,
   filter: AnalyticsFilter,
-  ranges: Array<{ start: string | null; end: string | null }>,
+  ranges: Array<{ startDate: string | null; endDate: string | null }>,
   options: ValueOptions,
 ) {
   const tok = tokenExpr(filter.basis);
   const p = new Params();
   const f = factsFrom(filter, p);
-  const join = (starts: string, ends: string) =>
-    `JOIN unnest(${starts}::timestamptz[], ${ends}::timestamptz[]) WITH ORDINALITY AS seg(s, e, idx)
-       ON f.occurred_at >= COALESCE(seg.s, '-infinity') AND f.occurred_at < COALESCE(seg.e, 'infinity')`;
-  const starts = ranges.map((r) => r.start);
-  const ends = ranges.map((r) => r.end);
+  // By calendar day, the day the fact is charted on. `e` is exclusive.
+  const join = (day: string, starts: string, ends: string) =>
+    `JOIN unnest(${starts}::date[], ${ends}::date[]) WITH ORDINALITY AS seg(s, e, idx)
+       ON ${day} >= COALESCE(seg.s, '-infinity'::date) AND ${day} < COALESCE(seg.e, 'infinity'::date)`;
+  const starts = ranges.map((r) => r.startDate);
+  const ends = ranges.map((r) => r.endDate);
   const { rows } = await db.query<Record<string, unknown>>(
     `SELECT seg.idx::int AS idx, sum(${tok})::bigint AS tokens,
             COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'exact'), 0)::bigint AS exact,
@@ -258,14 +310,14 @@ async function aggregateRanges(
             count(DISTINCT ${f.day})::int AS active_days,
             min(f.occurred_at) AS first_at, max(f.occurred_at) AS last_at,
             min(${f.day})::text AS first_day, max(${f.day})::text AS last_day
-       FROM ${f.from} ${join(p.add(starts), p.add(ends))} ${f.conversationJoin}
+       FROM ${f.from} ${join(f.day, p.add(starts), p.add(ends))} ${f.conversationJoin}
       WHERE ${f.where} GROUP BY 1`,
     p.values,
   );
   // The value query assembles its own parameter list, so the arrays are inlined as literals there.
   const lit = (values: Array<string | null>) =>
     `ARRAY[${values.map((v) => (v === null ? 'NULL' : `'${v.replace(/'/g, "''")}'`)).join(',')}]`;
-  const values = await getApiValueBy(db, filter, `seg.idx`, join(lit(starts), lit(ends)), options);
+  const values = await getApiValueBy(db, filter, `seg.idx`, (day) => join(day, lit(starts), lit(ends)), options);
   return { rows: new Map(rows.map((r) => [toNumber(r.idx), r])), values };
 }
 
@@ -277,33 +329,32 @@ export async function getSegmentStats(
 ): Promise<SegmentStats[]> {
   const periods = await listPeriods(db, filter.userId, filter.timezone);
   if (periods.length === 0) return [];
-  const first = (
-    await db.query<{ first_at: Date | null }>(
-      `SELECT min(f.occurred_at) AS first_at FROM usage_facts f JOIN data_sources s ON s.id = f.source_id WHERE f.user_id = $1 AND s.include_in_totals`,
-      [filter.userId],
-    )
-  ).rows[0];
-  const segments = buildSegments(periods, toIso(first?.first_at), now.toISOString());
+  const history = await recordedHistory(db, filter);
+  const today = dayInZone(now, filter.timezone);
+  const segments = buildSegments(periods, history ? { day: history.first, at: history.firstAt } : null, today);
   const { rows, values } = await aggregateRanges(db, filter, segments, options);
+  const scope = history ? scopeOf(history, filter) : null;
   return segments.map((seg, i) => {
     const r = rows.get(i + 1);
-    const startMs = Date.parse(seg.start);
-    const endMs = seg.end ? Date.parse(seg.end) : now.getTime();
-    const days = Math.max(1, Math.round((endMs - startMs) / DAY_MS));
-    // Usage can only have accrued up to now, whatever end date was entered.
-    const elapsedDays = startMs >= now.getTime() ? 0 : Math.max(1, Math.round((Math.min(endMs, now.getTime()) - startMs) / DAY_MS));
+    const lastDay = seg.endDate === null ? null : addDays(seg.endDate, -1);
+    const started = seg.startDate <= today;
+    const days = Math.max(1, daysBetween(seg.startDate, lastDay ?? today));
+    // Usage can only have accrued up to today, whatever end date was entered.
+    const elapsedDays = started ? daysBetween(seg.startDate, lastDay !== null && lastDay < today ? lastDay : today) : 0;
+    const recordedDays = scope ? sharedDays([seg.startDate, lastDay], scope) : 0;
     const tokens = toNumber(r?.tokens);
     return {
       ...seg,
       days,
       elapsedDays,
+      recordedDays,
       tokens,
       exact: toNumber(r?.exact),
       estimated: toNumber(r?.estimated),
       conversations: toNumber(r?.conversations),
       messages: toNumber(r?.messages),
       activeDays: toNumber(r?.active_days),
-      averageDailyTokens: tokens > 0 && elapsedDays > 0 ? tokens / elapsedDays : null,
+      averageDailyTokens: tokens > 0 && recordedDays > 0 ? tokens / recordedDays : null,
       value: values.get(String(i + 1)) ?? ZERO_FIGURES,
     };
   });
@@ -323,7 +374,14 @@ export interface SideStats {
   /** First and last local day with usage on this side (see Overview.firstDay). */
   firstDay: string | null;
   lastDay: string | null;
-  /** Calendar days the side spans: first record to the split, or the split to the last record. */
+  /**
+   * The days this side is averaged over, inclusive: its part of the recorded history
+   * (first to last imported record) that the selected date range leaves in scope. The
+   * split day belongs to the later side. Null when the side has no records in scope.
+   */
+  spanFrom: string | null;
+  spanTo: string | null;
+  /** Number of days from `spanFrom` to `spanTo`; 0 when the side has no records in scope. */
   spanDays: number;
   value: ValueFigures;
 }
@@ -339,22 +397,29 @@ export async function getBeforeAfter(db: SqlExecutor, filter: AnalyticsFilter, o
   const periods = await listPeriods(db, filter.userId, filter.timezone);
   const firstPaid = periods.find((p) => isPaidPlan(p.planKey));
   if (!firstPaid) return { split: null, before: null, after: null };
+  const split = firstPaid.startDate;
 
   const { rows, values } = await aggregateRanges(
     db,
     filter,
     [
-      { start: null, end: firstPaid.startedAt },
-      { start: firstPaid.startedAt, end: null },
+      { startDate: null, endDate: split },
+      { startDate: split, endDate: null },
     ],
     options,
   );
+  const history = await recordedHistory(db, filter);
+  const scope = history ? scopeOf(history, filter) : null;
   const side = (idx: number): SideStats => {
     const r = rows.get(idx);
-    const firstAt = toIso(r?.first_at);
-    const lastAt = toIso(r?.last_at);
-    const splitMs = Date.parse(firstPaid.startedAt);
-    const spanMs = idx === 1 ? (firstAt ? splitMs - Date.parse(firstAt) : 0) : lastAt ? Date.parse(lastAt) - splitMs : 0;
+    // Each side reaches only as far as the imported records and the selected range do.
+    let span: [string, string] | null = null;
+    if (r && scope) {
+      const from = idx === 1 ? scope[0] : scope[0] > split ? scope[0] : split;
+      const dayBefore = addDays(split, -1);
+      const to = idx === 1 ? (scope[1] < dayBefore ? scope[1] : dayBefore) : scope[1];
+      if (from <= to) span = [from, to];
+    }
     return {
       tokens: toNumber(r?.tokens),
       exact: toNumber(r?.exact),
@@ -362,16 +427,18 @@ export async function getBeforeAfter(db: SqlExecutor, filter: AnalyticsFilter, o
       conversations: toNumber(r?.conversations),
       messages: toNumber(r?.messages),
       activeDays: toNumber(r?.active_days),
-      firstAt,
-      lastAt,
+      firstAt: toIso(r?.first_at),
+      lastAt: toIso(r?.last_at),
       firstDay: (r?.first_day as string | null) ?? null,
       lastDay: (r?.last_day as string | null) ?? null,
-      spanDays: r ? Math.max(1, Math.ceil(spanMs / DAY_MS)) : 0,
+      spanFrom: span?.[0] ?? null,
+      spanTo: span?.[1] ?? null,
+      spanDays: span ? daysBetween(span[0], span[1]) : 0,
       value: values.get(String(idx)) ?? ZERO_FIGURES,
     };
   };
   return {
-    split: { at: firstPaid.startedAt, date: firstPaid.startDate, planKey: firstPaid.planKey, label: planLabel(firstPaid.planKey, firstPaid.label) },
+    split: { at: firstPaid.startedAt, date: split, planKey: firstPaid.planKey, label: planLabel(firstPaid.planKey, firstPaid.label) },
     before: side(1),
     after: side(2),
   };
@@ -407,7 +474,7 @@ export async function getBeforeAfterConversationUsage(
   const p = new Params();
   const f = factsFrom(filter, p);
   const { rows } = await db.query<Record<string, unknown>>(
-    `SELECT (f.occurred_at >= ${p.add(firstPaid.startedAt)}::timestamptz) AS is_after,
+    `SELECT (${f.day} >= ${p.add(firstPaid.startDate)}::date) AS is_after,
             count(DISTINCT f.conversation_id)::int AS conversations,
             COALESCE(sum(${tok}), 0)::bigint AS tokens,
             COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'exact'), 0)::bigint AS exact,

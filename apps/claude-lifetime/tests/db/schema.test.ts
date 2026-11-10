@@ -100,29 +100,95 @@ describe('seed', () => {
 });
 
 describe('constraints', () => {
+  const period = (plan: string, start: string, last: string | null) =>
+    t.db.query(`INSERT INTO subscription_periods (user_id, plan_key, start_date, last_date) VALUES ($1, $2, $3::date, $4::date)`, [t.userId, plan, start, last]);
+
   it('rejects overlapping subscription periods for the same user', async () => {
     await t.reset();
-    await t.db.query(
-      `INSERT INTO subscription_periods (user_id, plan_key, started_at, ended_at) VALUES ($1, 'pro', '2025-01-01Z', '2025-06-01Z')`,
-      [t.userId],
-    );
-    // touching periods are fine: [start, end) is half-open
-    await t.db.query(
-      `INSERT INTO subscription_periods (user_id, plan_key, started_at, ended_at) VALUES ($1, 'max', '2025-06-01Z', NULL)`,
-      [t.userId],
-    );
-    await expect(
-      t.db.query(`INSERT INTO subscription_periods (user_id, plan_key, started_at, ended_at) VALUES ($1, 'pro', '2025-03-01Z', '2025-04-01Z')`, [t.userId]),
-    ).rejects.toThrow(/subscription_periods_no_overlap/);
-    await expect(
-      t.db.query(`INSERT INTO subscription_periods (user_id, plan_key, started_at, ended_at) VALUES ($1, 'pro', '2026-01-01Z', NULL)`, [t.userId]),
-    ).rejects.toThrow(/subscription_periods_no_overlap/);
+    await period('pro', '2025-01-01', '2025-05-31');
+    // periods that follow each other are fine: the next one starts the day after the last day
+    await period('max', '2025-06-01', null);
+    await expect(period('pro', '2025-03-01', '2025-03-31')).rejects.toThrow(/subscription_periods_no_overlap/);
+    // an open-ended period covers every later day
+    await expect(period('pro', '2026-01-01', null)).rejects.toThrow(/subscription_periods_no_overlap/);
+    // the last day belongs to the period, so another one cannot start on it
+    await expect(period('team', '2025-05-31', '2025-05-31')).rejects.toThrow(/subscription_periods_no_overlap/);
+    // a single free day in front is enough room
+    await period('free', '2024-12-31', '2024-12-31');
   });
 
   it('rejects a period that ends before it starts', async () => {
     await t.reset();
-    await expect(
-      t.db.query(`INSERT INTO subscription_periods (user_id, plan_key, started_at, ended_at) VALUES ($1, 'pro', '2025-06-01Z', '2025-01-01Z')`, [t.userId]),
-    ).rejects.toThrow(/subscription_periods_range|range lower bound/);
+    await expect(period('pro', '2025-06-01', '2025-01-01')).rejects.toThrow(/subscription_periods_range|range lower bound/);
+    // one day long is the shortest period there is
+    await period('pro', '2025-06-01', '2025-06-01');
+  });
+});
+
+describe('the move of subscription periods from instants to calendar days', () => {
+  const BEFORE = MIGRATIONS.filter((m) => m.name < '20261110000300');
+  const open = async (timezone: string) => {
+    const db = pgliteDriver(new PGlite());
+    await migrate(db, BEFORE);
+    const userId = await ensureSeededWithout(db, timezone);
+    return { db, userId };
+  };
+  // The catalog seed needs the whole schema; a bare user is enough for these rows.
+  const ensureSeededWithout = async (db: ReturnType<typeof pgliteDriver>, timezone: string) =>
+    (await db.query<{ id: number }>(`INSERT INTO users (timezone) VALUES ($1) RETURNING id`, [timezone])).rows[0].id;
+  const old = (db: ReturnType<typeof pgliteDriver>, userId: number, plan: string, startedAt: string, endedAt: string | null) =>
+    db.query(`INSERT INTO subscription_periods (user_id, plan_key, started_at, ended_at, monthly_price) VALUES ($1, $2, $3::timestamptz, $4::timestamptz, 20)`, [userId, plan, startedAt, endedAt]);
+  const days = async (db: ReturnType<typeof pgliteDriver>) =>
+    (await db.query<{ plan_key: string; s: string; l: string | null }>(`SELECT plan_key, start_date::text AS s, last_date::text AS l FROM subscription_periods ORDER BY start_date`)).rows.map((r) => [r.plan_key, r.s, r.l]);
+
+  it('keeps the days every period showed, in the timezone that is set', async () => {
+    const { db, userId } = await open('America/New_York');
+    try {
+      // entered in New York as Free 1–31 January, Pro 1–28 February, Max from 9 March (local midnights as instants)
+      await old(db, userId, 'free', '2025-01-01T05:00:00Z', '2025-02-01T05:00:00Z');
+      await old(db, userId, 'pro', '2025-02-01T05:00:00Z', '2025-03-01T05:00:00Z');
+      await old(db, userId, 'max', '2025-03-09T05:00:00Z', null);
+      await migrate(db);
+      expect(await days(db)).toEqual([
+        ['free', '2025-01-01', '2025-01-31'],
+        ['pro', '2025-02-01', '2025-02-28'],
+        ['max', '2025-03-09', null],
+      ]);
+      const columns = await db.query<{ column_name: string }>(`SELECT column_name FROM information_schema.columns WHERE table_name = 'subscription_periods'`);
+      expect(columns.rows.map((r) => r.column_name)).not.toContain('started_at');
+      expect(columns.rows.map((r) => r.column_name)).not.toContain('ended_at');
+      // the constraints are back, on days
+      await expect(db.query(`INSERT INTO subscription_periods (user_id, plan_key, start_date) VALUES ($1, 'pro', '2025-02-28')`, [userId])).rejects.toThrow(/no_overlap/);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('settles neighbours that would share a day because the timezone was changed after they were entered', async () => {
+    // Entered in New York, but the app is set to Berlin by now: both periods show 1 February.
+    const { db, userId } = await open('Europe/Berlin');
+    try {
+      await old(db, userId, 'free', '2025-01-01T05:00:00Z', '2025-02-01T05:00:00Z');
+      await old(db, userId, 'pro', '2025-02-01T05:00:00Z', '2025-03-01T05:00:00Z');
+      await migrate(db);
+      expect(await days(db)).toEqual([
+        ['free', '2025-01-01', '2025-01-31'],
+        ['pro', '2025-02-01', '2025-03-01'],
+      ]);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('reads the last day of a period that ended at a midnight skipped by daylight saving', async () => {
+    const { db, userId } = await open('America/Santiago');
+    try {
+      // last day 6 September 2025; the clocks jump from 00:00 to 01:00 on the 7th, which is 04:00 UTC
+      await old(db, userId, 'pro', '2025-08-01T04:00:00Z', '2025-09-07T04:00:00Z');
+      await migrate(db);
+      expect(await days(db)).toEqual([['pro', '2025-08-01', '2025-09-06']]);
+    } finally {
+      await db.close();
+    }
   });
 });

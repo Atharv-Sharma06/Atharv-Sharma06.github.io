@@ -218,7 +218,8 @@ describe('figures on the conversations pages, against the demo dataset', () => {
     const direct = await one<{ n: number }>(
       `SELECT count(*)::int AS n FROM conversations c JOIN data_sources s ON s.id = c.source_id
         WHERE c.title ILIKE '%ramen%' AND s.kind = 'claude_export'
-          AND EXISTS (SELECT 1 FROM subscription_periods sp WHERE sp.plan_key = 'pro' AND c.created_at >= sp.started_at AND (sp.ended_at IS NULL OR c.created_at < sp.ended_at))`,
+          AND EXISTS (SELECT 1 FROM subscription_periods sp WHERE sp.plan_key = 'pro'
+                        AND (c.created_at AT TIME ZONE 'UTC')::date >= sp.start_date AND (sp.last_date IS NULL OR (c.created_at AT TIME ZONE 'UTC')::date <= sp.last_date))`,
     );
     expect(page.total).toBe(direct.n);
     expect(page.total).toBeGreaterThan(0);

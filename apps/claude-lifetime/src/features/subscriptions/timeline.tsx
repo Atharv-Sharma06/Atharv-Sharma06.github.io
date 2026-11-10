@@ -146,7 +146,7 @@ function SegmentDetails({
   scenario: CostScenario;
   hasUsage: boolean;
 }) {
-  const average = averagePerDay(segment, nowMs);
+  const average = averagePerDay(segment);
   const length = lengthDays(segment, nowMs);
   return (
     <div className="min-w-[14rem] py-0.5">
@@ -166,7 +166,10 @@ function SegmentDetails({
               {formatTokens(segment.tokens)}
               <ConfidenceMark level={confidenceOf(segment.exact, segment.estimated)} />
             </DetailRow>
-            <DetailRow label="Average per day">{average === null ? '–' : formatTokens(average)}</DetailRow>
+            <DetailRow label="Average per day">
+              {average === null ? '–' : formatTokens(average)}
+              {average !== null && segment.recordedDays < segment.elapsedDays ? <span className="text-ink-2">over {plural(segment.recordedDays, 'day')} with records on file</span> : null}
+            </DetailRow>
             <DetailRow label="Equivalent API value">
               {valueLevel(segment.value) === 'unavailable' ? <span className="text-ink-2">Not priced</span> : formatUsd(leadingUsd(segment.value, scenario), { cents: true })}
             </DetailRow>

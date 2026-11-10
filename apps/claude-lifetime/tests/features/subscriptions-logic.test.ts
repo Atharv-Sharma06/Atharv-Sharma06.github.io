@@ -11,7 +11,7 @@ import {
 const day = (iso: string) => Date.parse(`${iso}T00:00:00Z`);
 
 const side = (over: Partial<SideStats> = {}): SideStats => ({
-  tokens: 0, exact: 0, estimated: 0, conversations: 0, messages: 0, activeDays: 0, firstAt: null, lastAt: null, firstDay: null, lastDay: null, spanDays: 0, value: ZERO_FIGURES, ...over,
+  tokens: 0, exact: 0, estimated: 0, conversations: 0, messages: 0, activeDays: 0, firstAt: null, lastAt: null, firstDay: null, lastDay: null, spanFrom: null, spanTo: null, spanDays: 0, value: ZERO_FIGURES, ...over,
 });
 
 const NONE: Comparability = { lengths: null, measurement: null, firstRecord: null, short: [] };
@@ -184,33 +184,37 @@ describe('time axis', () => {
 describe('segments', () => {
   const NOW = Date.parse('2026-11-10T12:00:00Z');
 
-  it('averages over the days that have passed when a period is entered with a future end date', () => {
-    const closed = { start: '2026-09-01T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z', days: 30, tokens: 3000, activeDays: 12 };
+  it('counts the days that have passed when a period is entered with a future end date', () => {
+    const closed = { start: '2026-09-01T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z', days: 30 };
     expect(elapsedDays(closed, NOW)).toBe(30);
-    expect(averagePerDay(closed, NOW)).toBe(100);
 
-    const running = { start: '2026-11-01T00:00:00.000Z', end: null, days: 10, tokens: 3000, activeDays: 4 };
+    const running = { start: '2026-11-01T00:00:00.000Z', end: null, days: 10 };
     expect(elapsedDays(running, NOW)).toBe(10);
-    expect(averagePerDay(running, NOW)).toBe(300);
 
     // entered as 1 – 30 November; only nine and a half days of it have happened
-    const endsLater = { start: '2026-11-01T00:00:00.000Z', end: '2026-12-01T00:00:00.000Z', days: 30, tokens: 3000, activeDays: 4 };
+    const endsLater = { start: '2026-11-01T00:00:00.000Z', end: '2026-12-01T00:00:00.000Z', days: 30 };
     expect(elapsedDays(endsLater, NOW)).toBe(10);
-    expect(averagePerDay(endsLater, NOW)).toBe(300);
 
-    const notStarted = { start: '2026-12-01T00:00:00.000Z', end: '2027-01-01T00:00:00.000Z', days: 31, tokens: 0, activeDays: 0 };
+    const notStarted = { start: '2026-12-01T00:00:00.000Z', end: '2027-01-01T00:00:00.000Z', days: 31 };
     expect(elapsedDays(notStarted, NOW)).toBe(0);
-    expect(averagePerDay(notStarted, NOW)).toBeNull();
 
     expect([closed, running, endsLater, notStarted].map((segment) => lengthDays(segment, NOW))).toEqual([30, 10, 30, 31]);
   });
 
   it('gives no length to a running period that has not started', () => {
     // entered as "from 1 December", with no end date, three weeks ahead of time
-    const ahead = { start: '2026-12-01T00:00:00.000Z', end: null, days: 1, tokens: 0, activeDays: 0 };
+    const ahead = { start: '2026-12-01T00:00:00.000Z', end: null, days: 1 };
     expect(lengthDays(ahead, NOW)).toBeNull();
     expect(elapsedDays(ahead, NOW)).toBe(0);
-    expect(averagePerDay(ahead, NOW)).toBeNull();
+  });
+
+  it('averages over the days of a segment that the imported records cover', () => {
+    // a whole month inside the recorded history
+    expect(averagePerDay({ tokens: 3000, activeDays: 12, recordedDays: 30 })).toBe(100);
+    // a plan that began a year before the first imported record: the unrecorded year is not divided in
+    expect(averagePerDay({ tokens: 3000, activeDays: 4, recordedDays: 10 })).toBe(300);
+    // nothing recorded inside the segment
+    expect(averagePerDay({ tokens: 0, activeDays: 0, recordedDays: 0 })).toBeNull();
   });
 
   it('words the dates of a finished, a running and a coming stretch', () => {
@@ -224,8 +228,8 @@ describe('segments', () => {
   });
 
   it('has no average for a segment without imported records, and a real zero for one whose records hold no tokens', () => {
-    expect(averagePerDay({ start: '2026-09-01T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z', days: 30, tokens: 0, activeDays: 0 }, NOW)).toBeNull();
-    expect(averagePerDay({ start: '2026-09-01T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z', days: 30, tokens: 0, activeDays: 2 }, NOW)).toBe(0);
+    expect(averagePerDay({ tokens: 0, activeDays: 0, recordedDays: 30 })).toBeNull();
+    expect(averagePerDay({ tokens: 0, activeDays: 2, recordedDays: 30 })).toBe(0);
   });
 });
 

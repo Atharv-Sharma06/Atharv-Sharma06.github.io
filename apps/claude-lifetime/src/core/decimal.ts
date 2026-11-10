@@ -78,17 +78,21 @@ export class Decimal {
     return this.toFixed(digits).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
   }
 
-  /** Rounded (half away from zero) to exactly `digits` fractional digits. */
+  /**
+   * Rounded (half away from zero) to exactly `digits` fractional digits. The value holds
+   * 12 of them; asking for more appends zeros.
+   */
   toFixed(digits = 2): string {
-    const drop = SCALE - BigInt(Math.min(Number(SCALE), Math.max(0, digits)));
-    const factor = 10n ** drop;
+    const wanted = Math.max(0, Math.floor(digits));
+    const kept = Math.min(Number(SCALE), wanted);
+    const factor = 10n ** (SCALE - BigInt(kept));
     const negative = this.units < 0n;
     const abs = negative ? -this.units : this.units;
     const rounded = (abs + factor / 2n) / factor;
-    const text = rounded.toString().padStart(digits + 1, '0');
-    const head = digits === 0 ? text : text.slice(0, -digits);
-    const tail = digits === 0 ? '' : '.' + text.slice(-digits);
-    return (negative && rounded !== 0n ? '-' : '') + head + tail;
+    const text = rounded.toString().padStart(kept + 1, '0');
+    const head = kept === 0 ? text : text.slice(0, -kept);
+    const fraction = (kept === 0 ? '' : text.slice(-kept)).padEnd(wanted, '0');
+    return (negative && rounded !== 0n ? '-' : '') + head + (wanted === 0 ? '' : '.' + fraction);
   }
 
   /** For display only (charts, compact formatting). Never feed the result back into money math. */

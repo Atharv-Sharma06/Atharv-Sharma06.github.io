@@ -132,12 +132,19 @@ export async function getOverview(db: SqlExecutor, filter: AnalyticsFilter): Pro
 
   let mostActiveDay: Overview['mostActiveDay'] = null;
   if (top) {
+    const pn = new Params();
+    const started = [
+      `c.user_id = ${pn.add(filter.userId)}`,
+      `s.include_in_totals`,
+      `c.kind IN ('chat', 'code_session')`,
+      `(c.created_at AT TIME ZONE ${pn.add(filter.timezone)}::text)::date = ${pn.add(top.day)}::date`,
+    ];
+    if (filter.sourceKinds && filter.sourceKinds.length > 0) started.push(`s.kind::text = ANY(${pn.add(filter.sourceKinds)}::text[])`);
+    if (filter.conversationId) started.push(`c.id = ${pn.add(filter.conversationId)}`);
     const created = (
       await db.query<{ n: number }>(
-        `SELECT count(*)::int AS n FROM conversations c JOIN data_sources s ON s.id = c.source_id
-          WHERE c.user_id = $1 AND s.include_in_totals AND c.kind IN ('chat', 'code_session')
-            AND (c.created_at AT TIME ZONE $2::text)::date = $3::date`,
-        [filter.userId, filter.timezone, top.day],
+        `SELECT count(*)::int AS n FROM conversations c JOIN data_sources s ON s.id = c.source_id WHERE ${started.join(' AND ')}`,
+        pn.values,
       )
     ).rows[0];
     mostActiveDay = {
@@ -190,7 +197,7 @@ export interface SeriesPoint {
   requests: number;
 }
 
-const GROUPS: Record<SeriesGroup, { expr: string; join: string }> = {
+const GROUPS: Record<SeriesGroup, { expr: string; join: string | ((day: string) => string) }> = {
   none: { expr: `''`, join: '' },
   confidence: { expr: `f.confidence::text`, join: '' },
   source: { expr: `s.kind::text`, join: '' },
@@ -202,10 +209,10 @@ const GROUPS: Record<SeriesGroup, { expr: string; join: string }> = {
     expr: `COALESCE(mc.family, 'unknown')`,
     join: `LEFT JOIN model_catalog mc ON mc.id = f.model_id`,
   },
-  // The plan of a fact is derived from its timestamp; it is never stored on the fact.
+  // The plan of a fact is derived from its calendar day; it is never stored on the fact.
   plan: {
     expr: `COALESCE(sp.plan_key, '${NO_PLAN}')`,
-    join: `LEFT JOIN subscription_periods sp ON sp.user_id = f.user_id AND f.occurred_at >= sp.started_at AND (sp.ended_at IS NULL OR f.occurred_at < sp.ended_at)`,
+    join: (day) => `LEFT JOIN subscription_periods sp ON sp.user_id = f.user_id AND ${day} >= sp.start_date AND (sp.last_date IS NULL OR ${day} <= sp.last_date)`,
   },
 };
 
@@ -231,7 +238,7 @@ export async function getTimeSeries(
             sum(f.user_message_count + f.assistant_message_count)::bigint AS messages,
             count(DISTINCT ${f.conversationId})::int AS conversations,
             sum(f.request_count)::bigint AS requests
-       FROM ${f.from} ${g.join} ${f.conversationJoin}
+       FROM ${f.from} ${typeof g.join === 'function' ? g.join(f.day) : g.join} ${f.conversationJoin}
       WHERE ${f.where}
       GROUP BY 1, 2 ORDER BY 1, 2`,
     p.values,

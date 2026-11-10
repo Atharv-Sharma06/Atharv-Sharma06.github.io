@@ -38,7 +38,7 @@ describe('conversation counts', () => {
       },
       { source: { kind: 'generic_csv', label: 'Mixed', externalRef: 'proxy' }, contentHash: 'mixed' },
     );
-    await t.db.query(`INSERT INTO subscription_periods (user_id, plan_key, started_at) VALUES ($1, 'pro', '2025-05-01T00:00:00Z')`, [t.userId]);
+    await t.db.query(`INSERT INTO subscription_periods (user_id, plan_key, start_date) VALUES ($1, 'pro', '2025-05-01')`, [t.userId]);
   });
   afterAll(() => t.close());
 

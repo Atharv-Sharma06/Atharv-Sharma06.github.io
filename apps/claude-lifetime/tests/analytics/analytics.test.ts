@@ -206,7 +206,7 @@ describe('equivalent API value', () => {
   });
 
   it('keeps actual spend separate from equivalent value', async () => {
-    expect(await getActualSpend(t.db, t.userId)).toEqual({ reportedApiUsd: null, reportedRange: null, subscriptions: null });
+    expect(await getActualSpend(t.db, t.userId, 'UTC')).toEqual({ reportedApiUsd: null, reportedRange: null, subscriptions: null });
   });
 });
 

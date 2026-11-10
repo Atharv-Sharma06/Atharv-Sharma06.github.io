@@ -266,11 +266,14 @@ export function lengthDays(segment: Pick<SegmentStats, 'start' | 'end' | 'days'>
   return !segment.end && Date.parse(segment.start) >= nowMs ? null : segment.days;
 }
 
-/** Tokens per day over the days of the segment that have passed, or null when there is nothing to average. */
-export function averagePerDay(segment: Pick<SegmentStats, 'start' | 'end' | 'days' | 'tokens' | 'activeDays'>, nowMs: number): number | null {
+/**
+ * Tokens per day over the days of the segment that lie inside the recorded history, or
+ * null when there is nothing to average. Days before the first imported record or after
+ * the last are not counted: nothing is known about them, which is not the same as no usage.
+ */
+export function averagePerDay(segment: Pick<SegmentStats, 'tokens' | 'activeDays' | 'recordedDays'>): number | null {
   if (!hasRecords(segment)) return null;
-  const days = elapsedDays(segment, nowMs);
-  return days > 0 ? segment.tokens / days : null;
+  return segment.recordedDays > 0 ? segment.tokens / segment.recordedDays : null;
 }
 
 // ── Equivalent API value ────────────────────────────────────────────────────────

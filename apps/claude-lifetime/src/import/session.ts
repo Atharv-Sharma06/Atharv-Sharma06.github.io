@@ -4,6 +4,7 @@ import { ImportError, type ImportFile, type ImportProgress, type ParsedImport } 
 import type { SqlDriver } from '@/db/driver';
 import { commitImport, importGeneration, loadKnownRequestKeys, previewImport, type CommitResult, type ImportPreview } from './commit';
 import type { Detected } from './detect';
+import { acquireImportLock } from './lock';
 import { resetStaging, StagingWriter } from './staging';
 import type { FromWorker, ParseContextMessage, ToWorker } from './worker/protocol';
 
@@ -16,7 +17,8 @@ import type { FromWorker, ParseContextMessage, ToWorker } from './worker/protoco
  *   discard  → throw the staged records away
  *
  * Nothing touches stored data before `commit`. The staging tables belong to the one
- * database session all tabs share, so a Web Lock allows a single import at a time.
+ * database session all tabs share, so a lock (see lock.ts) allows a single import at a
+ * time, and a commit proves with a token that the staged records are still its own.
  */
 export interface PreparedImport {
   detected: Detected;
@@ -24,21 +26,8 @@ export interface PreparedImport {
   preview: ImportPreview;
   /** Import generation when parsing started; a later import by another tab invalidates this one. */
   generation: number;
-}
-
-const LOCK_NAME = 'claude-lifetime:import';
-
-function acquireLock(): Promise<(() => void) | null> {
-  if (typeof navigator === 'undefined' || !navigator.locks) return Promise.resolve(() => undefined);
-  return new Promise((resolve) => {
-    void navigator.locks.request(LOCK_NAME, { ifAvailable: true }, (lock) => {
-      if (!lock) {
-        resolve(null);
-        return undefined;
-      }
-      return new Promise<void>((release) => resolve(release));
-    });
-  });
+  /** Names the staged records this preview was computed from (see resetStaging). */
+  staging: string;
 }
 
 export class ImportSession {
@@ -104,14 +93,14 @@ export class ImportSession {
     onProgress?: (progress: ImportProgress) => void,
   ): Promise<PreparedImport> {
     if (!this.release) {
-      const release = await acquireLock();
+      const release = await acquireImportLock();
       if (!release) {
-        throw new ImportError('Another import is being prepared in a different tab. Finish or cancel it there first.', 'import_in_progress');
+        throw new ImportError('Another import is being prepared or is waiting to be saved, in this tab or another one. Save or cancel it first.', 'import_in_progress');
       }
       this.release = release;
     }
     try {
-      await resetStaging(this.db);
+      const staging = await resetStaging(this.db);
       this.staged = true;
       const generation = await importGeneration(this.db, this.userId);
 
@@ -135,7 +124,7 @@ export class ImportSession {
       const parsed = await this.parse(detected, chosen, context, transfer, writer, onProgress);
       await writer.finish();
       const preview = await previewImport(this.db, this.userId, parsed);
-      return { detected, parsed, preview, generation };
+      return { detected, parsed, preview, generation, staging };
     } catch (error) {
       await this.discard();
       throw error;
@@ -207,7 +196,7 @@ export class ImportSession {
   /** Merges the staged records into the real tables. */
   async commit(prepared: PreparedImport): Promise<CommitResult> {
     try {
-      return await commitImport(this.db, this.userId, prepared.parsed, { generation: prepared.generation });
+      return await commitImport(this.db, this.userId, prepared.parsed, { generation: prepared.generation, staging: prepared.staging });
     } finally {
       await this.discard();
     }

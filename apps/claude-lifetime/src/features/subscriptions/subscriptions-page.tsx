@@ -43,7 +43,7 @@ export function SubscriptionsPage() {
   const beforeAfter = useData(['subscriptions', 'before-after', settings.assumedModelKey], (a) => getBeforeAfter(a.db, a.lifetime, valueOptions));
   const inConversations = useData(['subscriptions', 'conversation-usage'], (a) => getBeforeAfterConversationUsage(a.db, a.lifetime));
   const value = useData(['subscriptions', 'api-value', settings.assumedModelKey], (a) => getApiValue(a.db, a.lifetime, valueOptions));
-  const spend = useData(['subscriptions', 'spend'], (a) => getActualSpend(a.db, a.userId));
+  const spend = useData(['subscriptions', 'spend'], (a) => getActualSpend(a.db, a.userId, a.settings.timezone));
 
   const [editor, setEditor] = useState<{ target: EditorTarget; visit: number } | null>(null);
   const [deleting, setDeleting] = useState<SubscriptionPeriod | null>(null);

@@ -2,6 +2,7 @@ import { resolveModel } from '@/core/models';
 import type { Confidence, ParsedImport, StagedUsage } from '@/core/types';
 import { toNumber, type SqlDriver, type SqlExecutor } from '@/db/driver';
 import { commitImport } from '@/import/commit';
+import { asOnlyImport } from '@/import/lock';
 import { resetStaging, StagingWriter } from '@/import/staging';
 import type { TokenBasis } from './base';
 
@@ -180,7 +181,12 @@ export interface UserPriceInput {
 
 const PRICE = /^\d{1,6}(\.\d{1,6})?$/;
 
-/** Adds a price the user looked up. User-entered prices take precedence over built-in ones. */
+/**
+ * Adds a price the user looked up. User-entered prices take precedence over built-in
+ * ones. A price for a model, tier and start date the user already entered one for
+ * replaces it: entering the price again is how a typing mistake is corrected, and two
+ * rows for the same thing would leave it open which one applies.
+ */
 export async function saveUserPrice(db: SqlDriver, input: UserPriceInput): Promise<void> {
   for (const [name, v] of Object.entries({ input: input.input, output: input.output })) {
     if (!PRICE.test(String(v).trim())) throw new SettingsError(`Enter the ${name} price as USD per million tokens, for example 3 or 0.25.`);
@@ -190,15 +196,25 @@ export async function saveUserPrice(db: SqlDriver, input: UserPriceInput): Promi
   }
   if (!/^https?:\/\/\S+$/.test(input.sourceUrl.trim())) throw new SettingsError('Add the web address where you found the price, so the figure stays traceable.');
   const opt = (v: string | null | undefined) => (v === undefined || v === null || String(v).trim() === '' ? null : String(v).trim());
-  const res = await db.query(
-    `INSERT INTO pricing_history (model_id, price_tier, effective_from, input_usd_per_mtok, output_usd_per_mtok,
-        cache_read_usd_per_mtok, cache_write_5m_usd_per_mtok, cache_write_1h_usd_per_mtok, source_url, source_retrieved_on, source_note, is_builtin)
-     SELECT m.id, $2, $3::date, $4::numeric, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9, CURRENT_DATE, $10, false
-       FROM model_catalog m WHERE m.model_key = $1`,
-    [input.modelKey, input.priceTier?.trim() || 'standard', opt(input.effectiveFrom), input.input.trim(), input.output.trim(),
-     opt(input.cacheRead), opt(input.cacheWrite5m), opt(input.cacheWrite1h), input.sourceUrl.trim(), opt(input.sourceNote)],
-  );
-  if ((res.affectedRows ?? 0) === 0) throw new SettingsError('That model is not in the catalog.');
+  const tier = input.priceTier?.trim() || 'standard';
+  await db.transaction(async (tx) => {
+    await tx.query(
+      `DELETE FROM pricing_history ph USING model_catalog m
+        WHERE m.id = ph.model_id AND m.model_key = $1 AND NOT ph.is_builtin
+          AND ph.price_tier = $2 AND ph.effective_from IS NOT DISTINCT FROM $3::date`,
+      [input.modelKey, tier, opt(input.effectiveFrom)],
+    );
+    const res = await tx.query(
+      `INSERT INTO pricing_history (model_id, price_tier, effective_from, input_usd_per_mtok, output_usd_per_mtok,
+          cache_read_usd_per_mtok, cache_write_5m_usd_per_mtok, cache_write_1h_usd_per_mtok, source_url, source_retrieved_on, source_note, is_builtin)
+       SELECT m.id, $2, $3::date, $4::numeric, $5::numeric, $6::numeric, $7::numeric, $8::numeric, $9, CURRENT_DATE, $10, false
+         FROM model_catalog m WHERE m.model_key = $1`,
+      [input.modelKey, tier, opt(input.effectiveFrom), input.input.trim(), input.output.trim(),
+       opt(input.cacheRead), opt(input.cacheWrite5m), opt(input.cacheWrite1h), input.sourceUrl.trim(), opt(input.sourceNote)],
+    );
+    // Nothing was inserted, so the transaction is rolled back and the delete above with it.
+    if ((res.affectedRows ?? 0) === 0) throw new SettingsError('That model is not in the catalog.');
+  });
   await db.flush();
 }
 
@@ -274,13 +290,20 @@ export async function addManualUsage(db: SqlDriver, userId: number, input: Manua
     warnings: [],
     stats: { manual: true },
   };
-  await resetStaging(db);
-  const writer = new StagingWriter(db);
-  if (model && !model.known) {
-    await writer.model({ key: model.key, displayName: model.model.displayName, family: model.model.family, tokenizerFamily: model.model.tokenizer });
-  }
-  await writer.usage(usage);
-  await writer.finish();
-  const result = await commitImport(db, userId, parsed);
-  return result.batchId;
+  // A manual entry is saved through the staging tables like every import. They may hold another import
+  // that is waiting at its preview, so the entry is only made while no other import is under way.
+  return asOnlyImport(async () => {
+    const staging = await resetStaging(db);
+    const writer = new StagingWriter(db);
+    if (model && !model.known) {
+      await writer.model({ key: model.key, displayName: model.model.displayName, family: model.model.family, tokenizerFamily: model.model.tokenizer });
+    }
+    await writer.usage(usage);
+    await writer.finish();
+    try {
+      return (await commitImport(db, userId, parsed, { staging })).batchId;
+    } finally {
+      await resetStaging(db).catch(() => undefined);
+    }
+  });
 }

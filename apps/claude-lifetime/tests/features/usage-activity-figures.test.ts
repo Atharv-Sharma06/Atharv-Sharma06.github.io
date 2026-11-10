@@ -149,7 +149,7 @@ describe('Lifetime Usage', () => {
     expect(plans.series.map((s) => s.label)).toEqual(['Free', 'Pro', 'Max 5x']);
     const pro = await one(
       `SELECT sum(${PROCESSED})::bigint AS n FROM ${FACTS}
-         JOIN subscription_periods sp ON sp.user_id = f.user_id AND sp.plan_key = 'pro' AND f.occurred_at >= sp.started_at AND f.occurred_at < sp.ended_at
+         JOIN subscription_periods sp ON sp.user_id = f.user_id AND sp.plan_key = 'pro' AND ${DAY} BETWEEN sp.start_date AND sp.last_date
         WHERE ${MINE}`,
     );
     expect(plans.rows.reduce((sum, r) => sum + Number(r.pro), 0)).toBe(toNumber(pro.n));

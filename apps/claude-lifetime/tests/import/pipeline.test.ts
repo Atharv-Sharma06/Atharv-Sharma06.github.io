@@ -169,7 +169,7 @@ describe('import pipeline', () => {
   it('never mixes the synthetic demo dataset with real data', async () => {
     const demo = { kind: 'claude_export' as const, label: 'Demo', externalRef: 'demo', isSynthetic: true };
     await importRecords(t.db, t.userId, { conversations: [conv('demo')], messages: [msg('demo', 0), msg('demo', 1)] }, { source: demo, contentHash: 'd' });
-    await t.db.query(`INSERT INTO subscription_periods (user_id, plan_key, started_at, is_synthetic) VALUES ($1, 'pro', '2025-01-01Z', true)`, [t.userId]);
+    await t.db.query(`INSERT INTO subscription_periods (user_id, plan_key, start_date, is_synthetic) VALUES ($1, 'pro', '2025-01-01', true)`, [t.userId]);
 
     const real = await importRecords(t.db, t.userId, { conversations: [conv('real')], messages: [msg('real', 0)] }, { contentHash: 'r' });
     expect(real.preview.willRemoveDemoData).toBe(true);
@@ -219,7 +219,7 @@ describe('data deletion', () => {
       { models: [{ key: 'custom-model', displayName: 'custom-model', family: 'other', tokenizerFamily: 'unknown' }], usage: [usage('g1', { modelKey: 'custom-model' })] },
       { source: { kind: 'generic_json', label: 'Custom', externalRef: '' }, contentHash: 'g' },
     );
-    await t.db.query(`INSERT INTO subscription_periods (user_id, plan_key, started_at) VALUES ($1, 'pro', '2025-01-01Z')`, [t.userId]);
+    await t.db.query(`INSERT INTO subscription_periods (user_id, plan_key, start_date) VALUES ($1, 'pro', '2025-01-01')`, [t.userId]);
     const builtin = await count('model_catalog WHERE is_builtin');
 
     await deleteAllData(t.db, t.userId);

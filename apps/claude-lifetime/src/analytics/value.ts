@@ -1,6 +1,7 @@
 import { WEB_SEARCH_USD_PER_1000 } from '@/core/catalog';
 import { Decimal } from '@/core/decimal';
 import { toNumber, type SqlExecutor } from '@/db/driver';
+import { dayInZone } from '@/lib/format';
 import { factsFrom, Params, type AnalyticsFilter } from './base';
 
 /**
@@ -85,6 +86,9 @@ const ZERO_FIGURES: ValueFigures = {
   assumedTokens: 0,
 };
 
+/** Extra joins for a grouping. A function receives the SQL expression of the fact's calendar day in that statement. */
+type GroupJoin = string | ((day: string) => string);
+
 async function resolveAssumedModel(db: SqlExecutor, key: string | null | undefined) {
   if (!key) return null;
   const { rows } = await db.query<{ id: number; model_key: string; display_name: string }>(
@@ -95,9 +99,10 @@ async function resolveAssumedModel(db: SqlExecutor, key: string | null | undefin
 }
 
 /** CTEs `agg` and `priced`: facts aggregated by (group, model, tier, day) with the applicable price attached. */
-function pricedCte(filter: AnalyticsFilter, p: Params, groupExpr: string, groupJoin: string, assumedModelId: number | null): string {
+function pricedCte(filter: AnalyticsFilter, p: Params, groupExpr: string, groupJoin: GroupJoin, assumedModelId: number | null): string {
   const f = factsFrom(filter, p);
   const assumed = p.add(assumedModelId);
+  const joined = typeof groupJoin === 'function' ? groupJoin(f.day) : groupJoin;
   return `
   agg AS (
     SELECT ${groupExpr} AS g,
@@ -108,7 +113,7 @@ function pricedCte(filter: AnalyticsFilter, p: Params, groupExpr: string, groupJ
            sum(f.cache_write_5m_tokens) AS cw5, sum(f.cache_write_1h_tokens) AS cw1,
            sum(f.replay_tokens) AS rp, sum(f.replay_cached_tokens) AS rpc,
            sum(f.web_search_requests) AS ws
-      FROM ${f.from} ${groupJoin}
+      FROM ${f.from} ${joined}
      WHERE ${f.where}
      GROUP BY 1, 2, 3, 4, 5, 6, 7
   ),
@@ -137,7 +142,8 @@ function pricedCte(filter: AnalyticsFilter, p: Params, groupExpr: string, groupJ
          WHERE ph.model_id = a.model_id AND ph.price_tier = a.price_tier
            AND (ph.effective_from IS NULL OR ph.effective_from <= a.day)
            AND (ph.effective_to IS NULL OR a.day < ph.effective_to)
-         ORDER BY ph.is_builtin ASC, ph.effective_from DESC NULLS LAST
+         -- the user's own price first, then the latest start date, then the latest entry
+         ORDER BY ph.is_builtin ASC, ph.effective_from DESC NULLS LAST, ph.id DESC
          LIMIT 1) pr ON true
   )`;
 }
@@ -181,8 +187,10 @@ export async function getApiValue(db: SqlExecutor, filter: AnalyticsFilter, opti
   const unpriced = (
     await db.query<Record<string, unknown>>(
       `WITH ${cteU}
-       SELECT (x.model_id IS NULL) AS no_model, mc.model_key, mc.display_name, x.price_tier, sum(x.tokens)::bigint AS tokens
-         FROM priced x LEFT JOIN model_catalog mc ON mc.id = x.model_id
+       -- By the model the source recorded. Usage that names no model stays "unknown model" when the assumed
+       -- model has no price for it either; it is not listed as usage of the assumed model.
+       SELECT (x.raw_model_id IS NULL) AS no_model, mc.model_key, mc.display_name, x.price_tier, sum(x.tokens)::bigint AS tokens
+         FROM priced x LEFT JOIN model_catalog mc ON mc.id = x.raw_model_id
         WHERE x.price_id IS NULL AND x.tokens > 0
         GROUP BY 1, 2, 3, 4 ORDER BY 5 DESC LIMIT 50`,
       pu.values,
@@ -228,7 +236,7 @@ export async function getApiValueBy(
   db: SqlExecutor,
   filter: AnalyticsFilter,
   groupExpr: string,
-  groupJoin = '',
+  groupJoin: GroupJoin = '',
   options: ValueOptions = {},
 ): Promise<Map<string, ValueFigures>> {
   const assumed = await resolveAssumedModel(db, options.assumedModelKey);
@@ -258,7 +266,7 @@ export interface ActualSpend {
   subscriptions: Array<{ currency: string; amount: string; cycles: number }> | null;
 }
 
-export async function getActualSpend(db: SqlExecutor, userId: number, now: Date = new Date()): Promise<ActualSpend> {
+export async function getActualSpend(db: SqlExecutor, userId: number, timezone: string, now: Date = new Date()): Promise<ActualSpend> {
   const reported = (
     await db.query<{ total: string | null; first_at: string | null; last_at: string | null }>(
       `SELECT sum(rc.amount_usd)::text AS total, min(rc.occurred_at)::date::text AS first_at, max(rc.occurred_at)::date::text AS last_at
@@ -268,25 +276,30 @@ export async function getActualSpend(db: SqlExecutor, userId: number, now: Date 
     )
   ).rows[0];
 
+  // A plan is billed on its first day and on the same day of every following month. The count is taken
+  // on calendar days alone, as the user entered them: with instants, a period of exactly one calendar
+  // month came out as two cycles east of UTC, and whenever a daylight-saving change fell inside it.
   const subs = (
     await db.query<{ currency: string; amount: string; cycles: unknown }>(
       `SELECT currency, sum(monthly_price * cycles)::text AS amount, sum(cycles)::bigint AS cycles
          FROM (
-           SELECT sp.currency, sp.monthly_price,
-                  -- whole months elapsed, plus one for a cycle that has started but not finished
-                  GREATEST(1,
-                    (EXTRACT(YEAR FROM age(LEAST(COALESCE(sp.ended_at, $2::timestamptz), $2::timestamptz), sp.started_at)) * 12
-                     + EXTRACT(MONTH FROM age(LEAST(COALESCE(sp.ended_at, $2::timestamptz), $2::timestamptz), sp.started_at)))::int
-                    + CASE WHEN LEAST(COALESCE(sp.ended_at, $2::timestamptz), $2::timestamptz)
-                                > sp.started_at + make_interval(months =>
-                                    (EXTRACT(YEAR FROM age(LEAST(COALESCE(sp.ended_at, $2::timestamptz), $2::timestamptz), sp.started_at)) * 12
-                                     + EXTRACT(MONTH FROM age(LEAST(COALESCE(sp.ended_at, $2::timestamptz), $2::timestamptz), sp.started_at)))::int)
-                           THEN 1 ELSE 0 END) AS cycles
-             FROM subscription_periods sp
-            WHERE sp.user_id = $1 AND sp.monthly_price IS NOT NULL AND sp.monthly_price > 0 AND sp.started_at <= $2::timestamptz
+           SELECT b.currency, b.monthly_price,
+                  -- whole months that fit, plus one for a cycle that has started but not finished
+                  b.months + CASE WHEN b.until > (b.start_date + make_interval(months => b.months))::date THEN 1 ELSE 0 END AS cycles
+             FROM (
+               SELECT a.*, (EXTRACT(YEAR FROM age(a.until::timestamp, a.start_date::timestamp)) * 12
+                            + EXTRACT(MONTH FROM age(a.until::timestamp, a.start_date::timestamp)))::int AS months
+                 FROM (
+                   -- "until" is the day after the last day that counts: the period's last day, or today while it runs
+                   SELECT sp.currency, sp.monthly_price, sp.start_date,
+                          LEAST(COALESCE(sp.last_date, $2::date), $2::date) + 1 AS until
+                     FROM subscription_periods sp
+                    WHERE sp.user_id = $1 AND sp.monthly_price IS NOT NULL AND sp.monthly_price > 0 AND sp.start_date <= $2::date
+                 ) a
+             ) b
          ) x
         GROUP BY currency ORDER BY currency`,
-      [userId, now.toISOString()],
+      [userId, dayInZone(now, timezone)],
     )
   ).rows;
 

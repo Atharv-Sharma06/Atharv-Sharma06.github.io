@@ -78,12 +78,14 @@ export async function listConversations(db: SqlExecutor, filter: AnalyticsFilter
   if (query.from) where.push(`(c.created_at AT TIME ZONE ${p.add(filter.timezone)}::text)::date >= ${p.add(query.from)}::date`);
   if (query.to) where.push(`(c.created_at AT TIME ZONE ${p.add(filter.timezone)}::text)::date <= ${p.add(query.to)}::date`);
 
+  // A conversation is filed under the plan that was active on the day it started.
+  const createdDay = `(c.created_at AT TIME ZONE ${p.add(filter.timezone)}::text)::date`;
   const base = `
     FROM conversations c
     JOIN data_sources s ON s.id = c.source_id
     LEFT JOIN model_catalog mc ON mc.id = c.model_id
     LEFT JOIN subscription_periods sp
-           ON sp.user_id = c.user_id AND c.created_at >= sp.started_at AND (sp.ended_at IS NULL OR c.created_at < sp.ended_at)
+           ON sp.user_id = c.user_id AND ${createdDay} >= sp.start_date AND (sp.last_date IS NULL OR ${createdDay} <= sp.last_date)
    WHERE ${where.join(' AND ')}`;
 
   const total = (await db.query<{ n: number }>(`SELECT count(*)::int AS n ${base}`, p.values)).rows[0].n;
@@ -97,7 +99,8 @@ export async function listConversations(db: SqlExecutor, filter: AnalyticsFilter
        SELECT f.conversation_id, sum(${tok})::bigint AS tokens,
               COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'exact'), 0)::bigint AS exact,
               COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'estimated'), 0)::bigint AS estimated
-         FROM usage_facts f WHERE f.user_id = ${user} AND f.conversation_id IS NOT NULL GROUP BY 1)
+         FROM usage_facts f JOIN data_sources fs ON fs.id = f.source_id
+        WHERE f.user_id = ${user} AND f.conversation_id IS NOT NULL AND fs.include_in_totals GROUP BY 1)
      SELECT c.id, c.title, c.kind::text AS kind, c.project_label, c.created_at, c.updated_at, c.message_count,
             mc.model_key, mc.display_name AS model_name,
             COALESCE(t.tokens, 0) AS tokens, COALESCE(t.exact, 0) AS exact, COALESCE(t.estimated, 0) AS estimated,
@@ -261,14 +264,16 @@ async function listConversationsById(db: SqlExecutor, filter: AnalyticsFilter, i
        JOIN data_sources s ON s.id = c.source_id
        LEFT JOIN model_catalog mc ON mc.id = c.model_id
        LEFT JOIN subscription_periods sp
-              ON sp.user_id = c.user_id AND c.created_at >= sp.started_at AND (sp.ended_at IS NULL OR c.created_at < sp.ended_at)
+              ON sp.user_id = c.user_id AND (c.created_at AT TIME ZONE $3::text)::date >= sp.start_date
+             AND (sp.last_date IS NULL OR (c.created_at AT TIME ZONE $3::text)::date <= sp.last_date)
        LEFT JOIN LATERAL (
          SELECT sum(${tok})::bigint AS tokens,
                 COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'exact'), 0)::bigint AS exact,
                 COALESCE(sum(${tok}) FILTER (WHERE f.confidence = 'estimated'), 0)::bigint AS estimated
-           FROM usage_facts f WHERE f.conversation_id = c.id) t ON true
+           FROM usage_facts f JOIN data_sources fs ON fs.id = f.source_id
+          WHERE f.conversation_id = c.id AND fs.include_in_totals) t ON true
       WHERE c.id = $1 AND c.user_id = $2`,
-    [id, filter.userId],
+    [id, filter.userId, filter.timezone],
   );
   const r = rows[0];
   if (!r) return null;

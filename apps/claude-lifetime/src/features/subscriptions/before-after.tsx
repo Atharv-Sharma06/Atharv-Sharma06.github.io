@@ -9,7 +9,7 @@ import { Segmented, Select } from '@/components/ui/controls';
 import { EmptyState } from '@/components/ui/feedback';
 import { Table, TableFrame, THead, Tr } from '@/components/ui/table';
 import { cn } from '@/lib/cn';
-import { addDays, dayInZone, formatDay, formatDayRange, formatInt, formatShare, formatTokens, formatUsd, plural } from '@/lib/format';
+import { dayInZone, formatDay, formatDayRange, formatInt, formatShare, formatTokens, formatUsd, plural } from '@/lib/format';
 import {
   assessComparability, COMPARE_MODES, defaultMode, describeRatio, leadingUsd, pricedShare, rateRatio, sideFigure, valueLevel,
   type CompareMode, type CostScenario, type Figure, type Side,
@@ -147,10 +147,8 @@ export function BeforeAfterCard({ data, inConversations, historyStart, timezone,
   );
 
   const splitDay = formatDay(split.date);
-  const range = (side: Side, stats: SideStats) =>
-    side === 'before'
-      ? formatDayRange(stats.firstAt ? dayInZone(stats.firstAt, timezone) : null, addDays(split.date, -1))
-      : formatDayRange(split.date, stats.lastAt ? dayInZone(stats.lastAt, timezone) : null);
+  // The days a side is averaged over: its part of the recorded history, as the analytics define it.
+  const range = (stats: SideStats) => formatDayRange(stats.spanFrom, stats.spanTo);
 
   const cell = (render: (stats: SideStats, conversations: ConversationUsage | null, side: Side) => ReactNode, side: Side) => {
     const entry = sides.find((s) => s.side === side);
@@ -181,7 +179,7 @@ export function BeforeAfterCard({ data, inConversations, historyStart, timezone,
                       <span className="block text-[13px] font-medium text-ink">{SIDE_NAME[side]}</span>
                       {stats && stats.spanDays > 0 ? (
                         <>
-                          <span className="block sm:whitespace-nowrap">{range(side, stats)}</span>
+                          <span className="block sm:whitespace-nowrap">{range(stats)}</span>
                           <span className="tabular block text-ink-3">{plural(stats.spanDays, 'day')}</span>
                         </>
                       ) : (

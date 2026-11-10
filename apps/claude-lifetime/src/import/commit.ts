@@ -1,6 +1,7 @@
 import { ImportError, type ParsedImport } from '@/core/types';
 import { toIso, toNumber, type SqlDriver, type SqlExecutor } from '@/db/driver';
 import { refreshStatistics } from '@/db/maintenance';
+import { stagingToken } from './staging';
 
 /**
  * Preview and commit of a staged import (see staging.ts).
@@ -245,6 +246,12 @@ export async function loadKnownRequestKeys(db: SqlExecutor, userId: number): Pro
 export interface CommitOptions {
   /** Value of importGeneration() when the input was parsed. Guards request-level deduplication. */
   generation?: number;
+  /**
+   * The token resetStaging() returned before the input was staged. When given, the commit
+   * is refused if the staging tables were reset since: they would hold nothing, or another
+   * import's records, and saving them would not be what the user confirmed.
+   */
+  staging?: string;
 }
 
 export async function commitImport(
@@ -254,6 +261,12 @@ export async function commitImport(
   options: CommitOptions = {},
 ): Promise<CommitResult> {
   const result = await db.transaction(async (tx) => {
+    if (options.staging !== undefined && (await stagingToken(tx)) !== options.staging) {
+      throw new ImportError(
+        'The records prepared for this import are no longer there: another import or a manual entry was made in the meantime, or the tab that held the database was closed. Nothing was saved. Run the import again.',
+        'stale_preview',
+      );
+    }
     await assertStagingValid(tx);
 
     if (options.generation !== undefined && parsed.requestKeys !== undefined) {
