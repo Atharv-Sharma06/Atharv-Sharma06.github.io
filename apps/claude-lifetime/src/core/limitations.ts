@@ -17,7 +17,7 @@ export const Limitation = {
   TIMESTAMP_INFERRED: 32,
   /** Modelled context replay was capped at the assumed context window. */
   CONTEXT_CAPPED: 64,
-  /** The conversation has edits or retries; replay assumes the listed order is one thread. */
+  /** The export has no branch information; replay assumes the messages form one thread in time order. */
   BRANCHES_LINEARISED: 128,
   /** An attachment had no extracted text in the export. */
   ATTACHMENT_TEXT_MISSING: 256,
@@ -63,7 +63,7 @@ export const LIMITATION_TEXT: Record<LimitationName, { short: string; detail: st
   BRANCHES_LINEARISED: {
     short: 'Edits treated as one thread',
     detail:
-      'The conversation contains edited or regenerated messages. Without reliable branch information, re-sent context is modelled on the listed order.',
+      'The export does not say which messages follow which, so an edited or regenerated message cannot be told apart from an ordinary turn. Re-sent context is modelled as one thread in the order of the timestamps, which can include an exchange that was abandoned.',
   },
   ATTACHMENT_TEXT_MISSING: {
     short: 'Attachment text missing',

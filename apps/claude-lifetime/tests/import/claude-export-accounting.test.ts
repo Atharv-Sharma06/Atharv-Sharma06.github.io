@@ -52,15 +52,115 @@ describe('conversation accounting', () => {
     expect(rows[3]).toMatchObject({ replayBase: 30, replayCachedBase: 0 });
   });
 
-  it('uses the end of the previous reply for cache timing when it is known', () => {
-    const rows = accountConversation([
-      m('user', 0, [text(10)]),
-      m('assistant', 10, [text(20)], { endMs: T0 + 500_000 }),
-      m('user', 700, [text(5)]),
-      m('assistant', 710, [text(8)]),
+  it('times the cache window from request to request, whatever time a reply took to write', () => {
+    // In an export a reply is stamped when it is complete; its blocks say when the model began to answer.
+    const at = (seconds: number) => T0 + seconds * 1000;
+    const reply = (began: number, completed: number, n: number, over: Partial<AccountMessage> = {}) =>
+      m('assistant', completed, [{ kind: 'text', base: n, startMs: at(began) }], over);
+    const second = (seconds: number) =>
+      accountConversation([m('user', 0, [text(1000)]), reply(1, 5, 20), m('user', 245, [text(5)]), reply(246, 246 + seconds, 8)])[3].replayCachedBase;
+    // The user answers four minutes after the first reply. The second request is sent at the same moment and over the
+    // same context whether its reply then takes ten seconds or a minute to write.
+    expect(second(10)).toBe(1000);
+    expect(second(60)).toBe(1000);
+    expect(second(400)).toBe(1000);
+
+    // More than five minutes between the two requests: no credit, even though the first reply only finished
+    // four minutes before the second one began.
+    const slow = accountConversation([m('user', 0, [text(1000)]), reply(1, 90, 20), m('user', 330, [text(5)]), reply(331, 340, 8)]);
+    expect(slow[3]).toMatchObject({ replayBase: 1020, replayCachedBase: 0 });
+
+    // A reply that makes several requests keeps the cache warm with each of them.
+    const long = accountConversation([
+      m('user', 0, [text(1000)]),
+      reply(1, 5, 20),
+      m('user', 10, [text(5)]),
+      m('assistant', 400, [
+        { kind: 'tool_use', base: 10, startMs: at(11) },
+        toolResult(100),
+        { kind: 'tool_use', base: 10, startMs: at(200) },
+        toolResult(100),
+        { kind: 'text', base: 30, startMs: at(390) },
+      ]),
+      m('user', 500, [text(5)]),
+      reply(501, 510, 8),
     ]);
-    // 710 s after the start, but only 210 s after the previous reply finished
-    expect(rows[3].replayCachedBase).toBe(10);
+    // request 1: 1,020 re-read, of which the 1,000 the first request read were cached 10 s earlier
+    // request 2: 1,035 re-read; request 1 read 1,025 of that 189 s earlier (the tool call was written, not read, by it)
+    // request 3: 1,145 re-read; request 2 read 1,135 of that 190 s earlier
+    expect(long[3]).toMatchObject({ requestCount: 3, replayBase: 1020 + 1035 + 1145, replayCachedBase: 1000 + 1025 + 1135 });
+    // the next turn follows the LAST request of that reply (390 s) by 111 s, not its first by 490 s:
+    // 1,275 re-read, of which request 3 had read 1,245
+    expect(long[5]).toMatchObject({ replayBase: 1275, replayCachedBase: 1245 });
+
+    // A tool that kept the model waiting for more than five minutes: the request after it finds no cache.
+    const waited = accountConversation([
+      m('user', 0, [text(1000)]),
+      m('assistant', 700, [{ kind: 'tool_use', base: 10, startMs: at(1) }, toolResult(100), { kind: 'text', base: 30, startMs: at(690) }]),
+    ]);
+    expect(waited[1]).toMatchObject({ requestCount: 2, replayBase: 1010, replayCachedBase: 0 });
+  });
+
+  it('falls back to the time the prompt was sent when blocks are not timed, and never trusts a time outside the turn', () => {
+    // no block times: the request is taken to have been sent with the prompt
+    const untimed = accountConversation([m('user', 0, [text(10)]), m('assistant', 10, [text(20)]), m('user', 250, [text(5)]), m('assistant', 600, [text(8)])]);
+    expect(untimed[3].replayCachedBase).toBe(10);
+    // a block time before the prompt or after the completed reply is not used
+    const early = accountConversation([m('user', 0, [text(10)]), m('assistant', 10, [text(20)]), m('user', 400, [text(5)]), m('assistant', 410, [{ kind: 'text', base: 8, startMs: T0 + 100_000 }])]);
+    expect(early[3].replayCachedBase).toBe(0);
+    const late = accountConversation([m('user', 0, [text(10)]), m('assistant', 10, [text(20)]), m('user', 100, [text(5)]), m('assistant', 110, [{ kind: 'text', base: 8, startMs: T0 + 900_000 }])]);
+    expect(late[3].replayCachedBase).toBe(10);
+  });
+
+  it('counts a prompt as new input for the first request that carries it, never as re-read context of that request', () => {
+    const tree = (id: string, parentId: string, role: 'user' | 'assistant', seconds: number, blocks: AccountBlock[], attachmentBase = 0) =>
+      m(role, seconds, blocks, { id, parentId, attachmentBase });
+    // The first reply failed before any output; the user pressed retry.
+    const retry = accountConversation([
+      tree('h1', ROOT_PARENT, 'user', 0, [text(100)], 50_000),
+      tree('a1', 'h1', 'assistant', 5, []),
+      tree('a1b', 'h1', 'assistant', 30, [text(400)]),
+    ]);
+    expect(retry[1]).toMatchObject({ requestCount: 0, replayBase: 0 });
+    expect(retry[2]).toMatchObject({ requestCount: 1, replayBase: 0, outputBase: 400 });
+    expect(sum(retry)).toMatchObject({ input: 50_100, output: 400, replay: 0, requests: 1 });
+
+    // The same when the user wrote a follow-up instead ...
+    const followUp = accountConversation([
+      tree('h1', ROOT_PARENT, 'user', 0, [text(100)], 50_000),
+      tree('a1', 'h1', 'assistant', 5, []),
+      tree('h2', 'a1', 'user', 60, [text(20)]),
+      tree('a2', 'h2', 'assistant', 70, [text(400)]),
+    ]);
+    expect(sum(followUp)).toMatchObject({ input: 50_120, output: 400, replay: 0, requests: 1 });
+
+    // ... and when the first prompt has no reply message at all.
+    const unanswered = accountConversation([
+      tree('h1', ROOT_PARENT, 'user', 0, [text(100)], 50_000),
+      tree('h2', 'h1', 'user', 60, [text(20)]),
+      tree('a2', 'h2', 'assistant', 70, [text(400)]),
+    ]);
+    expect(sum(unanswered)).toMatchObject({ input: 50_120, output: 400, replay: 0, requests: 1 });
+
+    // Once a request has carried a prompt, a retry of the same prompt re-reads it, as before.
+    const realRetry = accountConversation([
+      tree('h1', ROOT_PARENT, 'user', 0, [text(100)]),
+      tree('a1', 'h1', 'assistant', 5, [text(40)]),
+      tree('a1b', 'h1', 'assistant', 30, [text(400)]),
+    ]);
+    expect(realRetry[2]).toMatchObject({ requestCount: 1, replayBase: 100 });
+    // and the turn after an empty reply still finds the cache of the last real request
+    const afterEmpty = accountConversation([
+      tree('h1', ROOT_PARENT, 'user', 0, [text(100)]),
+      tree('a1', 'h1', 'assistant', 5, [text(40)]),
+      tree('h2', 'a1', 'user', 20, [text(7)]),
+      tree('a2', 'h2', 'assistant', 25, []),
+      tree('h3', 'a2', 'user', 40, [text(9)]),
+      tree('a3', 'h3', 'assistant', 45, [text(11)]),
+    ]);
+    // a3 reads h1 + a1 again (140) and gets h2 and h3 for the first time
+    expect(afterEmpty[5]).toMatchObject({ requestCount: 1, replayBase: 140, replayCachedBase: 100 });
+    expect(sum(afterEmpty)).toMatchObject({ input: 116, replay: 140, requests: 2 });
   });
 
   it('models one request per tool round trip inside a reply', () => {

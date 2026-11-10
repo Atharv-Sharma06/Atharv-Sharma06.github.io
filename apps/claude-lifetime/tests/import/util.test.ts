@@ -2,6 +2,7 @@ import { zipSync, strToU8 } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { ImportError } from '@/core/types';
 import { iterateJsonArray } from '@/import/util/json-array-stream';
+import { readLines } from '@/import/util/lines';
 import { looksLikeZip, openZipEntry, readZipDirectory } from '@/import/util/zip';
 
 const chunked = (bytes: Uint8Array, size: number) =>
@@ -48,7 +49,7 @@ describe('iterateJsonArray', () => {
   it('handles an empty array and reports completion', async () => {
     let end: unknown;
     expect(await collect(' [ ] ', 2, { onEnd: (i: unknown) => (end = i) })).toEqual([]);
-    expect(end).toEqual({ truncated: false, elements: 0 });
+    expect(end).toEqual({ truncated: false, elements: 0, trailingData: false });
   });
 
   it('keeps complete records from a truncated file and flags the truncation', async () => {
@@ -56,7 +57,7 @@ describe('iterateJsonArray', () => {
     const cut = compact.slice(0, compact.indexOf('"plain string') + 10);
     const got = await collect(cut, 7, { onEnd: (i: { truncated: boolean; elements: number }) => (end = i) });
     expect(got).toEqual([value[0]]);
-    expect(end).toEqual({ truncated: true, elements: 1 });
+    expect(end).toEqual({ truncated: true, elements: 1, trailingData: false });
   });
 
   it('rejects input that is not an array, with a specific error', async () => {
@@ -209,4 +210,60 @@ describe('zip reader', () => {
     const broken = blobOf(zip.subarray(0, 60));
     await expect(openZipEntry(broken, entries[0])).rejects.toMatchObject({ code: 'zip_truncated' });
   });
+});
+
+describe('readLines', () => {
+  const chunked = (bytes: Uint8Array, size: number): ReadableStream<Uint8Array> => {
+    let offset = 0;
+    return new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (offset >= bytes.length) controller.close();
+        else {
+          controller.enqueue(bytes.subarray(offset, Math.min(bytes.length, offset + size)));
+          offset += size;
+        }
+      },
+    });
+  };
+  const lines = async (text: string, size: number) => {
+    const out: string[] = [];
+    for await (const line of readLines(chunked(new TextEncoder().encode(text), size))) out.push(line);
+    return out;
+  };
+
+  it('yields the same lines for every chunk size: both line endings, empty lines, characters split across chunks', async () => {
+    const text = 'first\nsecond line\r\n\nπ ≈ 3.14 — 你好 🙂\r\n{"a":"b\\nc"}\nlast without newline';
+    const expected = ['first', 'second line', '', 'π ≈ 3.14 — 你好 🙂', '{"a":"b\\nc"}', 'last without newline'];
+    for (let size = 1; size <= 40; size++) expect(await lines(text, size), `chunks of ${size}`).toEqual(expected);
+    expect(await lines(text, 1 << 16)).toEqual(expected);
+  });
+
+  it('handles the edges: empty input, a final newline, a carriage return at a chunk border', async () => {
+    expect(await lines('', 8)).toEqual([]);
+    expect(await lines('only\n', 8)).toEqual(['only']);
+    expect(await lines('a\r\nb\r\n', 2)).toEqual(['a', 'b']);
+    expect(await lines('\n\n', 1)).toEqual(['', '']);
+    expect(await lines('tail\r', 3)).toEqual(['tail']);
+  });
+
+  it('reports every raw byte once', async () => {
+    const bytes = new TextEncoder().encode('one\ntwo\nthree');
+    let seen = 0;
+    const out: string[] = [];
+    for await (const line of readLines(chunked(bytes, 4), (chunk) => (seen += chunk.length))) out.push(line);
+    expect(seen).toBe(bytes.length);
+    expect(out).toEqual(['one', 'two', 'three']);
+  });
+
+  it('reads a very long line in time proportional to its length', async () => {
+    // A transcript row that carries an image is one line of many megabytes, delivered in 64 KiB chunks.
+    // Searching the whole unfinished line again for every chunk took about six seconds for this one.
+    const long = 'x'.repeat(32 * 1024 * 1024);
+    const bytes = new TextEncoder().encode(`{"short":1}\n${long}\n{"after":2}\n`);
+    const started = performance.now();
+    const lengths: number[] = [];
+    for await (const line of readLines(chunked(bytes, 64 * 1024))) lengths.push(line.length);
+    expect(lengths).toEqual([11, long.length, 11]);
+    expect(performance.now() - started).toBeLessThan(2500);
+  }, 30_000);
 });

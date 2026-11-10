@@ -124,8 +124,12 @@ real figure higher.
 An export lists messages. Usage is caused by requests. The app rebuilds the requests:
 
 - Every reply needed at least one request whose input was the whole conversation so far.
-- Each tool call adds a round trip: the tool result goes back in and another request
-  reads everything again. A reply with n tool calls stands for n + 1 requests.
+- Every tool result that goes back to the model starts another request, which reads
+  everything again. Tool calls that are answered together share one such request, and
+  a call that never got a result (a reply that was stopped) adds none.
+- A prompt counts as new input for the first request that actually carries it. If its
+  reply never came, or came back empty, the prompt is still new input for the next
+  reply on that thread; it is not counted a second time as re-read context.
 - **Input** is new content: your text, attachment text, tool results.
   **Output** is what the model wrote: reply text, visible thinking, tool calls.
   **Re-read context** is everything that had already been sent and was sent again.
@@ -134,11 +138,16 @@ An export lists messages. Usage is caused by requests. The app rebuilds the requ
   exceed it. Capped messages are flagged.
 - Exports that carry parent pointers are followed branch by branch, so an abandoned edit
   is not counted as context of the branch that replaced it. Exports without pointers are
-  treated as one thread in the listed order and flagged.
+  treated as one thread in the order of the message timestamps. Every such conversation
+  with more than one prompt is flagged, because an edited prompt cannot be told apart
+  from an ordinary next turn there.
 
 For the cost scenario "with prompt caching" the model also tracks which part of the
 re-read context a 5-minute prompt cache could have served: context that was sent less
-than five minutes earlier and was not changed by dropped thinking.
+than five minutes earlier and was not changed by dropped thinking. The five minutes run
+from one request to the next, each timed by the moment the model began to answer
+(recent exports time every block; older ones leave the time the prompt was sent). How
+long a reply took to write therefore does not decide whether it could use the cache.
 
 ### What an estimate leaves out
 
@@ -153,7 +162,7 @@ Recorded per message as limitation flags, shown on the conversation page:
 | Tool overhead excluded | Tool definitions and server-side tool processing are not visible |
 | Timestamp inferred | A missing or invalid time was replaced by a neighbouring one |
 | Context capped | Re-read context was limited to the context window |
-| Edits treated as one thread | No branch information in the export |
+| Edits treated as one thread | No branch information in the export: the conversation has several prompts and is read as one thread in time order, which can include an exchange that was abandoned |
 | Attachment text missing | An attachment had no extracted text |
 
 ## Equivalent API value

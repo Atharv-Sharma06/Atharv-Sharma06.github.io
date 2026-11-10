@@ -183,11 +183,13 @@ export function MethodologyPage() {
             />
             <p>
               <strong>Reconstructing requests.</strong> An export lists messages, not requests. Every reply needed at least one model request whose input
-              was the whole conversation so far, and each tool call adds another request that reads everything again. The app rebuilds that sequence:
+              was the whole conversation so far, and every tool result that goes back to the model starts another request that reads everything again.
+              The app rebuilds that sequence:
               your text, attachment text and tool results count as input; replies, visible thinking and tool calls count as output; and the earlier
               conversation that was sent again counts as re-read context. Thinking is carried within a turn but not into later turns. Re-read context is
               capped at a {formatInt(DEFAULT_CONTEXT_WINDOW)}-token window, since a real request cannot exceed it. Exports that record which message
-              each reply answered are followed branch by branch; older exports are treated as one thread.
+              each reply answered are followed branch by branch; older exports are treated as one thread in the order of their timestamps, and
+              flagged wherever an edited prompt could be hiding among the turns.
             </p>
             <p>
               <strong>What an estimate leaves out.</strong> Each estimated message records which of these apply to it, and the conversation page lists

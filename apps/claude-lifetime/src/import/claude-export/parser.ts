@@ -153,22 +153,25 @@ export function createClaudeExportParser(countTokens: (text: string) => number):
       const type = str(b.type);
       const stop = parseTime(b.stop_timestamp, nowMs);
       if (stop !== null && (n.endMs === null || stop > n.endMs)) n.endMs = stop;
+      // When the model began this block: the moment the request that produced it was answered.
+      const begun = parseTime(b.start_timestamp, nowMs);
+      const startMs = begun === null ? undefined : begun;
       if (type === 'text' || type === 'voice_note') {
         const text = str(b.text);
         n.textChars += text.length;
-        if (text.length) n.blocks.push({ kind: 'text', base: count(text) });
+        if (text.length) n.blocks.push({ kind: 'text', base: count(text), startMs });
         sawBlock = true;
       } else if (type === 'thinking') {
         const text = str(b.thinking);
         n.thinkingChars += text.length;
-        if (text.length) n.blocks.push({ kind: 'thinking', base: count(text) });
+        if (text.length) n.blocks.push({ kind: 'thinking', base: count(text), startMs });
         n.flags |= Limitation.THINKING_PARTIAL;
         tally.thinkingBlocks++;
         sawBlock = true;
       } else if (type === 'tool_use') {
         const text = `${str(b.name)} ${JSON.stringify(b.input ?? {})}`;
         n.toolChars += text.length;
-        n.blocks.push({ kind: 'tool_use', base: count(text) });
+        n.blocks.push({ kind: 'tool_use', base: count(text), startMs });
         n.flags |= Limitation.TOOL_OVERHEAD_EXCLUDED;
         tally.toolCalls++;
         sawBlock = true;
@@ -402,6 +405,7 @@ export function createClaudeExportParser(countTokens: (text: string) => number):
       let bytesRead = 0;
       let records = 0;
       let truncated = false;
+      let trailingData = false;
       const hash = new Sha256();
 
       for (const part of parts) {
@@ -415,6 +419,7 @@ export function createClaudeExportParser(countTokens: (text: string) => number):
           },
           onEnd: (info) => {
             if (info.truncated) truncated = true;
+            if (info.trailingData) trailingData = true;
           },
         });
         try {
@@ -446,6 +451,13 @@ export function createClaudeExportParser(countTokens: (text: string) => number):
             'not_a_conversations_export',
           );
         }
+        if (records === 0 && truncated) {
+          // Cut off before the first conversation was complete: the file is damaged, not empty.
+          throw new ImportError(
+            'The file ends in the middle of its first conversation, so nothing could be read. The download or copy was probably cut short. Download the export again and choose the new file.',
+            'truncated_file',
+          );
+        }
         if (records === 0) throw new ImportError('The export contains no conversations.', 'empty_export');
       }
 
@@ -455,6 +467,25 @@ export function createClaudeExportParser(countTokens: (text: string) => number):
           code: 'truncated_file',
           message: 'The file ends unexpectedly. Complete conversations were read; the last one was cut off. Download the export again to be sure nothing is missing.',
           count: 1,
+        });
+      }
+      if (trailingData) {
+        warnings.push({
+          code: 'trailing_data',
+          message:
+            'The file continues after the end of its list of conversations, for example because a second export was appended to it. Only the first list was read. Import the other export as its own file.',
+          count: 1,
+        });
+      }
+      if (tally.accounts.size > 1) {
+        const counts = [...tally.accounts.values()].sort((a, b) => b - a);
+        warnings.push({
+          code: 'several_accounts',
+          message:
+            'accounts appear in this file. All of their conversations are imported together, under one source, and count as one history. ' +
+            'If the file holds other people’s conversations (an organisation export, or exports joined together), their usage is part of every total.',
+          count: tally.accounts.size,
+          sample: `Conversations per account: ${counts.slice(0, 8).join(', ')}${counts.length > 8 ? ', …' : ''}`,
         });
       }
       if (tally.invalidTimestamps > 0) {
@@ -504,7 +535,7 @@ export function createClaudeExportParser(countTokens: (text: string) => number):
         warnings.push({
           code: 'no_branch_information',
           message:
-            'This export has no parent pointers between messages (exports made before mid-2026 do not). Edited or regenerated messages cannot be told apart, so each conversation is treated as one thread.',
+            'This export has no parent pointers between messages (exports made before mid-2026 do not). Edited or regenerated messages cannot be told apart, so each conversation is treated as one thread in the order of its timestamps.',
           count: tally.conversationsWithoutPointers,
         });
       }
@@ -519,7 +550,9 @@ export function createClaudeExportParser(countTokens: (text: string) => number):
       const missingFields = ['model', 'token counts'];
       if (tally.conversationsWithoutPointers > 0) missingFields.push('parent_message_uuid');
 
-      const account = [...tally.accounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
+      // The account most conversations belong to names the source; among equals the same one every time,
+      // whatever order the file lists them in, so the next export of the same people adds to the same source.
+      const account = [...tally.accounts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))[0]?.[0] ?? '';
       return {
         format: 'claude-export/conversations',
         formatLabel: 'claude.ai data export',

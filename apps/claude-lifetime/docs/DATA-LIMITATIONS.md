@@ -32,7 +32,7 @@ covers chats from the web, desktop and mobile apps of one account.
 | System prompt, tool definitions, project knowledge, memory, styles | Sent to the model, not in the export, not counted. Real usage is higher. |
 | Images, PDFs and other binary files | The export lists file names only. Their tokens are not counted. |
 | Extended thinking | Visible thinking text is counted. It can be a summary, so billed thinking may be higher. |
-| Edits and regenerated replies | Recent exports record which message each reply answered, and the app follows each branch. Older exports do not; the app then treats the listed order as one thread and flags the conversation. |
+| Edits and regenerated replies | Recent exports record which message each reply answered, and the app follows each branch. Older exports do not; the app then treats the messages as one thread in the order of their timestamps, and flags every conversation with more than one prompt, because an edited prompt cannot be told apart from a next turn. |
 | Which project a chat belonged to | Not linked in the export. |
 
 Each estimated message stores which of these limitations apply to it. The conversation

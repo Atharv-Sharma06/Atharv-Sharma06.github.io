@@ -12,7 +12,12 @@ import { Limitation } from '@/core/limitations';
  *    is the whole conversation so far; its output is what the model wrote.
  *  - When the model calls a tool, the tool result goes back in and another request
  *    follows, re-reading everything again. An assistant message with n tool round
- *    trips therefore stands for n + 1 requests.
+ *    trips therefore stands for n + 1 requests. A round trip is a tool result that
+ *    goes back to the model: calls answered together share one, and a call that
+ *    never got a result adds none.
+ *  - A request is sent when the model starts to answer, not when the answer is
+ *    finished. The 5-minute cache window is measured between those moments, so how
+ *    long a reply took to write does not decide whether it could use the cache.
  *
  * For each message this module reports, in base units (see core/tokens):
  *    input   new content given to the model: the user's text and attachments, and
@@ -35,6 +40,8 @@ export interface AccountBlock {
   kind: BlockKind;
   /** Size in base units. */
   base: number;
+  /** When the model began to write this block (epoch milliseconds), when the export says so. */
+  startMs?: number;
 }
 
 export interface AccountMessage {
@@ -42,7 +49,10 @@ export interface AccountMessage {
   /** Parent message id when the export has parent pointers, else undefined. */
   parentId?: string | null;
   role: 'user' | 'assistant' | 'other';
-  /** Epoch milliseconds used for ordering and cache timing. */
+  /**
+   * Epoch milliseconds used for ordering. For a reply this is the moment it was
+   * complete: an export stamps an assistant message when its last block has ended.
+   */
   timeMs: number;
   /** When the model finished this message, if known (last block's stop time). */
   endMs?: number;
@@ -75,9 +85,9 @@ interface Node {
   /** Sum of carry over all ancestors: the context that existed before this message. */
   ctxBefore: number;
   resolved: boolean;
-  /** For a user message: an assistant child has already consumed it as new input. */
-  answered: boolean;
-  /** For an assistant message: input size and time of its last request (cache model). */
+  /** A request has carried this message to the model. Until then its content is new input, not re-read context. */
+  sent: boolean;
+  /** For an assistant message: input size of its last request and the moment that request was sent (cache model). */
   lastRequestInput: number;
   lastRequestMs: number;
   /**
@@ -97,7 +107,7 @@ export function accountConversation(messages: AccountMessage[]): AccountResult[]
     carry: 0,
     ctxBefore: 0,
     resolved: false,
-    answered: false,
+    sent: false,
     lastRequestInput: 0,
     lastRequestMs: 0,
     cachedForNextTurn: 0,
@@ -121,14 +131,16 @@ export function accountConversation(messages: AccountMessage[]): AccountResult[]
     // No tree information: treat the conversation as one thread in time order.
     order = [...nodes].sort((a, b) => a.msg.timeMs - b.msg.timeMs || a.index - b.index);
     for (let i = 1; i < order.length; i++) order[i].parent = order[i - 1];
-    // Two user messages or two assistant messages in a row suggest an edit or a retry
-    // whose abandoned branch cannot be told apart.
-    for (let i = 1; i < order.length; i++) {
-      if (order[i].msg.role === order[i - 1].msg.role && order[i].msg.role !== 'other') {
-        linearised = true;
-        break;
-      }
+    // Without pointers an edited prompt looks like any other turn (prompt, reply, new
+    // prompt, new reply), so every conversation with a second prompt may contain an
+    // abandoned exchange that is counted here as context. Two messages of one role in a
+    // row (a retry, or a prompt that got no reply) are the same uncertainty.
+    let prompts = 0;
+    for (let i = 0; i < order.length; i++) {
+      if (order[i].msg.role === 'user') prompts++;
+      if (i > 0 && order[i].msg.role === order[i - 1].msg.role && order[i].msg.role !== 'other') linearised = true;
     }
+    if (prompts > 1) linearised = true;
   }
 
   // ── 2. carry and context before each message (parents first, no recursion) ──
@@ -182,25 +194,39 @@ export function accountConversation(messages: AccountMessage[]): AccountResult[]
       continue;
     }
 
-    // The nearest earlier assistant message on this thread gives the previous request.
+    // The nearest earlier assistant message on this thread that made a request gives the previous request.
     let prev: Node | null = n.parent;
-    while (prev && prev.msg.role !== 'assistant') prev = prev.parent;
+    while (prev && !(prev.msg.role === 'assistant' && prev.sent)) prev = prev.parent;
 
-    // The user message being answered is new input for the first request, unless an
-    // earlier reply (a retry sibling) already consumed it: then it is re-sent context.
+    // When the first request of this reply was sent: when the model began its first block. Exports that
+    // do not time their blocks leave the moment the prompt was sent, and last the reply's own stamp.
+    // Either way it lies between the prompt and the completed reply; a stamp outside that is not trusted.
+    const firstStart = m.blocks.find((b) => b.kind !== 'tool_result')?.startMs;
+    const promptMs = n.parent && n.parent.msg.role !== 'assistant' && n.parent.msg.timeMs <= m.timeMs ? n.parent.msg.timeMs : undefined;
+    const firstRequestMs = Math.min(Math.max(firstStart ?? promptMs ?? m.timeMs, promptMs ?? -Infinity), m.timeMs);
+
+    // Tool results that came back while this reply was being written, not yet carried by a request of it.
     let pendingNewInput = 0;
-    const parent = n.parent;
-    if (parent && parent.msg.role !== 'assistant' && !parent.answered) {
-      pendingNewInput = parent.carry;
-      parent.answered = true;
-    }
-
     let turn = 0; // context added by this message so far, including its own thinking
     let requestOpen = false;
     let previousInput = prev ? prev.cachedForNextTurn : 0;
-    let previousWithinTtl = prev !== null && m.timeMs - prev.lastRequestMs <= ttlMs;
+    let previousRequestMs = prev ? prev.lastRequestMs : 0;
+    let lastRequestMs = firstRequestMs;
 
-    const openRequest = () => {
+    const openRequest = (startMs: number | undefined) => {
+      if (r.requestCount === 0) {
+        // Everything above this reply on its thread that no request has carried yet is new input here: the
+        // prompt being answered, and before it any prompt whose reply never came or came back empty. What a
+        // request already carried (also for a retry of the same prompt) is re-sent context.
+        for (let a = n.parent; a && !a.sent; a = a.parent) {
+          pendingNewInput += a.carry;
+          a.sent = true;
+        }
+        n.sent = true;
+      }
+      // Later requests of the same reply follow the tool result they answer; without block times that is taken to be at once.
+      const requestMs = r.requestCount === 0 ? firstRequestMs : Math.max(startMs ?? lastRequestMs, lastRequestMs);
+      const withinTtl = (r.requestCount > 0 || prev !== null) && requestMs - previousRequestMs <= ttlMs;
       const totalInput = n.ctxBefore + turn;
       let replay = totalInput - pendingNewInput;
       if (totalInput > m.capBase) {
@@ -208,10 +234,11 @@ export function accountConversation(messages: AccountMessage[]): AccountResult[]
         r.flags |= Limitation.CONTEXT_CAPPED;
       }
       r.replayBase += replay;
-      if (previousWithinTtl) r.replayCachedBase += Math.min(replay, previousInput);
+      if (withinTtl) r.replayCachedBase += Math.min(replay, previousInput);
       r.requestCount += 1;
       previousInput = Math.min(totalInput, m.capBase);
-      previousWithinTtl = true; // later requests of the same message follow within seconds
+      previousRequestMs = requestMs;
+      lastRequestMs = requestMs;
       pendingNewInput = 0;
       requestOpen = true;
     };
@@ -225,20 +252,19 @@ export function accountConversation(messages: AccountMessage[]): AccountResult[]
         requestOpen = false;
         continue;
       }
-      if (!requestOpen) openRequest();
+      if (!requestOpen) openRequest(b.startMs);
       r.outputBase += b.base;
       turn += b.base;
     }
+    if (r.requestCount === 0) {
+      // Nothing was generated (an empty or interrupted reply): no request is modelled for it, the thread's
+      // cache state is unchanged, and whatever it would have carried stays new input for the request that does.
+      continue;
+    }
     n.lastRequestInput = previousInput;
-    n.lastRequestMs = m.endMs ?? m.timeMs;
+    n.lastRequestMs = lastRequestMs;
     const thought = m.blocks.some((b) => b.kind === 'thinking');
     n.cachedForNextTurn = thought ? Math.min(n.ctxBefore, m.capBase, previousInput) : previousInput;
-    if (r.requestCount === 0 && prev) {
-      // Nothing was generated (an empty or interrupted reply): keep the thread's cache state.
-      n.lastRequestInput = prev.lastRequestInput;
-      n.lastRequestMs = prev.lastRequestMs;
-      n.cachedForNextTurn = prev.cachedForNextTurn;
-    }
   }
 
   return results;

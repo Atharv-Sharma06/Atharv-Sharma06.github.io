@@ -258,6 +258,67 @@ describe('claude.ai export parser', () => {
     expect(parsed.warnings.map((w) => w.code)).toContain('truncated_file');
   });
 
+  it('says that a file cut short inside its first conversation is damaged, not that the export is empty', async () => {
+    const json = JSON.stringify([modernConversation(), legacyConversation()]);
+    await expect(run(json.slice(0, 400))).rejects.toMatchObject({
+      code: 'truncated_file',
+      message: expect.stringContaining('Download the export again'),
+    });
+  });
+
+  it('notes when the file goes on after its list of conversations', async () => {
+    // two exports joined into one file: only the first list is a valid document
+    const joined = `${JSON.stringify([modernConversation()])}\n${JSON.stringify([legacyConversation()])}`;
+    const { out, parsed } = await run(joined);
+    expect(out.conversations.map((c) => c.externalId)).toEqual(['conv-modern']);
+    expect(parsed.warnings.find((w) => w.code === 'trailing_data')?.message).toContain('Only the first list was read');
+    // white space after the list is not "more data"
+    expect((await run(`${JSON.stringify([modernConversation()])}\n  \n`)).parsed.warnings.map((w) => w.code)).not.toContain('trailing_data');
+  });
+
+  it('times the first request of a reply by its first block, as real exports stamp a reply when it is complete', async () => {
+    const at = (seconds: number) => ts(new Date(Date.UTC(2026, 7, 13, 20, 0, seconds)).toISOString().replace('.000Z', 'Z'));
+    const timed = (text: string, start: number, stop: number) => ({ ...textBlock(text), start_timestamp: at(start), stop_timestamp: at(stop) });
+    const chat = (secondReplyTakes: number) => ({
+      uuid: 'conv-timed', name: 'Timed', created_at: at(0), updated_at: at(600), account: { uuid: 'acct-1' },
+      chat_messages: [
+        { uuid: 'h1', parent_message_uuid: ROOT_PARENT, sender: 'human', text: '', content: [textBlock('a'.repeat(1000))], created_at: at(0), attachments: [], files: [] },
+        { uuid: 'a1', parent_message_uuid: 'h1', sender: 'assistant', text: '', content: [timed('b'.repeat(20), 1, 5)], created_at: at(5), attachments: [], files: [] },
+        // the user answers four minutes after the first reply was finished
+        { uuid: 'h2', parent_message_uuid: 'a1', sender: 'human', text: '', content: [textBlock('c'.repeat(5))], created_at: at(245), attachments: [], files: [] },
+        { uuid: 'a2', parent_message_uuid: 'h2', sender: 'assistant', text: '', content: [timed('d'.repeat(8), 246, 246 + secondReplyTakes)], created_at: at(246 + secondReplyTakes), attachments: [], files: [] },
+      ],
+    });
+    const cached = async (seconds: number) => (await run([chat(seconds)])).out.messages.find((m) => m.externalId === 'a2')!.replayCachedBase;
+    // the same request, sent at the same moment: how long the reply then took to write changes nothing
+    expect(await cached(10)).toBe(1000);
+    expect(await cached(60)).toBe(1000);
+  });
+
+  it('flags every conversation with several prompts in an export without pointers, and warns about several accounts', async () => {
+    const m = (uuid: string, sender: string, seconds: number, n: number) => ({
+      uuid, sender, text: 'x'.repeat(n), content: [textBlock('x'.repeat(n))], created_at: ts(`2025-02-24T23:10:${String(seconds).padStart(2, '0')}Z`), attachments: [], files: [],
+    });
+    // an edited prompt in an old export: prompt, reply, new prompt, new reply. Nothing tells it from two ordinary turns.
+    const edited = { uuid: 'conv-edited', name: 'Edited', created_at: ts('2025-02-24T23:10:00Z'), updated_at: ts('2025-02-24T23:11:00Z'), account: { uuid: 'acct-2' },
+      chat_messages: [m('h1', 'human', 0, 1000), m('a1', 'assistant', 10, 3000), m('h1b', 'human', 20, 1000), m('a1b', 'assistant', 30, 3000)] };
+    const single = { uuid: 'conv-single', name: 'Single', created_at: ts('2025-02-24T23:10:00Z'), updated_at: ts('2025-02-24T23:11:00Z'), account: { uuid: 'acct-1' },
+      chat_messages: [m('s-h1', 'human', 0, 10), m('s-a1', 'assistant', 10, 20)] };
+    const { out, parsed } = await run([edited, single, { ...single, uuid: 'conv-single-2', chat_messages: [m('t-h1', 'human', 0, 10), m('t-a1', 'assistant', 10, 20)] }]);
+    const flagged = (id: string) => (out.messages.find((x) => x.externalId === id)!.limitationFlags & Limitation.BRANCHES_LINEARISED) !== 0;
+    expect(['h1', 'a1', 'h1b', 'a1b'].map(flagged)).toEqual([true, true, true, true]);
+    // one prompt and its reply cannot contain an edit
+    expect(['s-h1', 's-a1'].map(flagged)).toEqual([false, false]);
+
+    const accounts = parsed.warnings.find((w) => w.code === 'several_accounts')!;
+    expect(accounts).toMatchObject({ count: 2, sample: 'Conversations per account: 2, 1' });
+    expect(accounts.message).toContain('count as one history');
+    // the account with most conversations names the source; with a tie it is the same one whatever the order in the file
+    expect(parsed.source.externalRef).toBe('acct-1');
+    const tie = async (order: unknown[]) => (await run(order)).parsed.source.externalRef;
+    expect(await tie([edited, single])).toBe(await tie([single, edited]));
+  });
+
   it('streams a large export without holding it in memory as one value', async () => {
     const message = (i: number, j: number) => ({
       uuid: `c${i}-m${j}`, sender: j % 2 === 0 ? 'human' : 'assistant', text: '',

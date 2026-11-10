@@ -13,8 +13,12 @@ import { ImportError } from '@/core/types';
 export interface JsonArrayStreamOptions {
   /** Called with every raw chunk (progress, hashing). */
   onBytes?: (chunk: Uint8Array) => void;
-  /** Called once at the end; `truncated` is true when the input stopped before the closing bracket. */
-  onEnd?: (info: { truncated: boolean; elements: number }) => void;
+  /**
+   * Called once at the end. `truncated`: the input stopped before the closing bracket.
+   * `trailingData`: something other than white space follows the closing bracket
+   * (a second list appended to the first, for example); it is not read.
+   */
+  onEnd?: (info: { truncated: boolean; elements: number; trailingData: boolean }) => void;
   /** Upper bound for a single element, in bytes. */
   maxElementBytes?: number;
 }
@@ -31,6 +35,7 @@ export async function* iterateJsonArray(
 
   let opened = false; // saw the opening '['
   let closed = false; // saw the matching ']'
+  let trailingData = false; // something follows the array
   let elements = 0;
 
   // state of the element being captured
@@ -78,7 +83,12 @@ export async function* iterateJsonArray(
 
       while (i < n) {
         if (closed) {
-          i = n; // ignore anything after the array
+          // Nothing after the array is read, but the caller is told when there is more than white space.
+          while (i < n && !trailingData) {
+            if (!WS(value[i])) trailingData = true;
+            i++;
+          }
+          i = n;
           break;
         }
         if (!opened) {
@@ -182,7 +192,7 @@ export async function* iterateJsonArray(
     }
     // A scalar that ran to the end of input without a delimiter still counts.
     if (capturing && kind === 'scalar' && pieceBytes > 0) yield finish();
-    options.onEnd?.({ truncated: !closed || capturing, elements });
+    options.onEnd?.({ truncated: !closed || capturing, elements, trailingData });
   } finally {
     reader.releaseLock();
   }

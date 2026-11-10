@@ -2,6 +2,12 @@
  * Reads a byte stream line by line without holding the whole input in memory.
  * Handles \n and \r\n, a missing final newline, and multi-byte characters split
  * across chunks. `onBytes` reports raw chunks (for progress and hashing).
+ *
+ * A line can be far longer than a chunk (a transcript row that carries an image is
+ * megabytes of base64). Each chunk is searched for a line feed on its own and the
+ * unfinished line is kept as a list of pieces that is joined once, when the line
+ * ends: appending to one growing string and searching it again from the start for
+ * every chunk takes time that grows with the square of the line's length.
  */
 export async function* readLines(
   stream: ReadableStream<Uint8Array>,
@@ -9,25 +15,37 @@ export async function* readLines(
 ): AsyncGenerator<string> {
   const decoder = new TextDecoder('utf-8');
   const reader = stream.getReader();
-  let pending = '';
+  let pieces: string[] = [];
+  const line = (last: string): string => {
+    let text = last;
+    if (pieces.length > 0) {
+      pieces.push(last);
+      text = pieces.join('');
+      pieces = [];
+    }
+    return text.endsWith('\r') ? text.slice(0, -1) : text;
+  };
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       onBytes?.(value);
-      pending += decoder.decode(value, { stream: true });
+      const text = decoder.decode(value, { stream: true });
       let start = 0;
       for (;;) {
-        const nl = pending.indexOf('\n', start);
+        const nl = text.indexOf('\n', start);
         if (nl === -1) break;
-        const end = nl > start && pending.charCodeAt(nl - 1) === 13 ? nl - 1 : nl;
-        yield pending.slice(start, end);
+        yield line(text.slice(start, nl));
         start = nl + 1;
       }
-      if (start > 0) pending = pending.slice(start);
+      if (start < text.length) pieces.push(start === 0 ? text : text.slice(start));
     }
-    pending += decoder.decode();
-    if (pending.length > 0) yield pending.endsWith('\r') ? pending.slice(0, -1) : pending;
+    const tail = decoder.decode();
+    if (tail.length > 0) pieces.push(tail);
+    if (pieces.length > 0) {
+      const rest = line('');
+      if (rest.length > 0) yield rest;
+    }
   } finally {
     reader.releaseLock();
   }

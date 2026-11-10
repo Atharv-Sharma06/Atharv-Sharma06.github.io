@@ -21,7 +21,9 @@ export function normaliseModelId(raw: string | null | undefined): string | null 
     .replace(/@/g, '-')
     .replace(/-v\d+(?::\d+)?$/, '')
     .replace(/-latest$/, '')
-    .replace(/-20\d{6}$/, '');
+    .replace(/-20\d{6}$/, '')
+    // Vertex AI puts the version before the date (claude-3-5-sonnet-v2@20241022), Bedrock after it.
+    .replace(/-v\d+$/, '');
   return id === '' ? null : id;
 }
 
