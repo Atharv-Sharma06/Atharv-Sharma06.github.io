@@ -59,6 +59,7 @@ function SearchBox({ committed, onCommit }: { committed: string; onCommit: (valu
   const [sync, setSync] = useState<{ seen: string; sent: string[] }>({ seen: committed, sent: [] });
   if (committed !== sync.seen) {
     const arrived = sync.sent.indexOf(committed);
+    console.log('DBG sync', JSON.stringify({ committed, seen: sync.seen, sent: sync.sent, text, arrived }));
     setSync({ seen: committed, sent: arrived >= 0 ? sync.sent.slice(arrived + 1) : [] });
     if (arrived < 0) setText(committed);
   }
@@ -68,6 +69,7 @@ function SearchBox({ committed, onCommit }: { committed: string; onCommit: (valu
     const value = text.trim();
     if (value === latest) return;
     const timer = window.setTimeout(() => {
+      console.log('DBG write', JSON.stringify({ value, latest }));
       setSync((s) => ({ seen: s.seen, sent: [...s.sent, value] }));
       onCommit(value);
     }, SEARCH_DELAY_MS);

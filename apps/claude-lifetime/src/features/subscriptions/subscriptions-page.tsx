@@ -85,6 +85,10 @@ export function SubscriptionsPage() {
   const segments = timeline.data?.segments ?? [];
   const firstSegment = segments[0];
   const today = timeline.data ? dayInZone(timeline.data.now, settings.timezone) : null;
+  // A period entered with dates in the future makes the band run past today.
+  const lastDates = segments.length > 0 ? segmentDates(segments[segments.length - 1], settings.timezone) : null;
+  const lastDay = lastDates ? (lastDates.lastDate ?? lastDates.startDate) : null;
+  const timelineEnd = today && lastDay && lastDay > today ? formatDay(lastDay) : 'today';
   const describe = (period: SubscriptionPeriod) => `${planLabel(period.planKey, period.label)}, ${describeDates(period, today ?? period.startDate)}`;
 
   const addButton = (
@@ -134,7 +138,7 @@ export function SubscriptionsPage() {
               <Card>
                 <CardHeader
                   title="Your plans over time"
-                  description={`Scaled by time, from ${formatDay(segmentDates(firstSegment, settings.timezone).startDate)} to today. Select a period to edit it${
+                  description={`Scaled by time, from ${formatDay(segmentDates(firstSegment, settings.timezone).startDate)} to ${timelineEnd}. Select a period to edit it${
                     segments.some((segment) => segment.kind === 'gap') ? ', or a stretch with no recorded plan to add one there' : ''
                   }.`}
                 />

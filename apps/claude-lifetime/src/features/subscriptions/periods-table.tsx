@@ -135,6 +135,8 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
                     formatDay(dates.lastDate)
                   ) : isGap ? (
                     'Ongoing'
+                  ) : length === null ? (
+                    <span className="text-ink-2">Not started</span>
                   ) : (
                     <span className="inline-flex items-center gap-1.5">
                       <span className="size-2 rounded-full bg-good" aria-hidden="true" />
@@ -144,7 +146,7 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
                 </Td>
                 <Td numeric className={cn(CELL, 'whitespace-nowrap', isGap && 'text-ink-2')}>
                   {length === null ? (
-                    <Unavailable>Not started</Unavailable>
+                    <Unavailable />
                   ) : (
                     <>
                       <span title={formatSpan(length)}>{plural(length, 'day')}</span>

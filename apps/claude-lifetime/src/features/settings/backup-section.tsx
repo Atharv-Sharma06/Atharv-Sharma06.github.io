@@ -12,7 +12,7 @@ import { BackupCryptoError, encryptBackup, isEncryptedBackup, MIN_PASSPHRASE_LEN
 import { formatBytes, formatInt, plural } from '@/lib/format';
 import { useApp, useData } from '@/state/app';
 import { useCoverage } from '@/state/queries';
-import { backupFileName, checkPassphrase, looksLikeGzip } from './logic';
+import { backupFileName, checkPassphrase, looksLikeDatabaseDump } from './logic';
 import { SettingRow, SettingsSection } from './parts';
 
 interface StorageInfo {
@@ -370,17 +370,26 @@ function RestoreDialog({ file, encrypted, onClose }: { file: File; encrypted: bo
 function RestoreRow() {
   const input = useRef<HTMLInputElement>(null);
   const [picked, setPicked] = useState<{ file: File; encrypted: boolean } | null>(null);
+  const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const choose = async (file: File | undefined) => {
     setError(null);
     if (!file) return;
-    const encrypted = await isEncryptedBackup(file);
-    if (!encrypted && !(await looksLikeGzip(file))) {
-      setError(`“${file.name}” is not a Claude Lifetime backup. Choose the .tar.gz or .clbackup file that “Download backup” saved.`);
-      return;
+    setChecking(true);
+    try {
+      const encrypted = await isEncryptedBackup(file);
+      // A protected backup can only be looked into with its passphrase; a plain one is checked here and now.
+      if (!encrypted && !(await looksLikeDatabaseDump(file))) {
+        setError(`“${file.name}” is not a Claude Lifetime backup. Choose the .tar.gz or .clbackup file that “Download backup” saved.`);
+        return;
+      }
+      setPicked({ file, encrypted });
+    } catch (e) {
+      setError(`“${file.name}” could not be read: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setChecking(false);
     }
-    setPicked({ file, encrypted });
   };
 
   return (
@@ -408,9 +417,9 @@ function RestoreRow() {
           void choose(file);
         }}
       />
-      <Button onClick={() => input.current?.click()}>
-        <Upload className="size-4" aria-hidden="true" />
-        Choose a backup file
+      <Button onClick={() => input.current?.click()} loading={checking}>
+        {checking ? null : <Upload className="size-4" aria-hidden="true" />}
+        {checking ? 'Checking the file…' : 'Choose a backup file'}
       </Button>
       <p className="mt-2.5 max-w-[68ch] text-[13px] text-ink-2">
         A .tar.gz file, or a passphrase-protected .clbackup file, made by “Download backup”. You are asked to confirm before anything is replaced.
