@@ -2,7 +2,7 @@
 
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
-import { useMemo, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { NO_PLAN, type TokenBasis } from '@/analytics/base';
 import { getConversationDetail, type ConversationDetail } from '@/analytics/conversations';
 import { getModelBreakdown, type ModelUsage } from '@/analytics/models';
@@ -23,6 +23,7 @@ import { useApp, useData, type AppReady } from '@/state/app';
 import { turnsOf } from './growth';
 import { MeteredUsageCard, TurnGrowthCard, type UsageOverTime } from './growth-card';
 import { MessageTable } from './message-table';
+import { onReturnClick, takePendingFocus } from './navigation';
 import { EstimateNotes, Provenance } from './provenance';
 import { KindIcon, kindLabel, UNTITLED } from './shared';
 import { listHref, type ExplorerState } from './url-state';
@@ -64,9 +65,13 @@ async function loadConversation(a: AppReady, id: number): Promise<Loaded> {
   return { id, detail, overview, value, usage, models };
 }
 
-function BackLink({ listState }: { listState: ExplorerState }) {
+function BackLink({ listState, from }: { listState: ExplorerState; from: number | null }) {
   return (
-    <Link href={listHref(listState)} className="mb-4 inline-flex h-8 items-center gap-1.5 rounded-md text-[13px] text-ink-2 hover:text-ink">
+    <Link
+      href={listHref(listState)}
+      onClick={(event) => onReturnClick(event, from, listState)}
+      className="mb-4 inline-flex h-8 items-center gap-1.5 rounded-md text-[13px] text-ink-2 hover:text-ink"
+    >
       <ArrowLeft className="size-4" aria-hidden="true" />
       Back to conversations
     </Link>
@@ -234,11 +239,11 @@ function ValueTile({ value, scenario }: { value: ApiValue; scenario: 'standard' 
 function NotFound({ listState }: { listState: ExplorerState }) {
   return (
     <div>
-      <BackLink listState={listState} />
+      <BackLink listState={listState} from={null} />
       <EmptyState
         title="This conversation is not in your data"
         action={
-          <Link href={listHref(listState)} className={buttonClass('secondary')}>
+          <Link href={listHref(listState)} onClick={(event) => onReturnClick(event, null, listState)} className={buttonClass('secondary')}>
             Back to conversations
           </Link>
         }
@@ -283,10 +288,32 @@ function DetailContent({ loaded, listState, stale }: { loaded: Present; listStat
   const listsMessages = detail.messages.length > 0;
   const singleTurn = listsMessages && turns.length < 2;
 
+  // Opened from the list: focus moves to the heading, which is how a screen reader learns the view changed.
+  const heading = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (takePendingFocus('detail')) heading.current?.focus({ preventScroll: true });
+  }, []);
+
+  // The tab and the history entry are named after the conversation while it is open.
+  useEffect(() => {
+    const previous = document.title;
+    document.title = `${title || UNTITLED} · ${previous}`;
+    return () => {
+      document.title = previous;
+    };
+  }, [title]);
+
   return (
     <div className={cn('transition-opacity', stale && 'opacity-70')}>
-      <BackLink listState={listState} />
-      <PageHeader title={title ? title : <span className="text-ink-3">{UNTITLED}</span>} className="mb-4" />
+      <BackLink listState={listState} from={c.id} />
+      <PageHeader
+        title={
+          <span ref={heading} tabIndex={-1} className={cn('rounded-sm', !title && 'text-ink-3')}>
+            {title || UNTITLED}
+          </span>
+        }
+        className="mb-4"
+      />
 
       <dl className="mb-6 grid grid-cols-2 gap-x-6 gap-y-3 border-y border-line py-3.5 sm:grid-cols-3 lg:flex lg:flex-wrap lg:gap-x-10">
         <Fact label="Kind">
@@ -427,7 +454,7 @@ export function ConversationDetailView({ id, listState }: { id: number | null; l
   if (query.error) {
     return (
       <div>
-        <BackLink listState={listState} />
+        <BackLink listState={listState} from={id} />
         <ErrorNote title="This conversation could not be read from the local database">{query.error.message}</ErrorNote>
       </div>
     );
@@ -437,7 +464,7 @@ export function ConversationDetailView({ id, listState }: { id: number | null; l
   if (!loaded) {
     return (
       <div>
-        <BackLink listState={listState} />
+        <BackLink listState={listState} from={id} />
         <DetailSkeleton />
       </div>
     );

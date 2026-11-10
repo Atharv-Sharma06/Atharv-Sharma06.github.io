@@ -6,10 +6,10 @@ import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, typ
 import { isPaidPlan, type SegmentStats } from '@/analytics/subscriptions';
 import { confidenceOf } from '@/components/data/confidence';
 import { cn } from '@/lib/cn';
-import { dayInZone, formatDay, formatSpan, formatTokens, formatUsd, plural } from '@/lib/format';
+import { dayInZone, formatDay, formatMonth, formatSpan, formatTokens, formatUsd, plural } from '@/lib/format';
 import { planColor } from '@/lib/palette';
 import {
-  averagePerDay, blockLabelFit, boundaryX, describeDates, hasRecords, layoutTimeline, leadingUsd, placeAxisLabels, segmentDates, segmentSpans,
+  averagePerDay, blockLabelFit, boundaryX, describeDates, hasRecords, layoutTimeline, leadingUsd, lengthDays, placeAxisLabels, segmentDates, segmentSpans,
   timelineTicks, timelineX, valueLevel, type CostScenario,
 } from './logic';
 import { ConfidenceMark, PlanSwatch } from './parts';
@@ -70,6 +70,10 @@ const sameWidths = (a: Record<string, number>, b: Record<string, number>) => {
  * Measures how wide each label is in the font it will be drawn in, so a block only
  * shows a label that fits. The texts are laid out invisibly and re-measured whenever
  * their size changes, for instance once the web font has loaded.
+ *
+ * Each text is drawn by CSS from an attribute rather than written into the page, so the
+ * probes never count as content: a search for "No subscription recorded" finds the block
+ * and the table row that show it, not an invisible copy in front of them.
  */
 function TextProbes({ probes, onMeasure }: { probes: Probe[]; onMeasure: (widths: Record<string, number>) => void }) {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -89,9 +93,7 @@ function TextProbes({ probes, onMeasure }: { probes: Probe[]; onMeasure: (widths
   return (
     <div ref={ref} aria-hidden="true" className="pointer-events-none invisible absolute left-0 top-0 h-0 max-w-full overflow-hidden whitespace-nowrap">
       {probes.map((probe) => (
-        <span key={probe.key} data-key={probe.key} className={cn('inline-block', probe.className)}>
-          {probe.text}
-        </span>
+        <span key={probe.key} data-key={probe.key} data-text={probe.text} className={cn('inline-block before:content-[attr(data-text)]', probe.className)} />
       ))}
     </div>
   );
@@ -145,6 +147,7 @@ function SegmentDetails({
   hasUsage: boolean;
 }) {
   const average = averagePerDay(segment, nowMs);
+  const length = lengthDays(segment, nowMs);
   return (
     <div className="min-w-[14rem] py-0.5">
       <p className="flex items-center gap-1.5 text-[13px] font-medium text-ink">
@@ -154,8 +157,8 @@ function SegmentDetails({
       <p className="mt-0.5 text-ink-2">{datesText}</p>
       <dl className="mt-2 space-y-1 border-t border-line pt-2">
         <DetailRow label="Length">
-          {plural(segment.days, 'day')}
-          {segment.days >= 60 ? <span className="text-ink-2">({formatSpan(segment.days)})</span> : null}
+          {length === null ? 'Not started' : plural(length, 'day')}
+          {length !== null && length >= 60 ? <span className="text-ink-2">({formatSpan(length)})</span> : null}
         </DetailRow>
         {hasUsage && hasRecords(segment) ? (
           <>
@@ -192,13 +195,16 @@ export function Timeline({ segments, now, timezone, scenario, hasUsage, onEditPe
     const datesText = describeDates(dates, today);
     const activate = () => (segment.kind === 'period' && segment.periodId !== null ? onEditPeriod(segment.periodId) : onAddPeriod(dates));
     const action = segment.kind === 'period' ? 'Edit this period' : ADD_HERE;
+    const length = lengthDays(segment, nowMs);
+    const lengthText = length === null ? 'Not started' : plural(length, 'day');
     return {
       key: `${segment.kind}:${segment.periodId ?? index}:${segment.start}`,
       segment,
       dates,
       datesText,
+      lengthText,
       activate,
-      accessibleName: `${segment.label}, ${datesText}, ${plural(segment.days, 'day')}. ${action}.`,
+      accessibleName: `${segment.label}, ${datesText}, ${lengthText.toLowerCase()}. ${action}.`,
     };
   });
 
@@ -224,7 +230,8 @@ export function Timeline({ segments, now, timezone, scenario, hasUsage, onEditPe
   const axisLabels = firstBlock
     ? placeAxisLabels(layout.width, [
         { x: todayAtEnd ? layout.width : todayX, text: 'Today', anchor: todayAtEnd ? 'end' : 'middle', major: true },
-        { x: 0, text: formatDay(items[0].dates.startDate), anchor: 'start', major: true },
+        // On a narrow band the month is enough; the list underneath gives the day.
+        { x: 0, text: compact ? formatMonth(items[0].dates.startDate) : formatDay(items[0].dates.startDate), anchor: 'start', major: true },
         ...ticks.map((tick) => ({ x: tick.x, text: tick.label, anchor: 'middle' as const, major: tick.major })),
       ])
     : [];
@@ -353,7 +360,7 @@ export function Timeline({ segments, now, timezone, scenario, hasUsage, onEditPe
                     <span className={cn('block text-[13px]', isGap ? 'text-ink-2' : 'font-medium text-ink')}>{item.segment.label}</span>
                     <span className="block text-xs text-ink-3">{item.datesText}</span>
                   </span>
-                  <span className="tabular shrink-0 text-xs text-ink-2">{plural(item.segment.days, 'day')}</span>
+                  <span className="tabular shrink-0 text-xs text-ink-2">{item.lengthText}</span>
                   {isGap ? <Plus className="size-4 shrink-0 text-ink-3" aria-hidden="true" /> : <ChevronRight className="size-4 shrink-0 text-ink-3" aria-hidden="true" />}
                 </button>
               </li>

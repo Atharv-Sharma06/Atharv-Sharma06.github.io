@@ -49,3 +49,6 @@ next-env.d.ts
 # playwright
 /test-results/
 /playwright-report/
+
+# scratch tests written during code review
+/review-scratch/

@@ -32,15 +32,18 @@ export interface BeforeAfterCardProps {
 
 const SIDE_NAME: Record<Side, string> = { before: 'Before', after: 'After' };
 
+/** Tighter on a phone, where the three columns have to share the width of the screen. */
+const CELL = 'px-2 py-2.5 align-top sm:px-3';
+
 function MeasureRow({ label, hint, before, after }: { label: string; hint?: string; before: ReactNode; after: ReactNode }) {
   return (
     <Tr>
-      <th scope="row" className="whitespace-nowrap px-3 py-2.5 text-left align-top font-normal text-ink-2">
+      <th scope="row" className={cn(CELL, 'text-left font-normal text-ink-2 sm:whitespace-nowrap')}>
         {label}
         {hint ? <span className="mt-0.5 block text-xs text-ink-3">{hint}</span> : null}
       </th>
-      <td className="px-3 py-2.5 align-top text-ink">{before}</td>
-      <td className="px-3 py-2.5 align-top text-ink">{after}</td>
+      <td className={cn(CELL, 'text-ink')}>{before}</td>
+      <td className={cn(CELL, 'text-ink')}>{after}</td>
     </Tr>
   );
 }
@@ -167,18 +170,18 @@ export function BeforeAfterCard({ data, inConversations, historyStart, timezone,
       <CardBody className="grid gap-x-10 gap-y-7 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
         <div className="min-w-0">
           <TableFrame>
-            <Table className="min-w-[31rem]">
+            <Table>
               <THead>
                 <tr>
-                  <th scope="col" className="px-3 py-2 font-medium">
+                  <th scope="col" className="px-2 py-2 font-medium sm:px-3">
                     <span className="sr-only">Measure</span>
                   </th>
                   {sides.map(({ side, stats }) => (
-                    <th key={side} scope="col" className="px-3 py-2 text-left align-top font-normal">
+                    <th key={side} scope="col" className="px-2 py-2 text-left align-top font-normal sm:px-3">
                       <span className="block text-[13px] font-medium text-ink">{SIDE_NAME[side]}</span>
                       {stats && stats.spanDays > 0 ? (
                         <>
-                          <span className="block whitespace-nowrap">{range(side, stats)}</span>
+                          <span className="block sm:whitespace-nowrap">{range(side, stats)}</span>
                           <span className="tabular block text-ink-3">{plural(stats.spanDays, 'day')}</span>
                         </>
                       ) : (

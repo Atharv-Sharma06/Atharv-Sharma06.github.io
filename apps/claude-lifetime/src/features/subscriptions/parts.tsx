@@ -67,7 +67,7 @@ export function BadgedFigure({
   column?: boolean;
 }) {
   return (
-    <span className={cn('inline-flex items-center gap-2', column && 'justify-end')}>
+    <span className={cn('inline-flex items-center gap-x-2 gap-y-1', column ? 'justify-end' : 'flex-wrap')}>
       <span className="tabular whitespace-nowrap text-ink" title={title}>
         {children}
       </span>

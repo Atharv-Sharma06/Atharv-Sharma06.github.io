@@ -25,6 +25,8 @@ const MIN_CELL = 12;
 const MAX_CELL = 15;
 /** Width of the weekday labels to the left of the grid, including the space after them. */
 const GUTTER = 36;
+/** Space kept free around the grid inside its scroll frame, so the focus ring of an edge square is not cut off. */
+const RING = 3;
 const TIP_WIDTH = 224;
 /** Room a tooltip needs above a square before it would slide under the sticky top bar. */
 const TIP_CLEARANCE = 190;
@@ -41,7 +43,7 @@ function useCellSize(box: RefObject<HTMLDivElement | null>, weeks: number): numb
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
-    const fit = () => setCell(Math.max(MIN_CELL, Math.min(MAX_CELL, Math.floor((el.clientWidth - GUTTER + GAP) / weeks) - GAP)));
+    const fit = () => setCell(Math.max(MIN_CELL, Math.min(MAX_CELL, Math.floor((el.clientWidth - GUTTER - RING + GAP) / weeks) - GAP)));
     fit();
     const observer = new ResizeObserver(fit);
     observer.observe(el);
@@ -166,9 +168,12 @@ export function Heatmap({ history, year, metric, scale }: { history: History; ye
 
   const place = (el: HTMLElement): Tip | null => {
     const box = root.current?.getBoundingClientRect();
+    const view = frame.current?.getBoundingClientRect();
     const day = el.dataset.day;
-    if (!box || !day) return null;
+    if (!box || !view || !day) return null;
     const r = el.getBoundingClientRect();
+    // A square that has been scrolled out of the frame has nothing to point at.
+    if (r.right < view.left || r.left > view.right) return null;
     const half = TIP_WIDTH / 2 + 8;
     const centre = Math.max(half, Math.min(window.innerWidth - half, r.left + r.width / 2));
     const below = r.top < TIP_CLEARANCE;
@@ -251,7 +256,7 @@ export function Heatmap({ history, year, metric, scale }: { history: History; ye
   return (
     <div ref={root} className="relative">
       <div className="flex">
-        <div aria-hidden="true" className="flex shrink-0 flex-col pt-6 text-xs text-ink-3" style={{ gap: GAP, width: GUTTER }}>
+        <div aria-hidden="true" className="flex shrink-0 flex-col pt-6 text-xs text-ink-3" style={{ gap: GAP, width: GUTTER - RING }}>
           {['Mon', '', 'Wed', '', 'Fri', '', ''].map((label, i) => (
             <span key={i} className="flex items-center" style={{ height: cell }}>
               {label}
@@ -259,7 +264,7 @@ export function Heatmap({ history, year, metric, scale }: { history: History; ye
           ))}
         </div>
         <div ref={frame} onScroll={onScroll} className="scrollbar-thin min-w-0 flex-1 overflow-x-auto pb-2">
-          <div style={{ width: gridWidth }}>
+          <div className="box-content" style={{ width: gridWidth, padding: `0 ${RING}px` }}>
             <div aria-hidden="true" className="relative h-6 text-xs text-ink-3">
               {calendar.months.map((m) => (
                 <span key={m.label} className="absolute top-0.5" style={{ left: m.week * pitch }}>
@@ -270,7 +275,7 @@ export function Heatmap({ history, year, metric, scale }: { history: History; ye
             <div
               role="grid"
               aria-label={`${title} per day in ${year}. Rows are weekdays from Monday, columns are weeks. Use the arrow keys to move between days.`}
-              className="flex flex-col p-px"
+              className="flex flex-col"
               style={{ gap: GAP }}
               onPointerOver={onPointerOver}
               onPointerLeave={() => setHoverTip(null)}
@@ -306,7 +311,6 @@ export function Heatmap({ history, year, metric, scale }: { history: History; ye
                 <li key={level} className="flex">
                   <Tooltip content={`${bandLabel(scale, level, metric)} in a day`}>
                     <span
-                      tabIndex={0}
                       role="img"
                       aria-label={`Level ${level} of ${levels}: ${bandLabel(scale, level, metric)} in a day`}
                       className={cn('rounded-[3px]', RAMP[rampStep(level, levels)])}

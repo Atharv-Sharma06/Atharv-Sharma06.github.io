@@ -1,11 +1,12 @@
 'use client';
 
-import { FlaskConical, Trash } from 'lucide-react';
+import { FlaskConical, Trash, Upload } from 'lucide-react';
 import Link from 'next/link';
 import { useId, useState, type ReactNode } from 'react';
 import type { SourceCoverage } from '@/analytics/coverage';
 import { setSourceIncluded } from '@/analytics/settings';
 import { deletePeriod, listPeriods } from '@/analytics/subscriptions';
+import { LoadDemoButton } from '@/components/data/no-data';
 import { SOURCE_KIND_LABEL } from '@/components/shell/coverage-indicator';
 import { Button, buttonClass } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -274,13 +275,17 @@ export function SourcesSection() {
         <EmptyState
           title="No sources yet"
           action={
-            <Link href="/import/" className={buttonClass('primary')}>
-              Import your history
-            </Link>
+            <div className="flex flex-wrap items-start gap-3">
+              <Link href="/import/" className={buttonClass('primary')}>
+                <Upload className="size-4" aria-hidden="true" />
+                Import your history
+              </Link>
+              <LoadDemoButton />
+            </div>
           }
         >
           Every figure in the app comes from files you import: a claude.ai data export, Claude Code session logs or an Anthropic API usage report.
-          Each of them shows up here as a source once it is imported.
+          Each of them shows up here as a source once it is imported. The demo data is synthetic and labelled as such on every page.
         </EmptyState>
       ) : (
         <Card className={cn('transition-opacity', coverage.isPlaceholderData && 'opacity-70')}>

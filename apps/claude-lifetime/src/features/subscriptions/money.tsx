@@ -116,7 +116,7 @@ export function MoneyCard({ spend, value, scenario, hasUsage, periodCount }: Mon
           )}
         </section>
 
-        <section className="min-w-0 border-line md:border-l md:pl-10">
+        <section className="min-w-0 border-t border-line pt-7 md:border-l md:border-t-0 md:pl-10 md:pt-0">
           <h3 className="flex flex-wrap items-center gap-2 text-sm font-medium text-ink">
             Equivalent API value
             <Kind>Hypothetical</Kind>
@@ -142,8 +142,20 @@ export function MoneyCard({ spend, value, scenario, hasUsage, periodCount }: Mon
                 />
               </p>
               <p className="mt-2 max-w-[58ch] text-[13px] text-ink-2">
-                A calculation, not a bill: it is not money you paid, and the difference to what you paid is not a saving.
-                {spend?.reportedApiUsd != null ? ' It also covers the API usage that was billed to you.' : ''}
+                {level === 'unavailable' ? (
+                  <>
+                    None of your recorded usage names a model with a published price, so there is nothing to calculate. You can choose a reference model for such usage in{' '}
+                    <Link href="/settings/" className={LINK}>
+                      Settings
+                    </Link>
+                    ; the result is then labelled as an assumption.
+                  </>
+                ) : (
+                  <>
+                    A calculation, not a bill: it is not money you paid, and the difference to what you paid is not a saving.
+                    {spend?.reportedApiUsd != null ? ' It also covers the API usage that was billed to you.' : ''}
+                  </>
+                )}
               </p>
 
               <dl className="mt-4 space-y-2.5 border-t border-line pt-4 text-[13px]">

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { ConversationUsage, SideStats, SubscriptionPeriod } from '@/analytics/subscriptions';
 import { ZERO_FIGURES } from '@/analytics/value';
 import {
-  assessComparability, averagePerDay, blockLabelFit, boundaryX, DAY_MS, DAYS_PER_MONTH, dayStartInZone, defaultMode, describeRatio, elapsedDays,
-  emptyPeriodForm, endDateResolvingOverlap, formToInput, layoutTimeline, leadingUsd, otherUsd, perConversation, periodToForm, periodToInput,
+  assessComparability, averagePerDay, blockLabelFit, boundaryX, DAY_MS, DAYS_PER_MONTH, dayStartInZone, defaultMode, describeDates, describeRatio, elapsedDays,
+  emptyPeriodForm, endDateResolvingOverlap, formToInput, layoutTimeline, leadingUsd, lengthDays, otherUsd, perConversation, periodToForm, periodToInput,
   placeAxisLabels, pricedShare, ratePer, rateRatio, segmentDates, segmentSpans, sideFigure, timelineTicks, timelineX, validatePeriodForm, valueLevel,
   type AxisLabel, type Comparability,
 } from '@/features/subscriptions/logic';
@@ -201,6 +201,26 @@ describe('segments', () => {
     const notStarted = { start: '2026-12-01T00:00:00.000Z', end: '2027-01-01T00:00:00.000Z', days: 31, tokens: 0, activeDays: 0 };
     expect(elapsedDays(notStarted, NOW)).toBe(0);
     expect(averagePerDay(notStarted, NOW)).toBeNull();
+
+    expect([closed, running, endsLater, notStarted].map((segment) => lengthDays(segment, NOW))).toEqual([30, 10, 30, 31]);
+  });
+
+  it('gives no length to a running period that has not started', () => {
+    // entered as "from 1 December", with no end date, three weeks ahead of time
+    const ahead = { start: '2026-12-01T00:00:00.000Z', end: null, days: 1, tokens: 0, activeDays: 0 };
+    expect(lengthDays(ahead, NOW)).toBeNull();
+    expect(elapsedDays(ahead, NOW)).toBe(0);
+    expect(averagePerDay(ahead, NOW)).toBeNull();
+  });
+
+  it('words the dates of a finished, a running and a coming stretch', () => {
+    const today = '2026-11-10';
+    expect(describeDates({ startDate: '2025-01-10', lastDate: '2025-12-10' }, today)).toBe('Jan 10 – Dec 10, 2025');
+    expect(describeDates({ startDate: '2024-05-12', lastDate: '2025-01-09' }, today)).toBe('May 12, 2024 – Jan 9, 2025');
+    expect(describeDates({ startDate: '2025-07-01', lastDate: '2025-07-01' }, today)).toBe('Jul 1, 2025');
+    expect(describeDates({ startDate: '2025-12-11', lastDate: null }, today)).toBe('Since Dec 11, 2025');
+    expect(describeDates({ startDate: '2026-11-10', lastDate: null }, today)).toBe('Since Nov 10, 2026');
+    expect(describeDates({ startDate: '2026-12-01', lastDate: null }, today)).toBe('From Dec 1, 2026');
   });
 
   it('has no average for a segment without imported records, and a real zero for one whose records hold no tokens', () => {

@@ -2,7 +2,6 @@
 
 import { Search, X } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { NO_PLAN, UNKNOWN_MODEL_LABEL } from '@/analytics/base';
 import { listConversationModels, listConversations, type ConversationRow, type ConversationSort } from '@/analytics/conversations';
@@ -22,6 +21,7 @@ import { formatDayRange, formatInstant, formatInt, formatTokens } from '@/lib/fo
 import { rangeKey, useApp, useData } from '@/state/app';
 import { useCoverage, usePeriods } from '@/state/queries';
 import { ConfidenceMark } from './confidence-mark';
+import { isPlainClick, onOpenClick, openConversation, takePendingFocus } from './navigation';
 import { ensurePlannerStatistics } from './planner-statistics';
 import { KindIcon, shortProject, UNTITLED } from './shared';
 import {
@@ -52,27 +52,27 @@ function writeState(next: ExplorerState) {
 
 function SearchBox({ committed, onCommit }: { committed: string; onCommit: (value: string) => void }) {
   const [text, setText] = useState(committed);
-  // What this box last wrote. A different value in the URL came from somewhere else
-  // (Clear filters, the back button) and replaces the text; our own echo must not,
-  // or it would overwrite characters typed while the URL was catching up.
-  const lastWritten = useRef(committed);
-
-  useEffect(() => {
-    if (committed !== lastWritten.current) {
-      lastWritten.current = committed;
-      setText(committed);
-    }
-  }, [committed]);
+  // `seen` is the search last found in the URL; `sent` holds what this box has written
+  // that the URL does not show yet. When the URL changes to something this box did not
+  // send (Clear filters, the back button), the text follows it. When it is our own
+  // write arriving, the text is left alone: the user may already have typed more.
+  const [sync, setSync] = useState<{ seen: string; sent: string[] }>({ seen: committed, sent: [] });
+  if (committed !== sync.seen) {
+    const arrived = sync.sent.indexOf(committed);
+    setSync({ seen: committed, sent: arrived >= 0 ? sync.sent.slice(arrived + 1) : [] });
+    if (arrived < 0) setText(committed);
+  }
+  const latest = sync.sent.length > 0 ? sync.sent[sync.sent.length - 1] : sync.seen;
 
   useEffect(() => {
     const value = text.trim();
-    if (value === lastWritten.current) return;
+    if (value === latest) return;
     const timer = window.setTimeout(() => {
-      lastWritten.current = value;
+      setSync((s) => ({ seen: s.seen, sent: [...s.sent, value] }));
       onCommit(value);
     }, SEARCH_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [text, onCommit]);
+  }, [text, latest, onCommit]);
 
   return (
     <div className="relative col-span-2 min-w-0 sm:flex-[1_1_15rem]">
@@ -115,6 +115,8 @@ function ConversationTableRow({ row, state, timezone, onOpen }: { row: Conversat
           <Link
             href={detailHref(row.id, state)}
             prefetch={false}
+            onClick={(event) => onOpenClick(event, row.id, state)}
+            data-conversation={row.id}
             title={title || undefined}
             className={cn('min-w-0 truncate underline-offset-4 hover:underline', title ? 'text-ink' : 'text-ink-3')}
           >
@@ -183,7 +185,6 @@ function TableSkeleton() {
 
 export function Explorer({ state }: { state: ExplorerState }) {
   const app = useApp();
-  const router = useRouter();
   const { resolved, settings } = app;
   const scoped = resolved.from !== null || resolved.to !== null;
   const rangeLabel = formatDayRange(resolved.from, resolved.to);
@@ -257,11 +258,18 @@ export function Explorer({ state }: { state: ExplorerState }) {
   const openRow = (event: MouseEvent<HTMLTableRowElement>, id: number) => {
     // The title is the real link. The rest of the row is a larger target for a plain
     // click on it; modified clicks and text selection are left to the browser.
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    if ((event.target as HTMLElement).closest('a, button')) return;
+    if (!isPlainClick(event) || (event.target as HTMLElement).closest('a, button')) return;
     if (window.getSelection()?.toString()) return;
-    router.push(detailHref(id, state));
+    openConversation(id, state);
   };
+
+  // Back from a conversation: keyboard focus returns to the row it was opened from.
+  const listed = page.data?.rows;
+  useEffect(() => {
+    if (!listed) return;
+    const target = takePendingFocus('list');
+    if (target) frame.current?.querySelector<HTMLAnchorElement>(`a[data-conversation="${target.id}"]`)?.focus();
+  }, [listed]);
 
   const goToPage = (next: number) => {
     writeState({ ...state, page: next });

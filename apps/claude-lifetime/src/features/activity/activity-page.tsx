@@ -23,7 +23,6 @@ import {
   METRIC_NOUN,
   METRIC_OPTIONS,
   monthRows,
-  quantity,
   summariseYear,
   valueOf,
   weekdayAverages,

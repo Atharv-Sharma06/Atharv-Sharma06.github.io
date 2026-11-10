@@ -3,7 +3,7 @@
 import { ChartCard } from '@/components/charts/chart-card';
 import { Table, TableFrame, Td, Th, THead, Tr } from '@/components/ui/table';
 import { Tooltip } from '@/components/ui/overlay';
-import { formatDecimal, formatInt, formatTokens, plural } from '@/lib/format';
+import { daysBetween, formatDecimal, formatInt, formatTokens, plural } from '@/lib/format';
 import { METRIC_NOUN, METRIC_OPTIONS, quantity, type DaySpan, type Metric, type WeekdayAverage } from './activity-model';
 
 /** Averages of small counts keep one decimal; large ones are shortened like every other figure. */
@@ -33,7 +33,7 @@ export function WeekdayChart({
   const noun = METRIC_NOUN[metric].many;
   const title = METRIC_OPTIONS.find((m) => m.value === metric)?.label ?? '';
   const max = Math.max(0, ...rows.map((r) => r.average ?? 0));
-  const whole = span.days === (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 366 : 365);
+  const whole = span.days === daysBetween(`${year}-01-01`, `${year}-12-31`);
   return (
     <ChartCard
       className={className}
@@ -60,13 +60,12 @@ export function WeekdayChart({
                 >
                   <div
                     role="listitem"
-                    tabIndex={0}
                     aria-label={r.average === null ? `${r.label}: not available` : `${r.label}: ${formatAverage(r.average)} ${noun} a day on average`}
-                    className="group flex h-full min-w-0 flex-1 flex-col items-center justify-end rounded-t-[4px]"
+                    className="group flex h-full min-w-0 flex-1 flex-col items-center justify-end"
                   >
                     <span className="tabular mb-1.5 h-4 text-xs leading-4 text-ink-2 group-hover:text-ink">{r.average === null ? '–' : formatAverage(r.average)}</span>
                     <div
-                      className="w-full max-w-6 rounded-t-[4px] bg-[var(--color-series-1)] group-hover:bg-accent-soft"
+                      className="w-full max-w-6 rounded-t-[4px] bg-accent group-hover:bg-accent-soft"
                       style={{ height: r.average && max > 0 ? `max(2px, calc((100% - 1.375rem) * ${r.average / max}))` : 0 }}
                     />
                   </div>
