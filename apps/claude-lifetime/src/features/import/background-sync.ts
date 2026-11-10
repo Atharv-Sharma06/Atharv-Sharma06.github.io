@@ -1,7 +1,7 @@
 'use client';
 
 import { ImportError } from '@/core/types';
-import type { SqlDriver } from '@/db/driver';
+import { DatabaseMovedError, type SqlDriver } from '@/db/driver';
 import { ImportSession } from '@/import/session';
 import { kvGet, kvSet } from '@/lib/kv';
 import { LAST_SYNC_KEY, readRememberedFolder, type FolderReading } from './local-files';
@@ -61,27 +61,32 @@ export async function syncClaudeCodeFolder(db: SqlDriver, userId: number, ask: b
   if (reading.status === 'no_folder') return { status: 'no_folder' };
   if (reading.status === 'no_permission') return { status: 'no_permission', folder: reading.name };
   const { folder, source } = reading;
-  const session = new ImportSession(db, userId);
-  let outcome: SyncOutcome;
-  try {
-    if (folder.files.length === 0) {
-      outcome = { at: Date.now(), added: 0, problem: `No transcripts were found in “${folder.name}”.` };
-    } else {
+  /** One reading of the folder. 'moved' when the tab that held the database went away in the middle of it. */
+  const attempt = async (): Promise<SyncOutcome | 'busy' | 'moved'> => {
+    const session = new ImportSession(db, userId);
+    try {
+      if (folder.files.length === 0) return { at: Date.now(), added: 0, problem: `No transcripts were found in “${folder.name}”.` };
       const detected = await session.detect(folder.files);
       if (detected.parser !== 'claude-code') throw new ImportError(`“${folder.name}” no longer looks like a Claude Code folder.`, 'unknown_format');
       const prepared = await session.prepare(folder.files, detected, { ...source });
       const added = prepared.preview.requests?.new ?? prepared.preview.usageRows.new;
       // An import with nothing new is still committed: it records which files were read, so the next sync can skip them.
       await session.commit(prepared);
-      outcome = { at: Date.now(), added };
+      return { at: Date.now(), added };
+    } catch (error) {
+      // Another import holds the staging tables: not a failure of this folder, and nothing to record about it.
+      if (error instanceof ImportError && error.code === 'import_in_progress') return 'busy';
+      if (error instanceof DatabaseMovedError) return 'moved';
+      return { at: Date.now(), added: 0, problem: error instanceof Error ? error.message : String(error) };
+    } finally {
+      await session.dispose();
     }
-  } catch (error) {
-    // Another import holds the staging tables: not a failure of this folder, and nothing to record about it.
-    if (error instanceof ImportError && error.code === 'import_in_progress') return { status: 'busy' };
-    outcome = { at: Date.now(), added: 0, problem: error instanceof Error ? error.message : String(error) };
-  } finally {
-    await session.dispose();
-  }
+  };
+  let result = await attempt();
+  // Reading the folder twice adds nothing twice, so after a move it is simply read again, by the tab that took over.
+  if (result === 'moved') result = await attempt();
+  if (result === 'busy') return { status: 'busy' };
+  const outcome: SyncOutcome = result === 'moved' ? { at: Date.now(), added: 0, problem: new DatabaseMovedError().message } : result;
   await kvSet(LAST_SYNC_KEY, outcome).catch(() => undefined);
   return { status: 'done', outcome };
 }

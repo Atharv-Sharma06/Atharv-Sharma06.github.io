@@ -1,7 +1,9 @@
 import { createElement, isValidElement, type ReactElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BootError } from '@/components/shell/boot';
+import { BootError, BootProgress } from '@/components/shell/boot';
+import { DatabaseBusyError, SETUP_TIMEOUT_MS } from '@/db/client';
+import { DatabaseMovedError } from '@/db/driver';
 import { MigrationError, NewerSchemaError } from '@/db/migrate';
 
 /**
@@ -96,5 +98,59 @@ describe('BootError, for every other start-up failure', () => {
     expect(screen).toContain('The local database could not be opened');
     expect(screen).toContain('Try again');
     expect(screen).not.toContain('newer version');
+  });
+});
+
+describe('BootError, for a database that is there but held by another tab', () => {
+  it('says that the database did not answer and what to do about the other tabs, without the advice for a database that cannot be stored', () => {
+    const retry = vi.fn();
+    const busy = new DatabaseBusyError(SETUP_TIMEOUT_MS);
+    const screen = html(busy, retry);
+    expect(screen).toContain('The database did not answer');
+    expect(screen).toContain('This tab waited for its turn and did not get one in time.');
+    expect(screen).toContain('If another tab is in the middle of a large import or a backup, let it finish, then try again.');
+    expect(screen).toContain('Otherwise reload the other open tabs of Claude Lifetime, or close them, then try again.');
+    expect(screen).toContain('Nothing was changed, and your data is still stored in this browser.');
+    // Before the fix this case never ended; the generic screen it would have reached speaks of
+    // private windows, browser versions and disk space, none of which has anything to do with it.
+    expect(screen).not.toContain('could not be opened');
+    expect(screen).not.toContain('incognito');
+    expect(screen).not.toContain('disk space');
+
+    const found = buttons(expand(createElement(BootError, { error: busy, retry })));
+    expect([...found.keys()]).toEqual(['Try again']);
+    found.get('Try again')!();
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('says so when the tab that held the database kept going away during the start', () => {
+    const screen = html(new DatabaseMovedError());
+    expect(screen).toContain('The database changed hands while this tab was starting');
+    expect(screen).toContain('The tab that held it was closed or reloaded several times while this one was starting, so this tab stopped trying.');
+    expect(screen).toContain('Try again');
+    expect(screen).not.toContain('incognito');
+    // The sentence for a change that may not have been saved is not for a start: nothing was being saved.
+    expect(screen).not.toContain('Check whether this was saved');
+  });
+});
+
+describe('the start-up screen while it waits', () => {
+  const progress = (phase: 'starting' | 'migrating' | 'ready', slow: boolean) => renderToStaticMarkup(createElement(BootProgress, { phase, slow }));
+
+  it('only names the step at first', () => {
+    expect(progress('migrating', false)).toContain('Preparing the database…');
+    expect(progress('migrating', false)).not.toContain('Another tab');
+    expect(progress('starting', false)).not.toContain('Another tab');
+  });
+
+  it('says what it is probably waiting for once a step takes long', () => {
+    // A tab that opens while another one saves a large import waits for that, in either of the first two steps.
+    expect(progress('migrating', true)).toContain(
+      'This tab is waiting for its turn at the database, which the tabs of Claude Lifetime share. Another tab is probably in the middle of an import or a backup; this one goes on when that is done.',
+    );
+    expect(progress('starting', true)).toContain(
+      'Either the database engine (about 5.5 MB) is still being downloaded, or another tab of Claude Lifetime is in the middle of an import or a backup',
+    );
+    expect(progress('ready', true)).not.toContain('Another tab');
   });
 });

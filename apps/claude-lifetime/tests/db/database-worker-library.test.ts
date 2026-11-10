@@ -20,12 +20,12 @@ import {
 } from '../helpers/database-worker';
 
 /**
- * The real database worker together with both halves of PGlite's worker library, none
- * of them changed: PGliteWorker on the page's side, worker() inside the worker. Only
- * the transport between them, Web Locks and `fetch` are stand-ins.
+ * The real database worker behind PGlite's own page class, PGliteWorker, unchanged.
+ * Only the transport between them, Web Locks and `fetch` are stand-ins.
  *
- * This is where it shows that the worker's own messages do not disturb the library,
- * and that the library on its own never tells the page about a failed start.
+ * This is where it shows that the worker speaks that class's protocol, that its own
+ * messages do not disturb it, and that the class on its own never tells the page about
+ * a failed start.
  */
 const START_FAILED = 'claude-lifetime:start-failed';
 const meta = (name: string): WorkerMeta => ({ assetBase: 'https://app.test/pglite/0.5.16/', controlChannel: `claude-lifetime:db-control:${name}` });
@@ -64,11 +64,8 @@ describe('the database worker behind PGlite’s own client', () => {
 
     // PGlite's client keeps asking for the database (every 16 ms) and is never answered or told.
     expect(await Promise.race([pg.waitReady.then(() => 'ready'), after(500, 'still waiting')])).toBe('still waiting');
-    // Each of those requests ends in a rejection inside the worker. The page has the reason already,
-    // so the worker keeps them out of the console; anything else would show up here.
-    const routed = rejections;
-    await waitFor(() => routed.offered > 0);
-    expect(routed.unhandled).toEqual([]);
+    // None of those requests raises an error inside the worker: the page has the reason already.
+    expect(rejections.offered).toBe(0);
     expect(worker.posted.filter((message) => message.type === START_FAILED)).toHaveLength(1);
   });
 

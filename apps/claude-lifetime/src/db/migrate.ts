@@ -1,4 +1,4 @@
-import type { SqlDriver } from './driver';
+import { DatabaseMovedError, type SqlDriver } from './driver';
 import { MIGRATIONS, type Migration } from './migrations.generated';
 
 /**
@@ -114,6 +114,8 @@ export async function migrate(db: SqlDriver, migrations: Migration[] = MIGRATION
         return 'applied';
       });
     } catch (err) {
+      // Not a fault of the migration: the tab that held the database went away. The caller starts over.
+      if (err instanceof DatabaseMovedError) throw err;
       throw new MigrationError(
         `Migration "${m.name}" failed and was rolled back: ${err instanceof Error ? err.message : String(err)}`,
         m.name,

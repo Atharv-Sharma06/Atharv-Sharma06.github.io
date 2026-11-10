@@ -34,12 +34,33 @@ leaves the device because there is nowhere for it to go.
  └──────────────────────────────────────────────────────────────────────┘
 ```
 
-All tabs of the app share one database: one tab's worker is elected leader and the
-others proxy their queries to it. A Web Lock makes sure only one import is prepared at a
+All tabs of the app share one database: the worker of one tab holds it, and the other
+tabs reach it through that worker. A Web Lock makes sure only one import is prepared at a
 time (file imports, folder syncs, manual entries and the demo data all take it), and a
 BroadcastChannel tells the other tabs to re-read after a write, to let go of the
 database before it is erased, and to reload after it was erased or replaced by a backup.
 Tabs that start at the same moment set the database up one after the other.
+
+A tab can be closed or reloaded at any moment, also in the middle of a transaction, and
+the other tabs must not pay for that:
+
+- **A tab that only uses the database goes away.** The worker that holds the database
+  (`src/db/worker/host.ts`) rolls back what that tab left unfinished before the next tab
+  gets its turn, and gives no turn to a tab that was still waiting in line. The pages
+  talk to the worker through PGlite's page class; the worker's side is the app's own
+  code, because PGlite's counterpart handed a turn to a tab that was gone (after which
+  no tab got an answer again) and let the next tab commit a closed tab's half-finished
+  transaction. A statement is only carried out for a tab during a turn this worker gave it.
+- **The tab whose worker holds the database goes away.** The worker of another tab opens
+  the database from IndexedDB and takes over. Whatever was under way goes with the old
+  worker: the driver (`src/db/pglite-driver.ts`) fails it at once with a message that
+  says what happened, and a transaction that was under way sends nothing more. Reads are
+  run again by themselves. A change is not repeated, because it is not known whether it
+  was stored: the person is told to check. An import that was being saved is not stored
+  in part, and can be imported again.
+- **A tab starts while the database is busy.** It waits for its turn, says after a few
+  seconds what it is probably waiting for (another tab's import or backup), and after
+  two minutes stops with a screen that says so and lets the next tab try.
 
 A backup is not the database's own files. PostgreSQL keeps deleted rows in its table
 files until the space is reused, and in its write-ahead log, so those files would give

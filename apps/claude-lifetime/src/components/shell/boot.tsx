@@ -1,8 +1,10 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ErrorNote, Skeleton, Spinner } from '@/components/ui/feedback';
-import type { BootPhase } from '@/db/client';
+import { DatabaseBusyError, type BootPhase } from '@/db/client';
+import { DatabaseMovedError } from '@/db/driver';
 import { NewerSchemaError } from '@/db/migrate';
 
 const PHASE_TEXT: Record<BootPhase, string> = {
@@ -11,13 +13,47 @@ const PHASE_TEXT: Record<BootPhase, string> = {
   ready: 'Reading your data…',
 };
 
+/** After this long in one phase, the start-up screen says what the tab is probably waiting for. */
+export const SLOW_START_MS = 8_000;
+
+/** Whether `phase` has lasted longer than a start normally takes. */
+function useSlowStart(phase: BootPhase): boolean {
+  const [slowPhase, setSlowPhase] = useState<BootPhase | null>(null);
+  useEffect(() => {
+    const timer = setTimeout(() => setSlowPhase(phase), SLOW_START_MS);
+    return () => clearTimeout(timer);
+  }, [phase]);
+  return slowPhase === phase;
+}
+
+/**
+ * What a start that takes long is probably waiting for. The database is shared by the
+ * tabs of the app and does one thing at a time, so a tab that opens while another one
+ * saves a large import waits for that, in either of the first two phases.
+ */
+const SLOW_TEXT: Record<BootPhase, string | null> = {
+  starting:
+    'This is taking longer than usual. Either the database engine (about 5.5 MB) is still being downloaded, or another tab of Claude Lifetime is in the middle of an import or a backup; this tab goes on when that is done.',
+  migrating:
+    'This tab is waiting for its turn at the database, which the tabs of Claude Lifetime share. Another tab is probably in the middle of an import or a backup; this one goes on when that is done.',
+  ready: null,
+};
+
 export function BootScreen({ phase }: { phase: BootPhase }) {
+  return <BootProgress phase={phase} slow={useSlowStart(phase)} />;
+}
+
+/** The start-up screen. `slow` is true once the phase has lasted longer than a start normally takes. */
+export function BootProgress({ phase, slow }: { phase: BootPhase; slow: boolean }) {
   return (
     <div aria-busy="true">
-      <p className="flex items-center gap-2 text-[13px] text-ink-2" role="status">
-        <Spinner className="size-3.5" />
-        {PHASE_TEXT[phase]}
-      </p>
+      <div role="status">
+        <p className="flex items-center gap-2 text-[13px] text-ink-2">
+          <Spinner className="size-3.5" />
+          {PHASE_TEXT[phase]}
+        </p>
+        {slow && SLOW_TEXT[phase] && <p className="mt-2 max-w-[68ch] text-[13px] text-ink-2">{SLOW_TEXT[phase]}</p>}
+      </div>
       <div className="mt-6 grid gap-4 md:grid-cols-3" aria-hidden="true">
         <Skeleton className="h-40 md:col-span-2" />
         <Skeleton className="h-40" />
@@ -57,8 +93,38 @@ function NewerVersionNeeded({ error }: { error: Error }) {
   );
 }
 
+/**
+ * Shown when the database is there but this tab did not get to it: another tab holds it
+ * and did not answer in time, or the tab that held it kept going away while this one was
+ * starting. Storage, the browser and disk space have nothing to do with either.
+ */
+function HeldByAnotherTab({ error, retry }: { error: Error; retry(): void }) {
+  const busy = error instanceof DatabaseBusyError;
+  return (
+    <div className="max-w-[68ch]">
+      <h1 className="text-xl font-medium">{busy ? 'The database did not answer' : 'The database changed hands while this tab was starting'}</h1>
+      <p className="mt-2 text-ink-2" role="alert">
+        {busy
+          ? 'The tabs of Claude Lifetime share one database in this browser and take turns at it. This tab waited for its turn and did not get one in time.'
+          : 'The tabs of Claude Lifetime share one database in this browser. The tab that held it was closed or reloaded several times while this one was starting, so this tab stopped trying.'}
+      </p>
+      {busy && (
+        <ul className="mt-4 list-disc space-y-1.5 pl-5 text-ink-2">
+          <li>If another tab is in the middle of a large import or a backup, let it finish, then try again.</li>
+          <li>Otherwise reload the other open tabs of Claude Lifetime, or close them, then try again.</li>
+        </ul>
+      )}
+      <p className="mt-4 text-ink-2">Nothing was changed, and your data is still stored in this browser.</p>
+      <Button variant="primary" className="mt-5" onClick={retry}>
+        Try again
+      </Button>
+    </div>
+  );
+}
+
 export function BootError({ error, retry }: { error: Error; retry(): void }) {
   if (error instanceof NewerSchemaError) return <NewerVersionNeeded error={error} />;
+  if (error instanceof DatabaseBusyError || error instanceof DatabaseMovedError) return <HeldByAnotherTab error={error} retry={retry} />;
   return (
     <div className="max-w-[68ch]">
       <h1 className="text-xl font-medium">The local database could not be opened</h1>

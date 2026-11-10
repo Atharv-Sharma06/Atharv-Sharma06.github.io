@@ -4,7 +4,7 @@ import { PGliteWorker } from '@electric-sql/pglite/worker';
 import { decryptBackup, isEncryptedBackup } from '@/lib/backup-crypto';
 import { looksLikeDatabaseDump } from '@/lib/backup-format';
 import { KV_DATABASE_NAME } from '@/lib/kv';
-import type { SqlDriver } from './driver';
+import { DatabaseMovedError, type SqlDriver } from './driver';
 import { ensureStatistics } from './maintenance';
 import { migrate, MigrationError, NewerSchemaError } from './migrate';
 import { pgliteDriver } from './pglite-driver';
@@ -284,12 +284,20 @@ interface Handle {
   db: SqlDriver;
   /**
    * Stops the database worker at once, for a database this page is finished with (it is
-   * about to be erased or replaced, and the page reloads). Used instead of closing the
-   * client: closing tears down the channels the client reaches other tabs on, while a
-   * timer of its own still posts to them whenever the tab that hosts the database has
-   * just changed, and that ends in an uncaught error.
+   * about to be erased or replaced, and the page reloads). Nothing more is sent through
+   * `db` afterwards. Used instead of closing the client: closing tears down the channels
+   * the client reaches other tabs on, while a timer of its own still posts to them
+   * whenever the tab that hosts the database has just changed, and that ends in an
+   * uncaught error.
    */
   stop(): void;
+  /**
+   * Gives this connection up after a start that did not get through, so that nothing of
+   * it goes on behind the error the page shows: whatever was still waiting for the
+   * database is refused when its turn comes. The worker is stopped as well, unless it is
+   * the one that holds the database for the other tabs.
+   */
+  giveUp(): void;
 }
 
 /** How long opening the database may take before it counts as failed. Restoring unpacks the whole backup first. */
@@ -335,7 +343,24 @@ async function connect(name: string, loadDataDir?: Blob): Promise<Handle> {
   } finally {
     clearTimeout(timer);
   }
-  return { pg, db: pgliteDriver(pg as never, { flush: () => saveWrites(name) }), stop: () => worker.terminate() };
+  let over = false;
+  return {
+    pg,
+    db: pgliteDriver(pg as never, {
+      flush: () => saveWrites(name),
+      // The database moves when the tab whose worker holds it goes away; PGlite's page class says so with this event.
+      onMove: (listener) => pg.onLeaderChange(listener),
+      isOver: () => over,
+    }),
+    stop() {
+      over = true;
+      worker.terminate();
+    },
+    giveUp() {
+      over = true;
+      if (!pg.isLeader) worker.terminate();
+    },
+  };
 }
 
 /**
@@ -452,28 +477,82 @@ async function clearDeviceState(): Promise<void> {
   });
 }
 
+/**
+ * The database did not answer while this tab was starting. It is shared by the tabs of
+ * the app and does one thing at a time, so a tab that starts while another one is in
+ * the middle of a long import or a backup waits for that; this is what the tab says
+ * when the wait went on for longer than any of those should take.
+ */
+export class DatabaseBusyError extends Error {
+  constructor(waitedMs: number) {
+    super(`The database did not answer within ${Math.round(waitedMs / 60_000)} minutes.`);
+    this.name = 'DatabaseBusyError';
+  }
+}
+
+/** How long a starting tab waits for its turn at the database and for the set-up below. */
+export const SETUP_TIMEOUT_MS = 120_000;
+/** How often the set-up is started over when the tab that held the database went away in the middle of it. */
+const SETUP_ATTEMPTS = 4;
+
+/** Rejects with `late()` when `work` has not settled after `ms`. `work` itself is not stopped: the caller has to see to that. */
+function within<T>(ms: number, work: Promise<T>, late: () => Error): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(late()), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+/** Brings the open database up to date: schema, the built-in catalog and the user, planner statistics. Returns the user's id. */
+async function setUp(db: SqlDriver): Promise<number> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await migrate(db);
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      const id = await ensureSeeded(db, { timezone });
+      await ensureStatistics(db);
+      return id;
+    } catch (error) {
+      // The tab that held the database went away in the middle of this. Every step can be done again from
+      // the start, and the next attempt waits for the tab that takes over.
+      if (!(error instanceof DatabaseMovedError) || attempt >= SETUP_ATTEMPTS) throw error;
+    }
+  }
+}
+
 let pending: Promise<Database & { name: string; stop(): void }> | null = null;
 
 /**
  * Opens the active database and brings it up to date. Rejects with a NewerSchemaError
  * when a newer version of the app has already upgraded the stored data: this page then
- * runs code that is too old for it and has to be reloaded.
+ * runs code that is too old for it and has to be reloaded. Rejects with a
+ * DatabaseBusyError when the database, held by another tab, did not answer in time.
  */
 export function openDatabase(onPhase?: (phase: BootPhase) => void): Promise<Database> {
   if (pending) return pending;
   pending = (async () => {
     onPhase?.('starting');
     const name = activeName();
-    const { db, stop } = await connect(name);
+    const { db, stop, giveUp } = await connect(name);
 
     onPhase?.('migrating');
-    const userId = await exclusively(name, async () => {
-      await migrate(db);
-      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-      const id = await ensureSeeded(db, { timezone });
-      await ensureStatistics(db);
-      return id;
-    });
+    let userId: number;
+    try {
+      // The time limit is inside the lock: a tab that gives up must let the next one try.
+      userId = await exclusively(name, () => within(SETUP_TIMEOUT_MS, setUp(db), () => new DatabaseBusyError(SETUP_TIMEOUT_MS)));
+    } catch (error) {
+      giveUp();
+      throw error;
+    }
     // Waits for the set-up to reach storage, but does not insist on it. Nothing the person did is at
     // stake yet: the schema and the built-in catalog are set up again at the next start if they were not
     // stored. And a device whose storage is full must still be able to open the app, to read what is

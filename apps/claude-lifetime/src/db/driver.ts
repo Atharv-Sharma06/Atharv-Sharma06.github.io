@@ -25,6 +25,40 @@ export interface SqlDriver extends SqlExecutor {
   close(): Promise<void>;
 }
 
+/**
+ * The database moved to the worker of another tab while something was under way,
+ * because the tab that held it was closed or reloaded. Whatever was running at that
+ * moment went with that tab's worker: something that was being read can simply be read
+ * again, and of a change it is not known whether it was stored. The message is written
+ * for the person using the app.
+ */
+export class DatabaseMovedError extends Error {
+  constructor() {
+    super(
+      'The tab that held the database was closed or reloaded at that moment, and another tab has taken over. Check whether this was saved, and do it again if it was not.',
+    );
+    this.name = 'DatabaseMovedError';
+  }
+}
+
+/** How often something is read again when the database moved in the middle of reading it. */
+export const REREAD_ATTEMPTS = 4;
+
+/**
+ * Runs `read`, and runs it again when the database moved to another tab in the middle
+ * of it. Only for reading: a change must not be made twice. The next attempt waits by
+ * itself until the tab that takes over has the database open.
+ */
+export async function rereadIfMoved<T>(read: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await read();
+    } catch (error) {
+      if (!(error instanceof DatabaseMovedError) || attempt >= REREAD_ATTEMPTS) throw error;
+    }
+  }
+}
+
 /** Postgres returns int8 as number when it is a safe integer and as bigint otherwise. */
 export function toNumber(value: unknown): number {
   if (typeof value === 'number') return value;

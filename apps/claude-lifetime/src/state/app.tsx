@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { AnalyticsFilter } from '@/analytics/base';
 import { getSettings, updateSettings, type AppSettings } from '@/analytics/settings';
 import { DATA_CHANNEL, openDatabase, releaseDatabase, TAB_ID, type BootPhase, type TabMessage } from '@/db/client';
-import type { SqlDriver } from '@/db/driver';
+import { DatabaseMovedError, REREAD_ATTEMPTS, rereadIfMoved, type SqlDriver } from '@/db/driver';
 import { addDays, addMonths, todayInZone } from '@/lib/format';
 
 /**
@@ -119,7 +119,7 @@ function AppStateProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     openDatabase((p) => !cancelled && setPhase(p))
       .then(async (database) => {
-        const s = await getSettings(database.db, database.userId);
+        const s = await rereadIfMoved(() => getSettings(database.db, database.userId));
         if (cancelled) return;
         setCore(database);
         setSettings(s);
@@ -163,7 +163,7 @@ function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!core || dataVersion === 0) return;
     let cancelled = false;
-    void getSettings(core.db, core.userId).then((s) => !cancelled && setSettings(s));
+    void rereadIfMoved(() => getSettings(core.db, core.userId)).then((s) => !cancelled && setSettings(s));
     return () => {
       cancelled = true;
     };
@@ -235,7 +235,16 @@ export function AppProviders({ children }: { children: ReactNode }) {
     () =>
       new QueryClient({
         defaultOptions: {
-          queries: { staleTime: Infinity, gcTime: 5 * 60_000, retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false },
+          queries: {
+            staleTime: Infinity,
+            gcTime: 5 * 60_000,
+            // Nothing is tried again by itself, with one exception: a read that was under way when the tab that
+            // held the database was closed. The database is then opened by another tab, and the read waits for it.
+            retry: (failures, error) => error instanceof DatabaseMovedError && failures < REREAD_ATTEMPTS - 1,
+            retryDelay: 0,
+            refetchOnWindowFocus: false,
+            refetchOnReconnect: false,
+          },
         },
       }),
   );

@@ -17,6 +17,33 @@ vi.mock('@/features/import/local-files', () => ({
   readRememberedFolder: (ask: boolean) => readRememberedFolder(ask),
 }));
 
+/** How saving ends for each reading of the folder, in order; and every session that was opened for one. */
+const saving = vi.hoisted(() => ({ outcomes: [] as Array<'moved' | 'saved'>, sessions: [] as Array<{ disposed: boolean }> }));
+vi.mock('@/import/session', async () => {
+  const { DatabaseMovedError } = await import('@/db/driver');
+  return {
+    ImportSession: class {
+      disposed = false;
+      constructor() {
+        saving.sessions.push(this);
+      }
+      async detect() {
+        return { parser: 'claude-code', fileIndexes: [0] };
+      }
+      async prepare() {
+        return { preview: { requests: { new: 3 }, usageRows: { new: 3 } } };
+      }
+      async commit() {
+        if (saving.outcomes.shift() === 'moved') throw new DatabaseMovedError();
+        return {};
+      }
+      async dispose() {
+        this.disposed = true;
+      }
+    },
+  };
+});
+
 import { folderProblem, lastSync, syncClaudeCodeFolder } from '@/features/import/background-sync';
 import type { SqlDriver } from '@/db/driver';
 
@@ -26,6 +53,8 @@ const browserError = (name: string, message: string) => Object.assign(new Error(
 beforeEach(() => {
   store.clear();
   readRememberedFolder.mockReset();
+  saving.outcomes = [];
+  saving.sessions = [];
 });
 
 describe('a remembered folder that cannot be opened', () => {
@@ -55,5 +84,34 @@ describe('a remembered folder that cannot be opened', () => {
     readRememberedFolder.mockResolvedValue({ status: 'no_permission', name: 'projects' });
     expect(await syncClaudeCodeFolder(db, 1, false)).toEqual({ status: 'no_permission', folder: 'projects' });
     expect(await lastSync()).toBeUndefined();
+  });
+});
+
+describe('a reading during which the tab that held the database goes away', () => {
+  const folder = { status: 'read', folder: { name: 'projects', files: [{ name: 'a.jsonl' }] }, source: { sourceRef: 'laptop', sourceLabel: 'Claude Code (laptop)' } };
+
+  it('is done again by itself, since reading a folder twice adds nothing twice', async () => {
+    readRememberedFolder.mockResolvedValue(folder);
+    saving.outcomes = ['moved', 'saved'];
+
+    const result = await syncClaudeCodeFolder(db, 1, false);
+
+    // Before the fix the first failure was the outcome: nothing added, and a problem nobody was there to read.
+    expect(result).toMatchObject({ status: 'done', outcome: { added: 3 } });
+    expect(result.status === 'done' && result.outcome.problem).toBeUndefined();
+    expect(saving.sessions).toHaveLength(2);
+    expect(saving.sessions.every((session) => session.disposed)).toBe(true);
+  });
+
+  it('says what happened when it happens a second time, and leaves it at that', async () => {
+    readRememberedFolder.mockResolvedValue(folder);
+    saving.outcomes = ['moved', 'moved', 'saved'];
+
+    const result = await syncClaudeCodeFolder(db, 1, false);
+
+    expect(result).toMatchObject({ status: 'done', outcome: { added: 0 } });
+    expect(result.status === 'done' && result.outcome.problem).toContain('The tab that held the database was closed or reloaded at that moment');
+    expect(saving.sessions).toHaveLength(2);
+    expect(await lastSync()).toMatchObject({ added: 0 });
   });
 });

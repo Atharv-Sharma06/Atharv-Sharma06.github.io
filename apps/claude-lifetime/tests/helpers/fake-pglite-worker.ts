@@ -20,7 +20,9 @@ import { timeline } from './browser';
  * Every connection is a real PostgreSQL in memory, so migrations, queries and backups
  * are the real thing. What a browser keeps in IndexedDB is `fakeDatabases.stored`; what
  * the database worker answers to a flush request is `fakeDatabases.answerFlush`, and to
- * a backup request `fakeDatabases.answerBackup`.
+ * a backup request `fakeDatabases.answerBackup`. A statement can be kept waiting with
+ * `fakeDatabases.beforeStatement`, and `fakeDatabases.move()` does what the real class
+ * does when the tab that held the database goes away: it tells the page so.
  */
 interface WorkerLike {
   addEventListener(type: string, listener: (event: { data?: unknown }) => void): void;
@@ -62,6 +64,18 @@ export const fakeDatabases = {
   backupBeatMs: null as number | null,
   /** False for a database whose worker never gets it started: the page then waits and is told nothing by PGlite. */
   becomeReady: true,
+  /**
+   * Runs before every statement the page sends outside a transaction, with the statement and the
+   * number of the connection it came through (0 for the first one opened). A promise keeps the
+   * statement waiting until it settles, as a database does that is busy or whose tab has just gone.
+   */
+  beforeStatement: null as null | ((sql: string, connection: number) => void | Promise<void>),
+  /** The listeners of every open connection for "the database moved to another tab's worker". */
+  moveListeners: new Set<() => void>(),
+  /** Tells every open connection that the database moved, as PGlite's page class does when the tab that held it goes away. */
+  move() {
+    for (const listener of [...this.moveListeners]) listener();
+  },
   reset() {
     this.stored.clear();
     this.opened.length = 0;
@@ -69,11 +83,16 @@ export const fakeDatabases = {
     this.answerBackup = null;
     this.backupBeatMs = null;
     this.becomeReady = true;
+    this.beforeStatement = null;
+    this.moveListeners.clear();
   },
 };
 
 export class FakePGliteWorker {
   readonly waitReady: Promise<void>;
+  /** This stand-in's worker never holds the database for other tabs. */
+  readonly isLeader = false;
+  private readonly connection: number;
   private pg: PGlite | null = null;
   private control: BroadcastChannel | null = null;
   private readonly record: OpenedDatabase;
@@ -83,6 +102,7 @@ export class FakePGliteWorker {
   constructor(worker: WorkerLike, options: { dataDir: string; loadDataDir?: Blob; meta: WorkerMeta }) {
     const name = options.dataDir.replace(/^idb:\/\//, '');
     this.record = { name, fromBackup: options.loadDataDir !== undefined, closed: false };
+    this.connection = fakeDatabases.opened.length;
     fakeDatabases.opened.push(this.record);
     timeline.push(`open ${name}`);
     // The real class answers the worker's "here" with the options. A worker that really runs waits for them.
@@ -149,11 +169,17 @@ export class FakePGliteWorker {
     return this.pg;
   }
 
-  query(sql: string, params?: unknown[]) {
+  async query(sql: string, params?: unknown[]) {
+    await fakeDatabases.beforeStatement?.(sql, this.connection);
     return this.database.query(sql, params as never[]);
   }
-  exec(sql: string) {
+  async exec(sql: string) {
+    await fakeDatabases.beforeStatement?.(sql, this.connection);
     return this.database.exec(sql);
+  }
+  onLeaderChange(listener: () => void) {
+    fakeDatabases.moveListeners.add(listener);
+    return () => void fakeDatabases.moveListeners.delete(listener);
   }
   transaction(fn: never) {
     return this.database.transaction(fn);

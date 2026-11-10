@@ -1,5 +1,5 @@
 import type { PGliteInterface, Transaction } from '@electric-sql/pglite';
-import type { QueryResult, SqlDriver, SqlExecutor } from './driver';
+import { DatabaseMovedError, type QueryResult, type SqlDriver, type SqlExecutor } from './driver';
 
 type Queryable = Pick<PGliteInterface, 'query' | 'exec'> | Pick<Transaction, 'query' | 'exec'>;
 
@@ -16,15 +16,112 @@ function executor(q: Queryable): SqlExecutor {
   };
 }
 
+export interface DriverOptions {
+  /** Waits until what was committed is stored. Supplied by the caller because durability depends on where PGlite runs. */
+  flush?: () => Promise<void>;
+  /**
+   * For a database that the tabs of the app share (see client.ts): calls `listener`
+   * every time the database moves to the worker of another tab, until the function this
+   * returns is called.
+   */
+  onMove?: (listener: () => void) => () => void;
+  /**
+   * True once the page has given this connection up (see client.ts). Nothing more is
+   * sent through it then, so that code which was still waiting for the database when
+   * that happened cannot go on with its work later, behind whatever the page shows now.
+   */
+  isOver?: () => boolean;
+}
+
+/** Never settles. What waits for it goes no further. */
+const forever = new Promise<never>(() => undefined);
+
 /**
- * Wraps a PGlite instance (in-process, or the cross-tab worker proxy) as a SqlDriver.
- * `flush` is supplied by the caller because durability depends on where PGlite runs.
+ * Wraps a PGlite instance (in-process, or the page's end of the worker that the tabs
+ * share) as a SqlDriver.
+ *
+ * With `onMove`, the driver deals with the moment the shared database moves to another
+ * tab's worker. PGlite's page class then fails the call it was waiting for, but goes on
+ * with the rest of the operation (giving back its turn, rolling back) by asking a worker
+ * that is not listening yet, and waits for an answer that never comes. So:
+ *
+ *  - Every operation that is under way when the database moves is rejected at once with
+ *    a DatabaseMovedError, whatever PGlite goes on to do.
+ *  - A transaction that was under way sends nothing more. Its transaction went with the
+ *    worker that held it, and a statement, COMMIT or ROLLBACK that reached the new
+ *    worker later would be carried out there outside of it, between the statements of
+ *    whatever this tab is doing by then.
  */
-export function pgliteDriver(pg: PGliteInterface, opts: { flush?: () => Promise<void> } = {}): SqlDriver {
+export function pgliteDriver(pg: PGliteInterface, opts: DriverOptions = {}): SqlDriver {
+  const { onMove } = opts;
+  let moves = 0;
+  onMove?.(() => void moves++);
+  const refuseWhenOver = () => {
+    if (opts.isOver?.()) throw new Error('This connection to the database has been given up. Reload the page.');
+  };
+
+  /** Settles the way `work` does, or rejects as soon as the database moves while `work` is under way. */
+  const unlessMoved = async <T>(work: () => Promise<T>): Promise<T> => {
+    refuseWhenOver();
+    if (!onMove) return work();
+    // While this tab is not connected (the database is just moving), the wait is here, where a further move
+    // loses nothing: `work` has not asked the database for anything yet.
+    await pg.waitReady;
+    return new Promise<T>((resolve, reject) => {
+      const stopWatching = onMove(() => {
+        stopWatching();
+        reject(new DatabaseMovedError());
+      });
+      work().then(
+        (value) => {
+          stopWatching();
+          resolve(value);
+        },
+        (error: unknown) => {
+          stopWatching();
+          reject(error);
+        },
+      );
+    });
+  };
+
+  const direct = executor(pg);
   return {
-    ...executor(pg),
+    query: (sql, params) => unlessMoved(() => direct.query(sql, params)),
+    exec: (sql) => unlessMoved(() => direct.exec(sql)),
     transaction<T>(fn: (tx: SqlExecutor) => Promise<T>): Promise<T> {
-      return pg.transaction((tx) => fn(executor(tx))) as Promise<T>;
+      return unlessMoved(
+        () =>
+          pg.transaction(async (tx) => {
+            const movesBefore = moves;
+            const moved = () => moves !== movesBefore;
+            const inside = executor(tx);
+            const refuse = () => {
+              if (moved()) throw new DatabaseMovedError();
+              // Given up by the page while the worker is still there: this fails the transaction, and PGlite rolls it back.
+              refuseWhenOver();
+            };
+            const statements: SqlExecutor = {
+              async query(sql, params) {
+                refuse();
+                return inside.query(sql, params);
+              },
+              async exec(sql) {
+                refuse();
+                return inside.exec(sql);
+              },
+            };
+            try {
+              const result = await fn(statements);
+              // PGlite would send COMMIT next, and ROLLBACK after an error. Neither may reach the new worker.
+              if (moved()) await forever;
+              return result;
+            } catch (error) {
+              if (moved()) await forever;
+              throw error;
+            }
+          }) as Promise<T>,
+      );
     },
     async flush() {
       await opts.flush?.();
