@@ -324,7 +324,8 @@ describe('settings and manual entries', () => {
 
   it('adds a manual record as its own deletable import, labelled with its confidence', async () => {
     const before = (await getOverview(t.db, filter())).tokens;
-    const batchId = await addManualUsage(t.db, t.userId, { date: '2024-11-05', model: 'claude-3-5-sonnet-20241022', inputTokens: 40_000, outputTokens: 10_000, confidence: 'estimated', note: 'Estimated from my November invoice' });
+    const { batchId, ...entry } = await addManualUsage(t.db, t.userId, { date: '2024-11-05', model: 'claude-3-5-sonnet-20241022', inputTokens: 40_000, outputTokens: 10_000, confidence: 'estimated', note: 'Estimated from my November invoice' });
+    expect(entry).toEqual({ removedDemoData: false, notOnDevice: null });
     const after = (await getOverview(t.db, filter())).tokens;
     expect(after.total).toBe(before.total + 50_000);
     expect(after.estimated).toBe(before.estimated + 50_000);
@@ -336,6 +337,16 @@ describe('settings and manual entries', () => {
     await expect(addManualUsage(t.db, t.userId, { date: 'yesterday', confidence: 'exact', inputTokens: 1 })).rejects.toThrow(/valid date/);
     await expect(addManualUsage(t.db, t.userId, { date: '2024-11-05', confidence: 'exact' })).rejects.toThrow(/at least one/);
     await expect(addManualUsage(t.db, t.userId, { date: '2024-11-05', confidence: 'exact', inputTokens: -3 })).rejects.toThrow(/whole number/);
+    // A year that is still being typed, or a slip of a digit, is a valid date. It is refused like the same date in a file.
+    const now = new Date('2026-11-10T12:00:00Z');
+    const entry2 = (date: string) => addManualUsage(t.db, t.userId, { date, confidence: 'exact', inputTokens: 1 }, now);
+    await expect(entry2('0226-11-05')).rejects.toThrow(/2021 or later/);
+    await expect(entry2('2020-12-31')).rejects.toThrow(/2021 or later/);
+    await expect(entry2('2062-11-05')).rejects.toThrow(/not in the future/);
+    await expect(entry2('2026-11-12')).rejects.toThrow(/not in the future/);
+    // tomorrow in UTC is already today in the timezones furthest ahead
+    const tomorrow = await entry2('2026-11-11');
+    await deleteBatch(t.db, t.userId, tomorrow.batchId!);
     await deleteBatch(t.db, t.userId, batchId!);
     expect((await getOverview(t.db, filter())).tokens).toEqual(before);
   });

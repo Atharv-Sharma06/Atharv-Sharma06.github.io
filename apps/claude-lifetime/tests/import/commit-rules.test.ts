@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { StagedCost } from '@/core/types';
 import { getCoverage } from '@/analytics/coverage';
+import { addManualUsage, updateSettings } from '@/analytics/settings';
 import { commitImport, importGeneration, previewImport } from '@/import/commit';
 import { deleteBatch } from '@/import/delete';
 import { createTestDb, type TestDb } from '../helpers/db';
@@ -154,6 +155,78 @@ describe('an import that adds nothing', () => {
     const nothing = parsed({ source: CODE, contentHash: 'empty', requestKeys: [], syncedFiles: [{ path: 'projects/p/a.jsonl', size: 10, lastModified: 1 }] });
     expect(await commitImport(t.db, t.userId, nothing)).toMatchObject({ nothingNew: true, sourceId: null });
     expect((await getCoverage(t.db, t.userId, 'UTC')).hasData).toBe(false);
+  });
+});
+
+describe('an import whose records are stored but could not be written to the device', () => {
+  it('is reported as saved with a problem, not as failed, so that nobody saves it a second time', async () => {
+    // What the browser database does when the device's storage is full: the transaction commits, the copy to disk fails.
+    const noRoom = Object.assign(Object.create(t.db) as typeof t.db, {
+      flush: async () => {
+        throw new Error('The change could not be saved to this device\'s storage. (QuotaExceededError: The quota has been exceeded.)');
+      },
+    });
+    await stage(t.db, { usage: [usage('cc:a')] });
+    const result = await commitImport(noRoom, t.userId, parsed({ source: CODE, contentHash: 'c1' }));
+    expect(result).toMatchObject({ nothingNew: false, inserted: { usageRows: 1 } });
+    expect(result.notOnDevice).toMatch(/QuotaExceededError/);
+    // the records are there and count
+    expect((await t.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM usage_records`)).rows[0].n).toBe(1);
+
+    // a manual entry says the same, with what it took away
+    const entry = await addManualUsage(noRoom, t.userId, { date: '2025-01-15', inputTokens: 1_000, confidence: 'estimated' });
+    expect(entry.batchId).toBeGreaterThan(0);
+    expect(entry.notOnDevice).toMatch(/QuotaExceededError/);
+    expect((await t.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM usage_records`)).rows[0].n).toBe(2);
+
+    // a healthy device reports nothing
+    await stage(t.db, { usage: [usage('cc:b')] });
+    expect((await commitImport(t.db, t.userId, parsed({ source: CODE, contentHash: 'c2' }))).notOnDevice).toBeUndefined();
+  });
+});
+
+describe('the days an import covers, as the preview states them', () => {
+  const previewIn = async (timezone: string, records: Parameters<typeof stage>[1], meta: Parameters<typeof parsed>[0] = {}) => {
+    await updateSettings(t.db, t.userId, { timezone });
+    await stage(t.db, records);
+    return (await previewImport(t.db, t.userId, parsed(meta))).coveredDays;
+  };
+  const daily = (key: string, day: string) => usage(key, { occurredAt: `${day}T00:00:00.000Z`, bucketSeconds: 86_400 });
+
+  it('a record that only knows its day is that day in every timezone', async () => {
+    // a manual entry, a dated table row or a daily report row: stored at 00:00 UTC of its day
+    for (const timezone of ['America/New_York', 'UTC', 'Asia/Kolkata', 'Pacific/Kiritimati', 'Pacific/Pago_Pago']) {
+      expect(await previewIn(timezone, { usage: [daily('d1', '2026-06-01')] }), timezone).toEqual({ first: '2026-06-01', last: '2026-06-01' });
+    }
+    // a daily report of 1 to 3 March speaks for exactly those days, east and west of UTC
+    const report = { usage: [daily('r1', '2026-03-01'), daily('r2', '2026-03-03')] };
+    const meta = { source: { kind: 'api_usage_report' as const, label: 'API', externalRef: '' }, replaceRanges: [{ start: '2026-03-01T00:00:00.000Z', end: '2026-03-04T00:00:00.000Z' }] };
+    expect(await previewIn('America/New_York', report, meta)).toEqual({ first: '2026-03-01', last: '2026-03-03' });
+    expect(await previewIn('Asia/Kolkata', report, meta)).toEqual({ first: '2026-03-01', last: '2026-03-03' });
+    // a row that states a whole month ends on the month's last day
+    expect(await previewIn('America/New_York', { usage: [usage('m', { occurredAt: '2026-02-01T00:00:00.000Z', bucketSeconds: 28 * 86_400 })] })).toEqual({
+      first: '2026-02-01',
+      last: '2026-02-28',
+    });
+  });
+
+  it('a record with a time of day falls on the day it has in the user\'s timezone', async () => {
+    // 03:30 UTC on 2 June is still 1 June in New York
+    const late = { usage: [usage('h1', { occurredAt: '2026-06-02T03:30:00.000Z', bucketSeconds: 900 })] };
+    expect(await previewIn('America/New_York', late)).toEqual({ first: '2026-06-01', last: '2026-06-01' });
+    expect(await previewIn('Asia/Tokyo', late)).toEqual({ first: '2026-06-02', last: '2026-06-02' });
+    // chat messages likewise
+    const chat = { conversations: [conv('z')], messages: [msg('z', 0, { createdAt: '2026-06-02T03:30:00.000Z', occurredAt: '2026-06-02T03:30:00.000Z' })] };
+    expect(await previewIn('America/New_York', chat)).toEqual({ first: '2026-06-01', last: '2026-06-01' });
+    // an hourly report is placed by the hour
+    const hourly = { usage: [usage('hr', { occurredAt: '2026-06-02T01:00:00.000Z', bucketSeconds: 3600 })] };
+    const meta = { source: { kind: 'api_usage_report' as const, label: 'API', externalRef: '' }, replaceRanges: [{ start: '2026-06-02T01:00:00.000Z', end: '2026-06-02T02:00:00.000Z' }] };
+    expect(await previewIn('America/New_York', hourly, meta)).toEqual({ first: '2026-06-01', last: '2026-06-01' });
+  });
+
+  it('is empty when nothing dated would be added', async () => {
+    await importRecords(t.db, t.userId, { usage: [usage('same')] }, { source: CODE, contentHash: 'c' });
+    expect(await previewIn('UTC', { usage: [usage('same')] }, { source: CODE, contentHash: 'c' })).toEqual({ first: null, last: null });
   });
 });
 

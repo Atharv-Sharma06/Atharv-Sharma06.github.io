@@ -40,6 +40,8 @@ const COMPUTER_KEY = 'claude-code-computer';
 const AUTO_SYNC_KEY = 'claude-code-auto-sync';
 /** When automatic reading was switched off by a deletion, so the import page can say why the switch is off. */
 const AUTO_SYNC_STOPPED_KEY = 'claude-code-auto-sync-stopped';
+/** How the last reading of the remembered folder ended (see background-sync.ts). It belongs to that folder. */
+export const LAST_SYNC_KEY = 'claude-code-last-sync';
 
 /** Folders inside a Claude Code directory that never hold transcripts and can be large. */
 const SKIP_DIRECTORIES = new Set(['tool-results', 'mcp-tasks', 'node_modules', '.git', 'shell-snapshots', 'statsig', 'todos', 'ide', 'plugins', 'debug']);
@@ -98,6 +100,8 @@ export async function pickClaudeCodeFolder(source: FolderSource = {}): Promise<P
   // Remembered so "Read the folder again" can re-read the same folder later. Handles can only be stored in IndexedDB.
   await kvSet(FOLDER_KEY, handle).catch(() => undefined);
   await kvSet(FOLDER_SOURCE_KEY, { ...source }).catch(() => undefined);
+  // What is on record about the last reading was said about the folder remembered until now.
+  await kvDelete(LAST_SYNC_KEY).catch(() => undefined);
   return { name: handle.name, files: await readTranscriptFolder(handle) };
 }
 
@@ -149,6 +153,7 @@ export async function forgetFolder(): Promise<void> {
   await kvDelete(FOLDER_SOURCE_KEY);
   await kvDelete(AUTO_SYNC_KEY);
   await kvDelete(AUTO_SYNC_STOPPED_KEY);
+  await kvDelete(LAST_SYNC_KEY);
 }
 
 /** The name last given to this computer on the import page, so the field starts with it on the next visit. */

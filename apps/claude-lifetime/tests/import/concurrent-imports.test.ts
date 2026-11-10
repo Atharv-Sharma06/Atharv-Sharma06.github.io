@@ -64,7 +64,7 @@ describe('the import lock', () => {
     expect((await t.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM stg_conversations`)).rows[0].n).toBe(1);
 
     release();
-    expect(await addManualUsage(t.db, t.userId, { date: '2025-01-15', inputTokens: 1_000, confidence: 'estimated' })).toBeGreaterThan(0);
+    expect((await addManualUsage(t.db, t.userId, { date: '2025-01-15', inputTokens: 1_000, confidence: 'estimated' })).batchId).toBeGreaterThan(0);
     expect((await getOverview(t.db, filter())).tokens.total).toBe(1_000);
   });
 });

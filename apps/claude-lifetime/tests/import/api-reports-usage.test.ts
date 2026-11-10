@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { ParseContext, StagedUsage } from '@/core/types';
-import { apiUsageReportParser, detectApiReportFormat, priceTierFor } from '@/import/api-reports';
+import { apiUsageReportParser, detectApiReportFormat, isUndecidedReport, priceTierFor } from '@/import/api-reports';
 import { detectJsonFormat } from '@/import/generic';
 import { collectingSink, fileOf } from '../helpers/sink';
 
@@ -748,6 +748,24 @@ describe('detectApiReportFormat', () => {
     expect(detectApiReportFormat(page([bucket(1, []), bucket(2, [])]))).toBe('anthropic/usage-report');
     expect(detectApiReportFormat({ data: [], has_more: false, next_page: null })).toBe('anthropic/usage-report');
     expect(detectApiReportFormat({ data: [], has_more: false, next_page: null, data_refreshed_at: null })).toBe('anthropic/analytics-usage');
+  });
+
+  it('knows when a report of the older endpoints says neither usage nor cost', () => {
+    const empty = page([bucket(1, []), bucket(2, [])], true);
+    // a cost report that starts before the first spend begins with such a page
+    expect(isUndecidedReport(empty)).toBe(true);
+    expect(isUndecidedReport([empty, empty])).toBe(true);
+    expect(isUndecidedReport([bucket(1, [])])).toBe(true);
+    expect(isUndecidedReport({ data: [], has_more: false, next_page: null })).toBe(true);
+    // one result anywhere decides it
+    expect(isUndecidedReport([empty, page([bucket(3, [result()])])])).toBe(false);
+    expect(isUndecidedReport(page([bucket(1, [{ amount: '1', currency: 'USD' }])]))).toBe(false);
+    // not reports of the older endpoints at all
+    expect(isUndecidedReport({ data: [], has_more: false, next_page: null, data_refreshed_at: '2026-04-10T00:00:00Z' })).toBe(false);
+    expect(isUndecidedReport({ data: [], has_more: false })).toBe(false);
+    expect(isUndecidedReport([])).toBe(false);
+    expect(isUndecidedReport({ records: [] })).toBe(false);
+    expect(isUndecidedReport(null)).toBe(false);
   });
 
   it('returns null for everything else', () => {

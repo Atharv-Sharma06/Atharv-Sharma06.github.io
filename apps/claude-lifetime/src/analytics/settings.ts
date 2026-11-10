@@ -239,11 +239,30 @@ export interface ManualUsageInput {
   note?: string | null;
 }
 
+export interface ManualUsageResult {
+  batchId: number | null;
+  /** The synthetic demo data was removed by this entry, as by any real import. */
+  removedDemoData: boolean;
+  /** Set when the entry is saved but could not be copied to the device's storage (see CommitResult.notOnDevice). */
+  notOnDevice: string | null;
+}
+
+/** No Claude model was available before 2021; the importers refuse earlier dates for the same reason. */
+export const MANUAL_ENTRY_FIRST_DAY = '2021-01-01';
+
+/** The latest day an entry can be for: tomorrow in UTC, which is "today" in the timezones furthest ahead. */
+export function manualEntryLastDay(now: Date = new Date()): string {
+  return new Date(now.getTime() + 86_400_000).toISOString().slice(0, 10);
+}
+
 /** Records one day of usage typed in by the user, as its own deletable import. */
-export async function addManualUsage(db: SqlDriver, userId: number, input: ManualUsageInput): Promise<number | null> {
+export async function addManualUsage(db: SqlDriver, userId: number, input: ManualUsageInput, now: Date = new Date()): Promise<ManualUsageResult> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date) || Number.isNaN(Date.parse(`${input.date}T00:00:00Z`))) {
     throw new SettingsError('Enter a valid date.');
   }
+  // A year that is still being typed (0226 for 2026) is a valid date too, and one such entry stretches every chart over centuries.
+  if (input.date < MANUAL_ENTRY_FIRST_DAY) throw new SettingsError('Enter a day in 2021 or later: no Claude usage can have happened before.');
+  if (input.date > manualEntryLastDay(now)) throw new SettingsError('Enter a day that is not in the future.');
   const n = (v: number | undefined, name: string) => {
     const x = v ?? 0;
     if (!Number.isFinite(x) || x < 0 || !Number.isInteger(x)) throw new SettingsError(`${name} must be a whole number of tokens, zero or more.`);
@@ -301,7 +320,8 @@ export async function addManualUsage(db: SqlDriver, userId: number, input: Manua
     await writer.usage(usage);
     await writer.finish();
     try {
-      return (await commitImport(db, userId, parsed, { staging })).batchId;
+      const result = await commitImport(db, userId, parsed, { staging });
+      return { batchId: result.batchId, removedDemoData: result.removedDemoData, notOnDevice: result.notOnDevice ?? null };
     } finally {
       await resetStaging(db).catch(() => undefined);
     }

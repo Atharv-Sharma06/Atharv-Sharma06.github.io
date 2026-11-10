@@ -1,6 +1,7 @@
 import { ImportError, type ParsedImport } from '@/core/types';
 import { toIso, toNumber, type SqlDriver, type SqlExecutor } from '@/db/driver';
 import { refreshStatistics } from '@/db/maintenance';
+import { dayInZone } from '@/lib/format';
 import { stagingToken } from './staging';
 
 /**
@@ -50,6 +51,12 @@ export interface ImportPreview {
   /** Tokens this import would add (processed basis). */
   tokens: { exact: number; estimated: number };
   dateRange: { start: string | null; end: string | null };
+  /**
+   * The same as calendar days, by the rule every chart uses: a record that only knows its day
+   * (a daily report row, a dated table row, a manual entry) is that day everywhere, and a record
+   * with a time of day falls on the day it has in the user's timezone.
+   */
+  coveredDays: { first: string | null; last: string | null };
   /** Share of new rows that carry the metadata the dashboard relies on. */
   coverage: { hasExactUsage: boolean; hasModel: boolean; modelShare: number | null; hasTimestamps: boolean };
   /**
@@ -74,6 +81,12 @@ export interface CommitResult {
   replaced: { usageRows: number; costRows: number };
   removedDemoData: boolean;
   nothingNew: boolean;
+  /**
+   * Set when the import is stored in the database but the browser refused to copy the change to
+   * the device's storage (typically a full disk), with the reason. The import is saved for as long
+   * as the app stays open; it is not a failed import, and must not be reported or retried as one.
+   */
+  notOnDevice?: string;
 }
 
 const one = async <T>(db: SqlExecutor, sql: string, params: unknown[] = []): Promise<T> => {
@@ -194,9 +207,24 @@ async function assertStagingValid(db: SqlExecutor) {
   }
 }
 
+/** First and last calendar day of a staged or stored row (see ImportPreview.coveredDays). `tz` is a parameter that holds the timezone. */
+const firstDayOf = (x: string, tz: string) =>
+  `(CASE WHEN ${x}.bucket_seconds >= 86400 THEN (${x}.occurred_at AT TIME ZONE 'UTC')::date ELSE (${x}.occurred_at AT TIME ZONE ${tz}::text)::date END)`;
+const lastDayOf = (x: string, tz: string) =>
+  `(CASE WHEN ${x}.bucket_seconds >= 86400 THEN ((${x}.occurred_at + make_interval(secs => ${x}.bucket_seconds - 1)) AT TIME ZONE 'UTC')::date
+         ELSE (${x}.occurred_at AT TIME ZONE ${tz}::text)::date END)`;
+
+/** The calendar days a restated range covers: its UTC days when it runs from midnight to midnight UTC, else its days in the timezone. */
+function daysOfRange(range: { start: string; end: string }, timezone: string): { first: string; last: string } {
+  const lastInstant = new Date(Date.parse(range.end) - 1).toISOString();
+  const wholeDays = range.start.endsWith('T00:00:00.000Z') && range.end.endsWith('T00:00:00.000Z');
+  return wholeDays ? { first: range.start.slice(0, 10), last: lastInstant.slice(0, 10) } : { first: dayInZone(range.start, timezone), last: dayInZone(lastInstant, timezone) };
+}
+
 export async function previewImport(db: SqlExecutor, userId: number, parsed: ParsedImport): Promise<ImportPreview> {
   await assertStagingValid(db);
   const sourceId = await sourceIdFor(db, userId, parsed);
+  const timezone = (await one<{ timezone: string | null } | undefined>(db, `SELECT timezone FROM users WHERE id = $1`, [userId]))?.timezone ?? 'UTC';
 
   const conv = await one<{ total: number; fresh: number }>(
     db,
@@ -217,12 +245,14 @@ export async function previewImport(db: SqlExecutor, userId: number, parsed: Par
             COALESCE(sum(round(d.input_base * em.central_factor) + round(d.output_base * em.central_factor) + round(d.replay_base * em.central_factor))
                      FILTER (WHERE m.id IS NULL), 0)::bigint AS tokens,
             min(d.occurred_at) FILTER (WHERE m.id IS NULL) AS first_at,
-            max(d.occurred_at) FILTER (WHERE m.id IS NULL) AS last_at
+            max(d.occurred_at) FILTER (WHERE m.id IS NULL) AS last_at,
+            min((d.occurred_at AT TIME ZONE $2::text)::date) FILTER (WHERE m.id IS NULL)::text AS first_day,
+            max((d.occurred_at AT TIME ZONE $2::text)::date) FILTER (WHERE m.id IS NULL)::text AS last_day
        FROM d
        JOIN estimation_methods em ON em.method_key = d.method_key
        LEFT JOIN conversations c ON c.user_id = $1 AND c.dedup_key = d.conversation_key
        LEFT JOIN messages m ON m.conversation_id = c.id AND m.external_id = d.external_id`,
-    [userId],
+    [userId, timezone],
   );
 
   // A report that restates a range of its source: a staged row is new unless the source already
@@ -251,12 +281,17 @@ export async function previewImport(db: SqlExecutor, userId: number, parsed: Par
             COALESCE(sum(input_tokens + output_tokens + cache_read_tokens + cache_write_5m_tokens + cache_write_1h_tokens)
                      FILTER (WHERE fresh AND confidence <> 'exact'), 0)::bigint AS estimated_tokens,
             min(occurred_at) FILTER (WHERE fresh) AS first_at,
-            max(occurred_at) FILTER (WHERE fresh) AS last_at
+            max(occurred_at) FILTER (WHERE fresh) AS last_at,
+            min(${firstDayOf('j', '$6')}) FILTER (WHERE fresh)::text AS first_day,
+            max(${lastDayOf('j', '$6')}) FILTER (WHERE fresh)::text AS last_day
        FROM j`,
-    [userId, ...rangeArgs],
+    [userId, ...rangeArgs, timezone],
   );
 
-  const cost = await one<{ staged: number; total: number; fresh: number; without_model: number; first_at: Date | null; last_at: Date | null }>(
+  const cost = await one<{
+    staged: number; total: number; fresh: number; without_model: number;
+    first_at: Date | null; last_at: Date | null; first_day: string | null; last_day: string | null;
+  }>(
     db,
     `WITH d AS (SELECT DISTINCT ON (dedup_key) * FROM stg_costs ORDER BY dedup_key),
           j AS (SELECT d.*, (r.id IS NULL OR (${restated('r')} AND NOT ${sameCost('d', 'r')})) AS fresh
@@ -264,9 +299,11 @@ export async function previewImport(db: SqlExecutor, userId: number, parsed: Par
      SELECT (SELECT count(*) FROM stg_costs)::int AS staged, count(*)::int AS total,
             count(*) FILTER (WHERE fresh)::int AS fresh,
             count(*) FILTER (WHERE fresh AND model_key IS NULL)::int AS without_model,
-            min(occurred_at) FILTER (WHERE fresh) AS first_at, max(occurred_at) FILTER (WHERE fresh) AS last_at
+            min(occurred_at) FILTER (WHERE fresh) AS first_at, max(occurred_at) FILTER (WHERE fresh) AS last_at,
+            min(${firstDayOf('j', '$6')}) FILTER (WHERE fresh)::text AS first_day,
+            max(${lastDayOf('j', '$6')}) FILTER (WHERE fresh)::text AS last_day
        FROM j`,
-    [userId, ...rangeArgs],
+    [userId, ...rangeArgs, timezone],
   );
 
   let replaced: ImportPreview['replaced'] = null;
@@ -315,6 +352,9 @@ export async function previewImport(db: SqlExecutor, userId: number, parsed: Par
   const lastOfRange = spoken.length > 0 ? new Date(Date.parse(spoken[spoken.length - 1].end) - 1).toISOString() : null;
   const starts = [toIso(msg.first_at), toIso(use.first_at), toIso(cost.first_at), spoken[0]?.start ?? null].filter(Boolean) as string[];
   const ends = [toIso(msg.last_at), toIso(use.last_at), toIso(cost.last_at), lastOfRange].filter(Boolean) as string[];
+  const spokenDays = spoken.map((range) => daysOfRange(range, timezone));
+  const firstDays = [msg.first_day, use.first_day, cost.first_day, ...spokenDays.map((d) => d.first)].filter((d): d is string => typeof d === 'string');
+  const lastDays = [msg.last_day, use.last_day, cost.last_day, ...spokenDays.map((d) => d.last)].filter((d): d is string => typeof d === 'string');
   const replacedRows = (replaced?.usageRows ?? 0) + (replaced?.costRows ?? 0);
   const stat = (name: string) => (typeof parsed.stats[name] === 'number' ? (parsed.stats[name] as number) : null);
 
@@ -359,6 +399,10 @@ export async function previewImport(db: SqlExecutor, userId: number, parsed: Par
     dateRange: {
       start: starts.length ? starts.sort()[0] : null,
       end: ends.length ? ends.sort()[ends.length - 1] : null,
+    },
+    coveredDays: {
+      first: firstDays.length ? firstDays.sort()[0] : null,
+      last: lastDays.length ? lastDays.sort()[lastDays.length - 1] : null,
     },
     coverage: {
       hasExactUsage: toNumber(use.exact_tokens) > 0,
@@ -705,7 +749,13 @@ export async function commitImport(
   await db.exec('TRUNCATE stg_models, stg_conversations, stg_messages, stg_usage, stg_costs;');
   // The browser database has no autovacuum; without fresh statistics the next queries can be far slower.
   if (!result.nothingNew || result.replaced.usageRows + result.replaced.costRows > 0) await refreshStatistics(db);
-  await db.flush();
+  // The transaction is committed. A failure from here on must not read as "nothing was saved": a second
+  // attempt would then store a manual entry twice, and the pages would keep showing the old figures.
+  try {
+    await db.flush();
+  } catch (error) {
+    return { ...result, notOnDevice: error instanceof Error ? error.message : String(error) };
+  }
   return result;
 }
 

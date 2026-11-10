@@ -96,6 +96,32 @@ export function detectApiReportFormat(value: unknown): ApiReportFormat | null {
 }
 
 /**
+ * True when the value is a report of the older endpoints that holds nothing but empty
+ * time buckets (or an empty page). Such input says neither "usage" nor "cost":
+ * `detectApiReportFormat` files it under usage for want of a better answer. A caller
+ * that can look further (at the next page of the file, or at the other files of a
+ * selection) should do so before it settles on that answer. A cost report that starts
+ * before the first spend begins with exactly such a page.
+ */
+export function isUndecidedReport(value: unknown): boolean {
+  const entries = Array.isArray(value) ? value : [value];
+  if (entries.length === 0) return false;
+  for (const entry of entries) {
+    if (isReportPage(entry)) {
+      if (entry.data.length === 0) {
+        // The analytics endpoints answer with `data_refreshed_at`; their empty page is not a page of the older ones.
+        if (!('has_more' in entry && 'next_page' in entry) || 'data_refreshed_at' in entry) return false;
+        continue;
+      }
+      if (!entry.data.every((item) => classifyReportItem(item) === 'empty-bucket')) return false;
+      continue;
+    }
+    if (classifyReportItem(entry) !== 'empty-bucket') return false;
+  }
+  return true;
+}
+
+/**
  * The message of an API error body, `{ "type": "error", "error": { "type", "message" } }`.
  * People save the output of a request that failed (wrong key, missing beta header)
  * and then try to import it; they deserve to be told what the file is.

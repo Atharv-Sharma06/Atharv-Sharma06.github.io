@@ -28,7 +28,8 @@ export function nextBucket(bucket: string, granularity: Granularity): string {
     case 'month':
       return addMonths(bucket, 1);
     case 'year':
-      return `${Number(bucket.slice(0, 4)) + 1}-01-01`;
+      // Padded: buckets are compared as text, and "227-01-01" would sort after "2025-01-01".
+      return `${String(Number(bucket.slice(0, 4)) + 1).padStart(4, '0')}-01-01`;
   }
 }
 

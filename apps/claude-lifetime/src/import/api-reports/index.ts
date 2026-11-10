@@ -12,6 +12,7 @@ export {
   detectApiReportFormat,
   detectConsoleCsvFormat,
   isReportPage,
+  isUndecidedReport,
   type ApiReportFormat,
   type ConsoleCsvFormat,
 } from './detect';

@@ -4,10 +4,9 @@ import { ImportError } from '@/core/types';
 import type { SqlDriver } from '@/db/driver';
 import { ImportSession } from '@/import/session';
 import { kvGet, kvSet } from '@/lib/kv';
-import { readRememberedFolder } from './local-files';
+import { LAST_SYNC_KEY, readRememberedFolder, type FolderReading } from './local-files';
 
-const LAST_SYNC_KEY = 'claude-code-last-sync';
-
+/** How an attempt to read the folder ended. With a `problem` it did not get as far as saving anything. */
 export interface SyncOutcome {
   at: number;
   /** Model requests newly counted by this sync. */
@@ -17,8 +16,21 @@ export interface SyncOutcome {
 }
 
 /**
- * How a sync ended. Only `done` means the folder was read; the others say why it was
- * not, so each can be told apart on screen.
+ * Why a remembered folder cannot be opened, in words for the person. The browser keeps
+ * a reference to the folder, not the folder: when it was moved, renamed or deleted, or
+ * its drive is not connected, reading it fails with a NotFoundError.
+ */
+export function folderProblem(error: unknown): string {
+  const name = error instanceof Error ? error.name : '';
+  if (name === 'NotFoundError') {
+    return 'The remembered folder could not be found any more. It may have been moved, renamed or deleted, or its drive is not connected. Choose the folder again.';
+  }
+  return `The remembered folder could not be read (${error instanceof Error ? error.message : String(error)}). Choose the folder again.`;
+}
+
+/**
+ * How a sync ended. `done` means an attempt was made and is on record, with its problem
+ * when it failed; the others say why no attempt was made, so each can be told apart on screen.
  */
 export type SyncResult =
   | { status: 'done'; outcome: SyncOutcome }
@@ -37,7 +49,15 @@ export const lastSync = () => kvGet<SyncOutcome>(LAST_SYNC_KEY);
  * adds something is a normal import: listed in the history, deletable.
  */
 export async function syncClaudeCodeFolder(db: SqlDriver, userId: number, ask: boolean): Promise<SyncResult> {
-  const reading = await readRememberedFolder(ask);
+  let reading: FolderReading;
+  try {
+    reading = await readRememberedFolder(ask);
+  } catch (error) {
+    // Nothing was read. That is worth keeping on record, because this also runs unattended when the app opens.
+    const outcome: SyncOutcome = { at: Date.now(), added: 0, problem: folderProblem(error) };
+    await kvSet(LAST_SYNC_KEY, outcome).catch(() => undefined);
+    return { status: 'done', outcome };
+  }
   if (reading.status === 'no_folder') return { status: 'no_folder' };
   if (reading.status === 'no_permission') return { status: 'no_permission', folder: reading.name };
   const { folder, source } = reading;

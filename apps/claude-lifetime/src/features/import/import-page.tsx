@@ -3,6 +3,7 @@
 import { CalendarRange, FileJson, FileSpreadsheet, FolderOpen, Keyboard, MessagesSquare, SquareTerminal, type LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import type { ManualUsageResult } from '@/analytics/settings';
 import { ConfidenceBadge } from '@/components/data/confidence';
 import { LoadDemoButton } from '@/components/data/no-data';
 import { PageHeader } from '@/components/shell/page-header';
@@ -88,11 +89,15 @@ export function ImportPage() {
   const top = useRef<HTMLDivElement>(null);
   const [idle, setIdle] = useState(true);
   const [manualOpen, setManualOpen] = useState(false);
+  /** How the last manual entry was saved, while there is something to say about it. */
+  const [manualSaved, setManualSaved] = useState<ManualUsageResult | null>(null);
   const [computer, setComputer] = useState('');
   const [folder, setFolder] = useState<RememberedFolder | null>(null);
   const [auto, setAuto] = useState(false);
   const [autoStoppedAt, setAutoStoppedAt] = useState<number | null>(null);
   const [sync, setSync] = useState<SyncOutcome | null>(null);
+  /** Why the last click on "Read the folder again" did not read it. Not a reading, so it is kept apart from `sync`. */
+  const [notRead, setNotRead] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [pickError, setPickError] = useState<string | null>(null);
 
@@ -163,22 +168,25 @@ export function ImportPage() {
 
   const syncNow = async () => {
     setSyncing(true);
+    setNotRead(null);
     try {
       const result = await syncClaudeCodeFolder(app.db, app.userId, true);
       if (result.status === 'done') {
         if (!result.outcome.problem) app.notifyDataChanged();
         refreshFolder();
       } else {
-        // The folder was not read. Each reason gets its own words; none of them is recorded as a reading.
-        const problem =
+        // No attempt was made. Each reason gets its own words; none of them is recorded as a reading.
+        setNotRead(
           result.status === 'busy'
             ? 'Another import is running or waiting to be saved, in this tab or another one. The folder was not read. Try again when that import is done.'
             : result.status === 'no_permission'
-              ? `The browser did not grant access to “${result.folder}”. Choose the folder again to continue.`
-              : 'No folder is remembered on this device any more. Choose the folder again.';
-        setSync({ at: Date.now(), added: 0, problem });
+              ? `The browser did not grant access to “${result.folder}”, so the folder was not read. Choose the folder again to continue.`
+              : 'No folder is remembered on this device any more. Choose the folder again.',
+        );
         if (result.status === 'no_folder') refreshFolder();
       }
+    } catch (error) {
+      setNotRead(`The folder was not read: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setSyncing(false);
     }
@@ -366,7 +374,11 @@ export function ImportPage() {
               <div className="min-w-0 max-w-[70ch] text-[13px] text-ink-2">
                 <p className="text-sm text-ink">
                   The folder “{folder.name}” is remembered on this device.
-                  {sync ? ` Last read ${formatRelative(sync.at)}${sync.problem ? '' : `, ${plural(sync.added, 'new model request')} added`}.` : ''}
+                  {sync
+                    ? sync.problem
+                      ? ` The last attempt to read it, ${formatRelative(sync.at)}, did not work.`
+                      : ` Last read ${formatRelative(sync.at)}, ${plural(sync.added, 'new model request')} added.`
+                    : ''}
                 </p>
                 <p className="mt-1">
                   Its usage is stored under the source “{folder.source.sourceLabel ?? 'Claude Code (this computer)'}”, and reading it again adds to that
@@ -385,6 +397,7 @@ export function ImportPage() {
                   variant="ghost"
                   onClick={async () => {
                     await forgetFolder();
+                    setNotRead(null);
                     refreshFolder();
                   }}
                 >
@@ -418,20 +431,33 @@ export function ImportPage() {
                 </Notice>
               </div>
             ) : null}
-            {sync?.problem ? (
-              <div className="mt-3">
-                <Notice tone="warning">{sync.problem}</Notice>
+            {(notRead ?? sync?.problem) ? (
+              <div className="mt-3" role="status">
+                <Notice tone="warning">{notRead ?? sync?.problem}</Notice>
               </div>
             ) : null}
           </Card>
         </section>
       ) : null}
 
+      {manualSaved && (manualSaved.removedDemoData || manualSaved.notOnDevice) ? (
+        <div className="mt-9 space-y-3" role="status">
+          {manualSaved.notOnDevice ? (
+            <Notice tone="warning">
+              <strong className="font-medium text-ink">The entry is saved, but could not be written to this device&rsquo;s storage.</strong> It is
+              in the figures now and can be lost when the app is closed. {manualSaved.notOnDevice} Do not enter it a second time: it would be counted
+              twice.
+            </Notice>
+          ) : null}
+          {manualSaved.removedDemoData ? <Notice>The synthetic demo data was removed. Everything you see from now on is your own.</Notice> : null}
+        </div>
+      ) : null}
+
       <div className="mt-9">
         <ImportHistory autoSync={folder !== null && auto} locked={!idle} onDeleted={refreshFolder} />
       </div>
 
-      <ManualEntryDialog open={manualOpen} onOpenChange={setManualOpen} />
+      <ManualEntryDialog open={manualOpen} onOpenChange={setManualOpen} onSaved={setManualSaved} />
     </div>
   );
 }

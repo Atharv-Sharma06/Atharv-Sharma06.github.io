@@ -4,7 +4,7 @@ import { CircleCheck, CircleSlash, Info, TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ConfidenceBadge } from '@/components/data/confidence';
 import { cn } from '@/lib/cn';
-import { formatBytes, formatInstant, formatInt, formatShare, formatTokens, plural } from '@/lib/format';
+import { formatBytes, formatDay, formatInstant, formatInt, formatShare, formatTokens, plural } from '@/lib/format';
 import type { ImportPreview } from '@/import/commit';
 import { FORMATS } from '@/import/formats';
 import type { PreparedImport } from '@/import/session';
@@ -111,8 +111,8 @@ export function ImportPreviewView({ prepared, timezone }: { prepared: PreparedIm
   const tokens = p.tokens.exact + p.tokens.estimated;
   // Model and token counts have their own lines below; this list is for everything else a format lacks.
   const otherMissing = p.missingFields.filter((f) => f !== 'model' && f !== 'token counts');
-  const range =
-    p.dateRange.start && p.dateRange.end ? `${formatInstant(p.dateRange.start, timezone)} – ${formatInstant(p.dateRange.end, timezone)}` : 'No dated records';
+  // Calendar days as the charts count them: a record that only knows its day is that day in every timezone.
+  const range = p.coveredDays.first && p.coveredDays.last ? `${formatDay(p.coveredDays.first)} – ${formatDay(p.coveredDays.last)}` : 'No dated records';
 
   return (
     <div className="space-y-5">
@@ -192,7 +192,7 @@ export function ImportPreviewView({ prepared, timezone }: { prepared: PreparedIm
                     : 'metered by the source'}
             </p>
           </div>
-          <Count label="Covers" value={p.dateRange.start ? formatInstant(p.dateRange.start, timezone) : '–'} detail={range} />
+          <Count label="Covers" value={p.coveredDays.first ? formatDay(p.coveredDays.first) : '–'} detail={range} />
         </dl>
       </section>
 
