@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AnalyticsFilter } from '@/analytics/base';
-import { listConversations } from '@/analytics/conversations';
+import { listConversationModels, listConversations } from '@/analytics/conversations';
 import { getCoverage } from '@/analytics/coverage';
 import { getOverview } from '@/analytics/overview';
 import { setSourceIncluded } from '@/analytics/settings';
@@ -102,5 +102,38 @@ describe('a session that two sources added to', () => {
     expect((await getOverview(t.db, filter())).tokens.total).toBe(1_000);
     const page = await listConversations(t.db, filter());
     expect(page.rows.map((r) => [r.title, r.tokens, r.exact])).toEqual([['Long-running session', 1_000, 1_000]]);
+  });
+
+  it('still lists the session when the source it belongs to is left out and the other one counts', async () => {
+    const { first, second } = await importTwice();
+    await setSourceIncluded(t.db, t.userId, first.sourceId!, false, 'counted elsewhere');
+    // the second source's tokens are in the totals, so the session they belong to is in the list, with those tokens
+    const overview = await getOverview(t.db, filter());
+    expect(overview.tokens.total).toBe(2_000);
+    expect(overview.mostActiveDay).toMatchObject({ day: '2025-06-02', conversationsActive: 1 });
+    expect((await listConversations(t.db, filter())).rows.map((r) => [r.title, r.tokens])).toEqual([['Long-running session', 2_000]]);
+    expect((await listConversationModels(t.db, t.userId)).map((m) => [m.modelKey, m.conversations])).toEqual([['claude-sonnet-4-5', 1]]);
+    // with both left out there is nothing to list
+    await setSourceIncluded(t.db, t.userId, second.sourceId!, false, 'counted elsewhere');
+    expect((await listConversations(t.db, filter())).rows).toEqual([]);
+    expect(await listConversationModels(t.db, t.userId)).toEqual([]);
+  });
+
+  it('hands the session to the other source when the first source keeps other imports but has nothing left in the session', async () => {
+    const { first, second } = await importTwice();
+    // the first source has a second import, of another session
+    const other = conv('s2', { dedupKey: 'claude_code:s2', kind: 'code_session', title: 'Another session', createdAt: '2025-06-03T10:00:00.000Z', updatedAt: '2025-06-03T10:00:00.000Z' });
+    await importRecords(
+      t.db, t.userId,
+      { conversations: [other], usage: [usage('cc:s2:a', { ...zero, conversationKey: 'claude_code:s2', occurredAt: '2025-06-03T10:00:00.000Z', inputTokens: 400, outputTokens: 0 })] },
+      { source: { kind: 'claude_code', label: 'Claude Code', externalRef: 'local' }, contentHash: 'h3', requestKeys: [3n] },
+    );
+    await deleteBatch(t.db, t.userId, first.batchId!);
+    // each source is listed with the sessions it holds records of
+    expect(await sessionRow()).toEqual({ source_id: second.sourceId, message_count: 2 });
+    expect(await sources()).toEqual([
+      ['Claude Code', 1, 400, 1],
+      ['Claude Code (work laptop)', 1, 2_000, 1],
+    ]);
   });
 });

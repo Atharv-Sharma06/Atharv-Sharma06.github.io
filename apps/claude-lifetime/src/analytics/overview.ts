@@ -1,5 +1,5 @@
 import { toIso, toNumber, type SqlExecutor } from '@/db/driver';
-import { bucketExpr, factsFrom, NO_PLAN, Params, tokenExpr, UNKNOWN_MODEL_LABEL, type AnalyticsFilter, type Granularity } from './base';
+import { bucketExpr, conversationShown, factsFrom, NO_PLAN, Params, tokenExpr, UNKNOWN_MODEL_LABEL, type AnalyticsFilter, type Granularity } from './base';
 
 export interface TokenTotals {
   /** Under the filter's basis. */
@@ -135,7 +135,7 @@ export async function getOverview(db: SqlExecutor, filter: AnalyticsFilter): Pro
     const pn = new Params();
     const started = [
       `c.user_id = ${pn.add(filter.userId)}`,
-      `s.include_in_totals`,
+      conversationShown(),
       `c.kind IN ('chat', 'code_session')`,
       `(c.created_at AT TIME ZONE ${pn.add(filter.timezone)}::text)::date = ${pn.add(top.day)}::date`,
     ];

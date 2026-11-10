@@ -847,7 +847,13 @@ describe('ledger importer', () => {
     expect(await isClaudeCodeLedgerFile(file('conversations.json', '[{"uuid": "x"}]'))).toBe(false);
     expect(await isClaudeCodeLedgerFile(file('a.jsonl', jsonl(sessionA())))).toBe(false);
     expect(looksLikeLedger('{\n  "format" : "claude-lifetime/claude-code-ledger",')).toBe(true);
+    expect(looksLikeLedger('\uFEFF{"format":"claude-lifetime/claude-code-ledger"')).toBe(true);
     expect(looksLikeLedger('{"format": "something-else"}')).toBe(false);
+    // A transcript of a session in which Claude Code read a ledger holds the same words inside a tool
+    // result. They only make a ledger where the collector writes them: as the first entry of the document.
+    const readALedger = { type: 'user', sessionId: SESSION_A, toolUseResult: { file: { format: 'claude-lifetime/claude-code-ledger', version: 1 } } };
+    expect(looksLikeLedger(JSON.stringify(readALedger))).toBe(false);
+    expect(await isClaudeCodeLedgerFile(file('a.jsonl', jsonl([readALedger, ...sessionA()])))).toBe(false);
   });
 
   it('tells a ledger and a transcript row from other parsed JSON', () => {

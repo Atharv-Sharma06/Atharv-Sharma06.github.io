@@ -37,6 +37,7 @@ export async function deleteBatch(db: SqlDriver, userId: number, batchId: number
       [userId, ids],
     );
     if (ids.length > 0) {
+      await handOverEmptiedConversations(tx, userId, ids);
       await refreshConversationCounters(tx, userId, `c.id IN (${ids.map((n) => Number(n)).join(',')})`);
     }
     // A source with no imports left has nothing to show. Conversations it started that another source
@@ -116,6 +117,32 @@ async function handOverSharedConversations(tx: SqlExecutor, userId: number, sour
     [userId, sourceId],
   );
   return rows.map((r) => r.id);
+}
+
+/**
+ * The same for single conversations after an import was deleted: one whose own source has no record left
+ * in it, while another source still has some, goes to that source. Left with its first source it would be
+ * listed under a source that holds nothing of it, and the source that does would show usage without a conversation.
+ */
+async function handOverEmptiedConversations(tx: SqlExecutor, userId: number, conversationIds: number[]): Promise<void> {
+  await tx.query(
+    `UPDATE conversations c SET source_id = keep.source_id
+       FROM (
+         SELECT mine.id,
+                (SELECT min(other.source_id) FROM (
+                   SELECT u.source_id FROM usage_records u WHERE u.conversation_id = mine.id
+                   UNION ALL
+                   SELECT b.source_id FROM messages m JOIN import_batches b ON b.id = m.batch_id WHERE m.conversation_id = mine.id
+                 ) other) AS source_id
+           FROM conversations mine
+          WHERE mine.user_id = $1 AND mine.id = ANY($2::int[])
+            AND NOT EXISTS (SELECT 1 FROM usage_records u WHERE u.conversation_id = mine.id AND u.source_id = mine.source_id)
+            AND NOT EXISTS (SELECT 1 FROM messages m JOIN import_batches b ON b.id = m.batch_id
+                             WHERE m.conversation_id = mine.id AND b.source_id = mine.source_id)
+       ) keep
+      WHERE c.id = keep.id AND keep.source_id IS NOT NULL`,
+    [userId, conversationIds],
+  );
 }
 
 /**

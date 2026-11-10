@@ -92,9 +92,14 @@ export function emptyLedger(): Ledger {
   return { generatedAt: null, machine: '', collector: null, responses: new Map(), prompts: new Map(), sessions: new Map() };
 }
 
-/** Cheap test on the beginning of a file: is this a ledger rather than something else? */
+/**
+ * Cheap test on the beginning of a file: is this a ledger rather than something else?
+ * The collector writes `format` as the first entry of the document, and only there does it
+ * count. Anywhere else the same words can be data: a transcript of a session in which
+ * Claude Code read a ledger holds them inside a tool result.
+ */
 export function looksLikeLedger(head: string): boolean {
-  return /"format"\s*:\s*"claude-lifetime\/claude-code-ledger"/.test(head);
+  return /^\uFEFF?\s*\{\s*"format"\s*:\s*"claude-lifetime\/claude-code-ledger"/.test(head);
 }
 
 type Json = Record<string, unknown>;

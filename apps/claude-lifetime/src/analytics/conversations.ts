@@ -1,7 +1,7 @@
 import { decodeLimitations, type LimitationName } from '@/core/limitations';
 import type { ConversationKind, SourceKind } from '@/core/types';
 import { toIso, toNumber, type SqlExecutor } from '@/db/driver';
-import { NO_PLAN, Params, tokenExpr, UNKNOWN_MODEL_LABEL, type AnalyticsFilter } from './base';
+import { conversationShown, NO_PLAN, Params, tokenExpr, UNKNOWN_MODEL_LABEL, type AnalyticsFilter } from './base';
 
 export type ConversationSort = 'tokens' | 'created' | 'updated' | 'messages' | 'title';
 
@@ -61,7 +61,7 @@ export async function listConversations(db: SqlExecutor, filter: AnalyticsFilter
   const p = new Params();
   const user = p.add(filter.userId);
   const tok = tokenExpr(filter.basis);
-  const where = [`c.user_id = ${user}`, `s.include_in_totals`, `c.kind IN ('chat', 'code_session')`];
+  const where = [`c.user_id = ${user}`, conversationShown(), `c.kind IN ('chat', 'code_session')`];
 
   const search = query.search?.trim();
   if (search) {
@@ -320,7 +320,7 @@ export async function listConversationModels(db: SqlExecutor, userId: number): P
        FROM conversations c
        JOIN data_sources s ON s.id = c.source_id
        LEFT JOIN model_catalog mc ON mc.id = c.model_id
-      WHERE c.user_id = $1 AND s.include_in_totals AND c.kind IN ('chat', 'code_session')
+      WHERE c.user_id = $1 AND ${conversationShown()} AND c.kind IN ('chat', 'code_session')
       GROUP BY 1, 2
       ORDER BY 3 DESC, 2`,
     [userId],

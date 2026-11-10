@@ -57,6 +57,18 @@ export function dayExpr(tz: string): string {
 }
 
 /**
+ * Whether a conversation is shown. It belongs to the source that imported it first (`s`), but another
+ * source can have added records to it. Its records are counted source by source, so it is shown when
+ * its own source counts toward the totals or any source that has records in it does: a conversation
+ * whose tokens are in the totals must not be missing from the list.
+ */
+export const conversationShown = (c = 'c', s = 's'): string => `(${s}.include_in_totals
+    OR EXISTS (SELECT 1 FROM usage_records vu JOIN data_sources vs ON vs.id = vu.source_id
+                WHERE vu.conversation_id = ${c}.id AND vs.include_in_totals)
+    OR EXISTS (SELECT 1 FROM messages vm JOIN import_batches vb ON vb.id = vm.batch_id JOIN data_sources vs ON vs.id = vb.source_id
+                WHERE vm.conversation_id = ${c}.id AND vs.include_in_totals))`;
+
+/**
  * `FROM ... WHERE ...` for usage facts under a filter. Sources the user excluded from
  * totals (to avoid counting overlapping sources twice) are always left out.
  */

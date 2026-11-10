@@ -804,7 +804,7 @@ function emptyLedger() {
   return { generatedAt: null, machine: "", collector: null, responses: /* @__PURE__ */ new Map(), prompts: /* @__PURE__ */ new Map(), sessions: /* @__PURE__ */ new Map() };
 }
 function looksLikeLedger(head) {
-  return /"format"\s*:\s*"claude-lifetime\/claude-code-ledger"/.test(head);
+  return /^\uFEFF?\s*\{\s*"format"\s*:\s*"claude-lifetime\/claude-code-ledger"/.test(head);
 }
 var isObject2 = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 var isCount = (v) => typeof v === "number" && Number.isInteger(v) && v >= 0;
