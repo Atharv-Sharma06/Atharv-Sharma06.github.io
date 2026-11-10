@@ -51,7 +51,9 @@ either folder ("Choose a ZIP"), made on another computer for example. File dialo
 dot-folders by default: press Cmd+Shift+. on macOS or Ctrl+H on Linux, or type the path.
 Importing the same archive again reads it again and adds nothing: every response is
 recognised by its message id. A response that was still being written when the archive
-was made is left out; import the folder, or a newer archive, to count it.
+was made is left out only when the archive is imported within about ten minutes of that.
+Imported later, the response is counted as far as the archive holds it, with a note, and
+a later import does not complete it: zip the folder when Claude Code is not running.
 
 **Read from it:** for every model response the input, output, cache-read and cache-write
 tokens (5-minute and 1-hour), the model, the service tier, whether inference was kept in

@@ -366,6 +366,31 @@ describe('detecting and parsing what is in an archive', () => {
     expect(out.conversations.length).toBeGreaterThan(0);
   });
 
+  it('says that transcripts have a password or an unknown compression method, not that they hold no usage', async () => {
+    const zip = zipSync({ '.claude/settings.json': strToU8('{}'), '.claude/projects/p/s1.jsonl': strToU8(S1), '.claude/projects/p/s2.jsonl': strToU8(S2) });
+    const lock = (bytes: Uint8Array, name: string) => patchCentral(bytes, name, (v, p) => v.setUint16(p + 8, v.getUint16(p + 8, true) | 1, true));
+    const locked = lock(lock(zip, '.claude/projects/p/s1.jsonl'), '.claude/projects/p/s2.jsonl');
+    expect(await caught(parse(claudeCodeParser, [fileOf('claude.zip', locked)], { now: LATER }))).toEqual({
+      code: 'zip_encrypted',
+      message: '".claude/projects/p/s1.jsonl" is password-protected. Remove the password from the archive and try again. 1 other transcript in the selection could not be unpacked either.',
+    });
+    const bzip2 = patchCentral(zip, '.claude/projects/p/s1.jsonl', (v, p) => v.setUint16(p + 10, 12, true));
+    const onlyBzip2 = fileOf('bz.zip', patchCentral(zipSync({ 'p/s1.jsonl': strToU8(S1) }), 'p/s1.jsonl', (v, p) => v.setUint16(p + 10, 12, true)));
+    expect(await caught(parse(claudeCodeParser, [onlyBzip2], { now: LATER }))).toMatchObject({ code: 'zip_unsupported_compression' });
+
+    // With one transcript readable, that one is counted, and the other is reported as locked, not as damaged.
+    const half = await parse(claudeCodeParser, [fileOf('claude.zip', bzip2)], { now: LATER });
+    expect(half.parsed.stats).toMatchObject({ filesRead: 2, filesUnreadable: 1, usageRows: 2 });
+    expect(half.parsed.warnings.map((w) => w.code)).toContain('locked_files');
+    expect(half.parsed.warnings.map((w) => w.code)).not.toContain('unreadable_files');
+    expect(half.parsed.warnings.find((w) => w.code === 'locked_files')).toMatchObject({
+      count: 1,
+      message:
+        '1 transcript in the ZIP archive has a password or was packed with a compression method this app cannot unpack, and was skipped. ' +
+        'Make the archive again without a password and with ordinary compression, or choose the folder itself, to read them.',
+    });
+  });
+
   it('does not tell you to import the same archive again to count a response that was still being written', async () => {
     const running = jsonl([
       user('please do the thing', { ts: at('09:00:00'), session: 's7' }),

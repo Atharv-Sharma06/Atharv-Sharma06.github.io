@@ -115,6 +115,9 @@ function deferralWarnings(deferredResponses: number, deferredPrompts: number, fr
   return warnings;
 }
 
+/** The sample of an unreadable file, as extract.ts writes it. */
+const brokenSample = (f: { name: string; error?: string } | undefined) => (f === undefined ? undefined : `${f.name}: ${f.error ?? ''}`);
+
 export const claudeCodeParser: ImportParser = {
   async parse(files: ImportFile[], sink: ImportSink, ctx: ParseContext): Promise<ParsedImport> {
     if (files.length === 0) throw new ImportError('No file was selected.', 'no_files');
@@ -138,6 +141,19 @@ export const claudeCodeParser: ImportParser = {
         `${files.length} file(s) given, none of them a .jsonl transcript`,
       );
     }
+    // Files in a ZIP archive that have a password or a compression method this app cannot unpack. Their
+    // contents were never seen, so when nothing else had usage, that is what to say rather than that there is none.
+    const locked = extraction.files.filter((f) => f.status === 'unreadable' && (f.errorCode === 'zip_encrypted' || f.errorCode === 'zip_unsupported_compression'));
+    if (c.usageRows === 0 && c.filesSkippedUnchanged === 0 && locked.length > 0) {
+      const first = locked[0];
+      const others = locked.length - 1;
+      throw new ImportError(
+        (first.error ?? `"${first.name}" could not be unpacked.`) +
+          (others > 0 ? ` ${plural(others, 'other transcript', 'other transcripts')} in the selection could not be unpacked either.` : ''),
+        first.errorCode ?? 'zip_encrypted',
+      );
+    }
+
     // Files that are skipped as unchanged had usage when they were imported, so an
     // incremental sync that finds nothing new is not an error.
     if (c.usageRows === 0 && c.filesSkippedUnchanged === 0) {
@@ -172,14 +188,26 @@ export const claudeCodeParser: ImportParser = {
     }
     // A transcript in a ZIP archive does not change: what is missing from it now does not follow later.
     const fromArchive = files.every((f) => f.archive !== undefined);
-    if (c.filesUnreadable > 0) {
+    const broken = c.filesUnreadable - locked.length;
+    if (broken > 0) {
       warnings.push({
         code: 'unreadable_files',
         message: fromArchive
-          ? `${plural(c.filesUnreadable, 'file', 'files')} in the ZIP archive could not be unpacked to the end, because the archive is damaged. What was read is counted; make the archive again to read the rest.`
-          : `${plural(c.filesUnreadable, 'file', 'files')} could not be read to the end (often because Claude Code was writing to it). What was read is counted; the rest follows with the next import.`,
-        count: c.filesUnreadable,
-        sample: extraction.samples.unreadableFile,
+          ? `${plural(broken, 'file', 'files')} in the ZIP archive could not be unpacked to the end, because the archive is damaged. What was read is counted; make the archive again to read the rest.`
+          : `${plural(broken, 'file', 'files')} could not be read to the end (often because Claude Code was writing to it). What was read is counted; the rest follows with the next import.`,
+        count: broken,
+        sample: locked.length === 0 ? extraction.samples.unreadableFile : brokenSample(extraction.files.find((f) => f.status === 'unreadable' && !locked.includes(f))),
+      });
+    }
+    if (locked.length > 0) {
+      warnings.push({
+        code: 'locked_files',
+        message:
+          `${plural(locked.length, 'transcript', 'transcripts')} in the ZIP archive ${locked.length === 1 ? 'has' : 'have'} a password or ` +
+          `${locked.length === 1 ? 'was' : 'were'} packed with a compression method this app cannot unpack, and ${locked.length === 1 ? 'was' : 'were'} skipped. ` +
+          'Make the archive again without a password and with ordinary compression, or choose the folder itself, to read them.',
+        count: locked.length,
+        sample: locked[0].error,
       });
     }
     if (c.usageRowsWithoutCounts > 0) {

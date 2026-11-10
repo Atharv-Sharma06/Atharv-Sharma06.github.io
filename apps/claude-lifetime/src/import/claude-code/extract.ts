@@ -160,6 +160,8 @@ export interface ExtractedFile {
   status: 'read' | 'unchanged' | 'unreadable';
   /** Why reading stopped, for an unreadable file. */
   error?: string;
+  /** The code of the error that stopped the reading, when it has one (an ImportError's, for a file in a ZIP archive). */
+  errorCode?: string;
   subagent: boolean;
 }
 
@@ -619,6 +621,8 @@ class TranscriptReader {
         } catch (err) {
           report.status = 'unreadable';
           report.error = err instanceof Error ? err.message : String(err);
+          const code = (err as { code?: unknown } | null)?.code;
+          if (typeof code === 'string') report.errorCode = code;
           this.counters.filesUnreadable++;
           this.samples.unreadableFile ??= `${info.base}: ${report.error}`;
           lines = null;
