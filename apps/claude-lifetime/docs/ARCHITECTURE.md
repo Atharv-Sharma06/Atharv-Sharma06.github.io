@@ -146,7 +146,7 @@ Deduplication, by kind of record:
 |---|---|
 | Conversation | source-aware key, e.g. `claude_ai:<uuid>` |
 | Message | id within its conversation |
-| Claude Code response | 64-bit hash of message id and request id, stored on the batch that counted it |
+| Claude Code response | 64-bit hash of its message id (or, for an id that Anthropic did not issue, of the uuid of the response's first row), stored on the batch that counted it |
 | API report row | period and dimensions. A newer report replaces the same source's rows in its range where it states them differently or no longer lists them; rows it repeats exactly are left alone. A report that starts or ends inside a stored total (an hourly report cutting into a daily row) is refused |
 | CSV/JSON row | its `id`, or a hash of its fields, within the source it is imported under |
 | Whole file | SHA-256, reported in the preview ("this exact file was imported before"), with a warning when that was under another source |

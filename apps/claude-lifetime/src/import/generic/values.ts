@@ -4,6 +4,8 @@
  * things is rejected and shown to the user rather than guessed.
  */
 
+import { US_INFERENCE_SUFFIX } from '@/core/catalog';
+
 export type Json = Record<string, unknown>;
 export const isObject = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -158,8 +160,13 @@ export const INT32_MAX = 2_147_483_647;
 
 // ── Price tiers ───────────────────────────────────────────────────────────────
 
-/** Tiers the app knows how to name. Only some have published prices (see core/catalog.ts). */
-export const KNOWN_PRICE_TIERS = new Set(['standard', 'batch', 'fast', 'long_context', 'priority', 'flex']);
+const NAMED_TIERS = ['standard', 'batch', 'fast', 'long_context', 'priority', 'flex'];
+
+/**
+ * Tiers the app knows how to name, each also with the `_us` suffix of US-only inference.
+ * Only some have published prices (see core/catalog.ts).
+ */
+export const KNOWN_PRICE_TIERS = new Set([...NAMED_TIERS, ...NAMED_TIERS.map((tier) => `${tier}${US_INFERENCE_SUFFIX}`)]);
 
 /** Tier of rows that only carry a token total: nothing is priced under it, by design. */
 export const UNCATEGORISED_TIER = 'uncategorised';

@@ -250,6 +250,36 @@ describe('Claude Code import into the database', () => {
     expect(transcripts.preview).toMatchObject({ requests: { new: 0, duplicate: 6 }, prompts: { new: 0, duplicate: 2 }, nothingNew: true });
   });
 
+  it('saves a selection in which two files have the same path, and remembers neither of them', async () => {
+    // Files that are picked one by one have no folder: the same session file from two project folders
+    // (a session that moved) and the ledgers of two computers arrive under one name each.
+    const name = `${SESSION_B}.jsonl`;
+    const first = assistant({ id: 'msg_SAME1', req: 'req_SAME1', ts: at('09:00:00'), session: SESSION_B, usage: usage(1, 10) });
+    const second = assistant({ id: 'msg_SAME2', req: 'req_SAME2', ts: at('09:01:00'), session: SESSION_B, usage: usage(2, 20) });
+    const alone = file('other.jsonl', jsonl([assistant({ id: 'msg_SAME3', req: 'req_SAME3', ts: at('09:02:00'), usage: usage(4, 40) })]), MODIFIED);
+    const { parsed, result } = await runImport([file(name, jsonl([first]), MODIFIED), file(name, jsonl([first, second]), MODIFIED + 1000), alone]);
+    expect(parsed.syncedFiles?.map((f) => f.path)).toEqual(['other.jsonl']);
+    expect(result.inserted.usageRows).toBeGreaterThan(0);
+    expect((await sums())['claude-sonnet-4-5']).toMatchObject({ input: 7, output: 70, requests: 3 });
+    expect([...(await knownFilesFromDb()).keys()]).toEqual(['other.jsonl']);
+
+    // two ledgers, both called claude-code-ledger.json by the collector
+    await t.reset();
+    const ledgerOf = async (rows: unknown[], machine: string) => {
+      const ledger = emptyLedger();
+      mergeIntoLedger(ledger, await extractTranscripts([file(name, jsonl(rows))]));
+      return [...serialiseLedger(ledger, { generatedAt: new Date(LATER).toISOString(), machine, collector: 'test' })].join('');
+    };
+    const ledgers = [
+      file('claude-code-ledger.json', await ledgerOf([first], 'laptop'), MODIFIED),
+      file('claude-code-ledger.json', await ledgerOf([second], 'desktop'), MODIFIED + 1000),
+    ];
+    const fromLedgers = await runImport(ledgers, { parser: claudeCodeLedgerParser });
+    expect(fromLedgers.parsed.syncedFiles).toEqual([]);
+    expect((await sums())['claude-sonnet-4-5']).toMatchObject({ input: 3, output: 30, requests: 2 });
+    expect(await count('synced_files')).toBe(0);
+  });
+
   it('stores model identifiers the catalog does not know and keeps a missing model empty', async () => {
     await runImport([
       file(`projects/p/${SESSION_B}.jsonl`, jsonl([

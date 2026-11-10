@@ -86,6 +86,28 @@ describe('which price applies', () => {
   });
 });
 
+describe('US-only inference', () => {
+  it('is valued at 1.1 times the price of its tier on the models that offer it', async () => {
+    await oneMillionInput('claude-opus-5-5', { priceTier: 'standard' });
+    expect((await getApiValue(t.db, filter())).exactUsd).toBe('4');
+    await oneMillionInput('claude-opus-5-5', { priceTier: 'standard_us', outputTokens: 1_000_000, cacheReadTokens: 1_000_000, cacheWrite5mTokens: 1_000_000, cacheWrite1hTokens: 1_000_000 });
+    // input 4, output 20, cache read 0.2, 5-minute write 5, 1-hour write 8; each times 1.1
+    expect((await getApiValue(t.db, filter())).exactUsd).toBe('40.92');
+    await oneMillionInput('claude-opus-5-5', { priceTier: 'batch_us' });
+    expect((await getApiValue(t.db, filter())).exactUsd).toBe('2.2');
+    await oneMillionInput('claude-haiku-5-5', { priceTier: 'long_context_us' });
+    expect((await getApiValue(t.db, filter())).exactUsd).toBe('0.55');
+  });
+
+  it('is left unpriced, and listed as such, on a model that has no US-only price', async () => {
+    // Claude Sonnet 4.5 came before the models that accept inference_geo
+    await oneMillionInput('claude-sonnet-4-5', { priceTier: 'standard_us' });
+    const value = await getApiValue(t.db, filter());
+    expect(value.exactUsd).toBe('0');
+    expect(value.unpriced).toMatchObject([{ modelKey: 'claude-sonnet-4-5', priceTier: 'standard_us', reason: 'no_price', tokens: 1_000_000 }]);
+  });
+});
+
 describe('usage that names no model stays unknown, whatever model is assumed', () => {
   it('is not listed as usage of the assumed model when that model has no price for it', async () => {
     // an API report grouped by service tier only: no model, on a tier Sonnet 4.5 has no price for

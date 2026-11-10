@@ -1,3 +1,4 @@
+import { tierForGeography } from '@/core/catalog';
 import { resolveModel } from '@/core/models';
 import { hash64, Sha256 } from '@/core/sha256';
 import type { ImportSink, ParseWarning, StagedConversation, StagedModel, StagedUsage } from '@/core/types';
@@ -33,11 +34,19 @@ const BUCKET_MS = BUCKET_SECONDS * 1000;
 const HAIKU_55_LONG_CONTEXT_OVER = 100_000;
 
 /**
- * Price tier of one response. Speed and service tier are stated by the API; the
- * long-context tier is not, so it is derived from the size of the prompt
- * (uncached input + cache reads + cache writes).
+ * Price tier of one response. Speed, service tier and inference geography are stated
+ * by the API; the long-context tier is not, so it is derived from the size of the
+ * prompt (uncached input + cache reads + cache writes). US-only inference is the same
+ * tier with the `_us` suffix, which the catalog prices at the published 1.1 times.
  */
-export function priceTierOf(modelKey: string | null, r: TokenCounts & { flags: number; serviceTier: string | null }): string {
+export function priceTierOf(
+  modelKey: string | null,
+  r: TokenCounts & { flags: number; serviceTier: string | null; geo?: string | null },
+): string {
+  return tierForGeography(baseTierOf(modelKey, r), r.geo);
+}
+
+function baseTierOf(modelKey: string | null, r: TokenCounts & { flags: number; serviceTier: string | null }): string {
   if ((r.flags & ResponseFlag.FAST) !== 0) return 'fast';
   const tier = r.serviceTier?.toLowerCase() ?? '';
   if (tier === 'batch') return 'batch';
@@ -281,7 +290,7 @@ export async function aggregateUsage(
       // advisor iteration is a record of its own (tokens only: it is not another request).
       if (it.type === 'advisor_message' && it.model !== null) {
         const advisorModel = models.keyOf(it.model);
-        const advisorTier = priceTierOf(advisorModel, { ...it, flags: 0, serviceTier: null });
+        const advisorTier = priceTierOf(advisorModel, { ...it, flags: 0, serviceTier: null, geo: r.geo });
         weigh(session, advisorModel, advisorTier, totalTokens(it));
         stats.advisorRecords++;
         if (claim(`${r.key}:advisor:${it.index}`)) {
@@ -475,7 +484,8 @@ export async function aggregateUsage(
       'missing_request_id',
       (n) =>
         `${plural(n, 'response has', 'responses have')} no requestId (usual behind gateways and proxies). ` +
-        'They are recognised by session and message id instead; a copy of such a row in a different session would be counted again.',
+        'They are recognised by their message id. Where the id was not issued by Anthropic, the lines of a response are recognised by ' +
+        'standing together in the file with the same usage.',
     )
   ) {
     missingFields.push('requestId');
@@ -484,8 +494,8 @@ export async function aggregateUsage(
     warn(
       'missing_message_id',
       (n) =>
-        `${plural(n, 'response has', 'responses have')} no message id. Each row is counted on its own, ` +
-        'so a response that was written as several lines may be counted more than once.',
+        `${plural(n, 'response has', 'responses have')} no message id. The lines of each were recognised by standing together ` +
+        'in the file, which is less certain than an id.',
     )
   ) {
     missingFields.push('message.id');
@@ -513,8 +523,8 @@ export async function aggregateUsage(
   warn(
     'message_id_reused',
     (n) =>
-      `${plural(n, 'response shares', 'responses share')} a message id with another request in the same session. ` +
-      'Each request was counted; if these are copies rather than separate requests, they are counted twice.',
+      `${plural(n, 'response was', 'responses were')} written under more than one request id. ` +
+      'A message id names one response, so each is counted once, with its most complete row.',
   );
   warn(
     'unmetered_responses',

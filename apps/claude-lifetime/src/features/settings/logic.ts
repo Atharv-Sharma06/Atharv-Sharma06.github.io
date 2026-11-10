@@ -1,4 +1,5 @@
 import type { PriceRow, UserPriceInput } from '@/analytics/settings';
+import { tierLabel, US_INFERENCE_SUFFIX } from '@/core/catalog';
 import { addDays, formatDay } from '@/lib/format';
 
 /**
@@ -87,20 +88,23 @@ export function isWholeValueInput(inputType: string | undefined): boolean {
 
 // ── Prices ──────────────────────────────────────────────────────────────────────
 
-export const PRICE_TIERS: Array<{ value: string; label: string; hint: string }> = [
-  { value: 'standard', label: 'Standard', hint: 'Regular API requests' },
-  { value: 'batch', label: 'Batch API', hint: 'Asynchronous batches' },
-  { value: 'fast', label: 'Fast mode', hint: 'Faster output at a premium' },
-  { value: 'long_context', label: 'Long context', hint: 'Prompts over the model’s threshold' },
+const BASE_TIERS: Array<{ value: string; hint: string }> = [
+  { value: 'standard', hint: 'Regular API requests' },
+  { value: 'batch', hint: 'Asynchronous batches' },
+  { value: 'fast', hint: 'Faster output at a premium' },
+  { value: 'long_context', hint: 'Prompts over the model’s threshold' },
 ];
 
-/** A readable name for a price tier. Tiers the app has no name for (they come from imported reports) are shown as written. */
-export function tierLabel(tier: string): string {
-  const known = PRICE_TIERS.find((t) => t.value === tier);
-  if (known) return known.label;
-  const words = tier.replace(/[_-]+/g, ' ').trim();
-  return words === '' ? 'Standard' : words.charAt(0).toUpperCase() + words.slice(1);
-}
+/** The tiers a price can be entered for: the four base tiers, then the same four for US-only inference. */
+export const PRICE_TIERS: Array<{ value: string; label: string; hint: string }> = [
+  ...BASE_TIERS.map((t) => ({ value: t.value, label: tierLabel(t.value), hint: t.hint })),
+  ...BASE_TIERS.map((t) => {
+    const value = `${t.value}${US_INFERENCE_SUFFIX}`;
+    return { value, label: tierLabel(value), hint: `${t.hint}, with inference kept in the US` };
+  }),
+];
+
+export { tierLabel };
 
 /**
  * A price per million tokens from its exact decimal string: "$3.00", "$0.25",

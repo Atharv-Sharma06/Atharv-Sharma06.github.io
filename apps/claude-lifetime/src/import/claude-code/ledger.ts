@@ -43,8 +43,8 @@ import {
  *     ]
  *   }
  *
- * Response row: `key` identifies the response (`mr:<message.id>:<requestId>` and the
- * fallbacks of extract.ts); `session` is the `i` of an entry in `sessions`; `model`,
+ * Response row: `key` identifies the response (`m:<message.id>` for an id issued by
+ * Anthropic, and the fallbacks of extract.ts); `session` is the `i` of an entry in `sessions`; `model`,
  * `serviceTier` and `geo` are indexes into the tables above (-1: not stated); `ts` is
  * epoch milliseconds (UTC) of the response's first line; the counters are tokens
  * (`thinking` is a share of `output`); `flags` is a bitmask of ResponseFlag. Raw facts
@@ -374,9 +374,11 @@ export function mergeIntoLedger(
     }
     const ts = Math.min(held.ts, r.ts);
     const sticky = (held.flags | r.flags) & STICKY_FLAGS;
+    // A request id on any copy of the response is enough to know it.
+    const noRequestId = held.flags & r.flags & ResponseFlag.NO_REQUEST_ID;
     const better = outranks(r, held);
     const kept = better ? r : held;
-    const flags = (kept.flags & ~STICKY_FLAGS) | sticky;
+    const flags = (kept.flags & ~(STICKY_FLAGS | ResponseFlag.NO_REQUEST_ID)) | sticky | noRequestId;
     if (better) {
       ledger.responses.set(r.key, { ...r, ts, lastTs: Math.max(held.lastTs, r.lastTs), flags });
       report.responsesImproved++;

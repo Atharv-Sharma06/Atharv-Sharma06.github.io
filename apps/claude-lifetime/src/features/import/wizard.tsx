@@ -32,6 +32,8 @@ type Stage =
 /** What to do about an error, by its code. The message itself already says what went wrong. */
 const NEXT_STEP: Record<string, string> = {
   zip_truncated: 'Request a new export on claude.ai and download it again; the link in the email works only for a short time.',
+  truncated_file: 'Request a new export on claude.ai and download it again; the link in the email works only for a short time.',
+  range_conflict: 'A report that runs from midnight to midnight (UTC), over whole days, can always replace what is stored for those days.',
   no_conversations_file: 'Choose the ZIP exactly as it was downloaded, or the conversations.json inside it.',
   no_usage_found: 'Claude Code keeps transcripts for 30 days unless you raise cleanupPeriodDays in its settings. Usage older than that can only come from the collector ledger.',
   import_in_progress: 'Only one import can be prepared at a time, because all tabs share one database.',

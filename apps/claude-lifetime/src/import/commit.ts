@@ -553,10 +553,12 @@ export async function commitImport(
     const insertedCosts = cost.affectedRows ?? 0;
 
     if (parsed.syncedFiles?.length) {
+      // A path listed twice names two files; neither is remembered (and one statement cannot update a row twice).
       await tx.query(
         `INSERT INTO synced_files (source_id, path, size, last_modified)
-         SELECT $1, p, s, to_timestamp(m / 1000.0)
+         SELECT $1, p, min(s), to_timestamp(min(m) / 1000.0)
            FROM unnest($2::text[], $3::bigint[], $4::double precision[]) AS x(p, s, m)
+          GROUP BY p HAVING count(*) = 1
          ON CONFLICT (source_id, path) DO UPDATE SET size = EXCLUDED.size, last_modified = EXCLUDED.last_modified, synced_at = now()`,
         [sourceId, parsed.syncedFiles.map((f) => f.path), parsed.syncedFiles.map((f) => f.size), parsed.syncedFiles.map((f) => f.lastModified)],
       );

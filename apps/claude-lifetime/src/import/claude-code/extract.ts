@@ -38,9 +38,9 @@ export const ResponseFlag = {
   HAS_SPEED: 16,
   /** Cache-write tokens without a 5-minute / 1-hour breakdown; they are held in the 5-minute column. */
   CACHE_TTL_UNKNOWN: 32,
-  /** The row has no `requestId`; the key is scoped to the session instead. */
+  /** No row of the response carries a `requestId` (usual behind gateways, and for rows Claude Code copied into another transcript). */
   NO_REQUEST_ID: 64,
-  /** The row has no `message.id`; it can only be recognised again by its row uuid. */
+  /** The response has no `message.id`; its lines were recognised by standing together in the file. */
   NO_MESSAGE_ID: 128,
   /** The row had no usable timestamp; the nearest one in the same file was used. */
   TIMESTAMP_INFERRED: 256,
@@ -48,13 +48,13 @@ export const ResponseFlag = {
   UNMETERED: 512,
   /** Claude Code marked the row `isVirtual` (meaning unverified; counted and reported). */
   VIRTUAL: 1024,
-  /** The same message id was seen with another request id on the main thread; both were counted. */
+  /** The same message id was seen with another request id on the main thread; it is one response and counted once. */
   MESSAGE_ID_REUSED: 2048,
 } as const;
 
 /** Flags that describe the whole response rather than the line that was kept. */
 const GROUP_FLAGS =
-  ResponseFlag.TOOL_USE | ResponseFlag.TIMESTAMP_INFERRED | ResponseFlag.UNMETERED | ResponseFlag.VIRTUAL;
+  ResponseFlag.TOOL_USE | ResponseFlag.TIMESTAMP_INFERRED | ResponseFlag.UNMETERED | ResponseFlag.VIRTUAL | ResponseFlag.MESSAGE_ID_REUSED;
 
 export interface TokenCounts {
   input: number;
@@ -79,7 +79,12 @@ export interface IterationRecord extends TokenCounts {
 
 /** One API response, de-duplicated across lines and files. */
 export interface ResponseRecord extends TokenCounts {
-  /** Identity of the response across files and imports, e.g. `mr:<message.id>:<requestId>`. */
+  /**
+   * Identity of the response across files and imports. `m:<message.id>` for an id issued
+   * by Anthropic, which names one response wherever and however often it is written. For
+   * any other id, or none, `u:<uuid of the response's first row>` (see GatewayRun), with
+   * `mst:<session>:<message.id>:<time of the first row>` and `line:<file>:<line>` as fallbacks.
+   */
   key: string;
   /** Session the response is attributed to (the original session for copied rows). */
   sessionId: string;
@@ -153,6 +158,8 @@ export interface ExtractedFile {
   lastModified: number | undefined;
   /** `unchanged`: skipped because of `knownFiles`; `unreadable`: reading stopped with an error. */
   status: 'read' | 'unchanged' | 'unreadable';
+  /** Why reading stopped, for an unreadable file. */
+  error?: string;
   subagent: boolean;
 }
 
@@ -164,7 +171,6 @@ export interface ExtractCounters {
   filesRead: number;
   filesSkippedUnchanged: number;
   /** Unchanged main transcripts read anyway because new subagent rows of their session arrived. */
-  filesRereadForContext: number;
   filesUnreadable: number;
   subagentFiles: number;
   bytesRead: number;
@@ -180,9 +186,9 @@ export interface ExtractCounters {
   rowsWithoutTimestamp: number;
   /** Usage rows that repeated a response already seen (further lines and copies). */
   duplicateLines: number;
-  /** Sidechain copies of a parent message under a new request id (not counted). */
+  /** Responses that a sidechain file repeated under a new request id (counted once). */
   sidechainReplaysDropped: number;
-  /** Message ids seen with more than one request id on the main thread (each counted). */
+  /** Responses written under more than one request id on the main thread (counted once). */
   messageIdsReused: number;
   userRows: number;
   /** `user` rows that are not human prompts, by reason. */
@@ -463,6 +469,8 @@ interface FileState {
   lastRawTime: unknown;
   /** Rows waiting for the first usable timestamp in the file. */
   waiting: Array<(ts: number) => void>;
+  /** The gateway response whose lines are being read, if the last usage row was one. */
+  gatewayRun: GatewayRun | null;
 }
 
 interface SessionState {
@@ -481,13 +489,40 @@ interface SessionState {
 
 interface Group {
   rec: ResponseRecord;
-  messageId: string | null;
   /** Timestamp of the line that was kept; breaks ties between equally complete lines. */
   keptTs: number;
   file: number;
   moreFiles: number[] | null;
-  dropped: boolean;
+  /** The request id the response was first seen with, and the latest other one. Repeats under another id are replays. */
+  requestId: string | null;
+  replayId: string | null;
 }
+
+/**
+ * Lines of one response whose message id was not issued by Anthropic: a gateway's own id,
+ * which it may put on every response, or no id at all. Such an id does not name the
+ * response, so the response is the run of lines that stand together in a file: same session,
+ * same id and the same request id or, where rows carry no request id, the same usage (a
+ * snapshot written while the response streamed may hold less), with no row of the person,
+ * of a tool or of another response in between. The run is known again by the uuid of its
+ * first row, which every kind of copy keeps.
+ */
+interface GatewayRun {
+  session: string;
+  messageId: string | null;
+  requestId: string | null;
+  usage: TokenCounts;
+  partial: boolean;
+  /** Set when the first line has been placed in time. */
+  key: string | null;
+}
+
+const countsOf = (t: TokenCounts): TokenCounts => ({
+  input: t.input, output: t.output, cacheRead: t.cacheRead, cacheWrite5m: t.cacheWrite5m, cacheWrite1h: t.cacheWrite1h,
+});
+const sameCounts = (a: TokenCounts, b: TokenCounts): boolean =>
+  a.input === b.input && a.output === b.output && a.cacheRead === b.cacheRead &&
+  a.cacheWrite5m === b.cacheWrite5m && a.cacheWrite1h === b.cacheWrite1h;
 
 interface PromptState {
   rec: PromptRecord;
@@ -514,7 +549,7 @@ function addFile(holder: { file: number; moreFiles: number[] | null }, index: nu
 class TranscriptReader {
   readonly counters: ExtractCounters = {
     filesGiven: 0, filesIgnored: 0, transcriptFiles: 0, filesRead: 0, filesSkippedUnchanged: 0,
-    filesRereadForContext: 0, filesUnreadable: 0, subagentFiles: 0, bytesRead: 0, lines: 0, malformedLines: 0,
+    filesUnreadable: 0, subagentFiles: 0, bytesRead: 0, lines: 0, malformedLines: 0,
     usageRows: 0, progressRows: 0, syntheticRows: 0, usageRowsWithoutCounts: 0, rowsWithoutTimestamp: 0,
     duplicateLines: 0, sidechainReplaysDropped: 0, messageIdsReused: 0, userRows: 0,
     notPromptSidechain: 0, notPromptMeta: 0, notPromptCompactSummary: 0, notPromptToolResult: 0,
@@ -527,9 +562,6 @@ class TranscriptReader {
   private readonly groups = new Map<string, Group>();
   private readonly prompts = new Map<string, PromptState>();
   private readonly sessions = new Map<string, SessionState>();
-  /** First response seen for a message id, and the ids that turned up under a second key. */
-  private readonly firstByMessage = new Map<string, Group>();
-  private readonly sameMessage = new Map<string, Group[]>();
   /** Main-thread row uuid -> session, to attach `summary` rows (which only name a leaf uuid). */
   private readonly uuidSession = new Map<string, string>();
   private readonly summaries: Array<{ leaf: string; title: string }> = [];
@@ -537,10 +569,6 @@ class TranscriptReader {
   private cancelled = false;
 
   constructor(private readonly options: ExtractOptions) {}
-
-  hasSidechainUsage(sessionId: string | null): boolean {
-    return sessionId !== null && this.sessions.get(sessionId)?.sidechainUsage === true;
-  }
 
   skip(source: TranscriptSource, info: TranscriptPathInfo): void {
     this.files.push({
@@ -562,6 +590,7 @@ class TranscriptReader {
       lastModified: source.lastModified,
       lastRawTime: undefined,
       waiting: [],
+      gatewayRun: null,
     };
     this.files.push(report);
     this.counters.filesRead++;
@@ -581,8 +610,9 @@ class TranscriptReader {
           next = await lines.next();
         } catch (err) {
           report.status = 'unreadable';
+          report.error = err instanceof Error ? err.message : String(err);
           this.counters.filesUnreadable++;
-          this.samples.unreadableFile ??= `${info.base}: ${err instanceof Error ? err.message : String(err)}`;
+          this.samples.unreadableFile ??= `${info.base}: ${report.error}`;
           lines = null;
           break;
         }
@@ -813,54 +843,90 @@ class TranscriptReader {
 
     const messageId = text(message.id);
     const requestId = text(env.requestId);
-    const uuid = text(env.uuid) ?? (outer !== null ? text(outer.uuid) : null);
+    const ownUuid = text(env.uuid);
+    const outerUuid = outer !== null ? text(outer.uuid) : null;
+
+    // Only an id issued by Anthropic names a response; any other is recognised by its lines standing together.
+    const run = messageId !== null && isAnthropicMessageId(messageId) ? null : this.joinRun(f, session.id, messageId, requestId, rec);
+    // A usage row of any other response ends the run that was open.
+    f.gatewayRun = run;
+
     // A wrapped message without its own timestamp was written when its wrapper was.
     const rawTime = outer !== null && Number.isNaN(timeOf(env.timestamp)) ? outer.timestamp : env.timestamp;
     this.withTime(rawTime, f, (ts, inferred) => {
       rec.ts = ts;
       rec.lastTs = ts;
       if (inferred) rec.flags |= ResponseFlag.TIMESTAMP_INFERRED;
-      if (messageId === null) {
-        // Copies keep the row uuid, so it still identifies the row across files; the
-        // position in the file is the last resort and only survives re-reading that file.
-        rec.flags |= ResponseFlag.NO_MESSAGE_ID;
-        rec.key = uuid !== null ? `u:${uuid}` : `line:${f.base}:${lineNo}`;
-      } else if (requestId !== null) {
-        rec.key = `mr:${messageId}:${requestId}`;
+      if (requestId === null) rec.flags |= ResponseFlag.NO_REQUEST_ID;
+      if (messageId === null) rec.flags |= ResponseFlag.NO_MESSAGE_ID;
+      if (run === null) {
+        // In whatever file the response is repeated, and whether or not the row still carries its request
+        // id: rows that Claude Code copies into the transcript of a session that moved to another folder
+        // keep everything but the request id.
+        rec.key = `m:${messageId}`;
       } else {
-        // Without a request id the key is scoped to the session. A placeholder id that
-        // a gateway reuses for every response additionally needs the timestamp.
-        rec.flags |= ResponseFlag.NO_REQUEST_ID;
-        rec.key = isAnthropicMessageId(messageId) ? `ms:${session.id}:${messageId}` : `mst:${session.id}:${messageId}:${ts}`;
+        // Fixed by the first line of the run. A copy keeps the row uuid and the timestamp; the position
+        // in the file is the last resort and only survives reading that same file again.
+        run.key ??=
+          ownUuid !== null ? `u:${ownUuid}`
+          : !inferred ? `mst:${session.id}:${messageId ?? ''}:${ts}`
+          : outerUuid !== null ? `u:${outerUuid}`
+          : `line:${f.base}:${lineNo}`;
+        rec.key = run.key;
       }
-      this.admit(rec, messageId, f.index);
+      this.admit(rec, requestId, f.index);
       if ((rec.flags & ResponseFlag.SIDECHAIN) !== 0) session.sidechainUsage = true;
     });
   }
 
-  private admit(rec: ResponseRecord, messageId: string | null, file: number): void {
+  /** The run of lines this usage row belongs to: the one open in the file, or a new one (see GatewayRun). */
+  private joinRun(f: FileState, session: string, messageId: string | null, requestId: string | null, rec: ResponseRecord): GatewayRun {
+    const partial = (rec.flags & ResponseFlag.PARTIAL) !== 0;
+    const open = f.gatewayRun;
+    if (open !== null && open.session === session && open.messageId === messageId) {
+      const sameResponse =
+        open.requestId !== null && requestId !== null ? open.requestId === requestId : open.partial || partial || sameCounts(open.usage, rec);
+      if (sameResponse) {
+        open.requestId ??= requestId;
+        if (!partial) {
+          open.partial = false;
+          open.usage = countsOf(rec);
+        }
+        return open;
+      }
+    }
+    return { session, messageId, requestId, usage: countsOf(rec), partial, key: null };
+  }
+
+  private admit(rec: ResponseRecord, requestId: string | null, file: number): void {
     const g = this.groups.get(rec.key);
     if (g === undefined) {
-      const created: Group = { rec, messageId, keptTs: rec.ts, file, moreFiles: null, dropped: false };
-      this.groups.set(rec.key, created);
-      if (messageId !== null && isAnthropicMessageId(messageId)) {
-        const first = this.firstByMessage.get(messageId);
-        if (first === undefined) this.firstByMessage.set(messageId, created);
-        else {
-          const list = this.sameMessage.get(messageId);
-          if (list === undefined) this.sameMessage.set(messageId, [first, created]);
-          else list.push(created);
-        }
-      }
+      this.groups.set(rec.key, { rec, keptTs: rec.ts, file, moreFiles: null, requestId, replayId: null });
       return;
     }
     // Another line (or copy) of a response already seen: keep the more complete one, never add.
     this.counters.duplicateLines++;
     addFile(g, file);
     const kept = g.rec;
+    // The same response under a second request id is a replay: a sidechain file repeating a message of its
+    // parent (seen with `/btw` side questions). It was billed once. Reported, and counted once like any copy.
+    if (requestId !== null) {
+      if (g.requestId === null) g.requestId = requestId;
+      else if (requestId !== g.requestId && requestId !== g.replayId) {
+        g.replayId = requestId;
+        if (((kept.flags | rec.flags) & ResponseFlag.SIDECHAIN) !== 0) this.counters.sidechainReplaysDropped++;
+        else {
+          this.counters.messageIdsReused++;
+          kept.flags |= ResponseFlag.MESSAGE_ID_REUSED;
+          rec.flags |= ResponseFlag.MESSAGE_ID_REUSED;
+        }
+      }
+    }
     const ts = Math.min(kept.ts, rec.ts);
     const lastTs = Math.max(kept.lastTs, rec.lastTs);
     const groupFlags = (kept.flags | rec.flags) & GROUP_FLAGS;
+    // A request id on any row of the response is enough to know it.
+    const noRequestId = kept.flags & rec.flags & ResponseFlag.NO_REQUEST_ID;
     // Equally complete lines: the earliest wins, then the first file in sorted order (already held).
     if (outranks(rec, kept) || (!outranks(kept, rec) && rec.ts < g.keptTs)) {
       g.keptTs = rec.ts;
@@ -869,11 +935,13 @@ class TranscriptReader {
     }
     g.rec.ts = ts;
     g.rec.lastTs = lastTs;
-    g.rec.flags = (g.rec.flags & ~GROUP_FLAGS) | groupFlags;
+    g.rec.flags = (g.rec.flags & ~(GROUP_FLAGS | ResponseFlag.NO_REQUEST_ID)) | groupFlags | noRequestId;
   }
 
   private userRow(row: Json, f: FileState): void {
     this.counters.userRows++;
+    // Whatever the person or a tool sent back, the response before it is over.
+    f.gatewayRun = null;
     const verdict = classifyUserRow(row, f.subagent);
     if (verdict.excluded !== undefined) {
       const c = this.counters;
@@ -902,44 +970,6 @@ class TranscriptReader {
     });
   }
 
-  /**
-   * A sidechain file can replay a parent message under a new request id (seen with
-   * `/btw` side questions); the normal key does not catch that. When responses of one
-   * session share a message id and a sidechain copy is among them, the parent's row
-   * is the one that was billed as part of the conversation and the copies are dropped.
-   */
-  private dropSidechainReplays(): void {
-    for (const list of this.sameMessage.values()) {
-      const bySession = new Map<string, Group[]>();
-      for (const g of list) {
-        const same = bySession.get(g.rec.sessionId);
-        if (same === undefined) bySession.set(g.rec.sessionId, [g]);
-        else same.push(g);
-      }
-      for (const same of bySession.values()) {
-        if (same.length < 2) continue;
-        const main = same.filter((g) => (g.rec.flags & ResponseFlag.SIDECHAIN) === 0);
-        const side = same.filter((g) => (g.rec.flags & ResponseFlag.SIDECHAIN) !== 0);
-        if (main.length > 1) {
-          // Not expected from the Anthropic API. Each one is counted; the flag makes it visible.
-          this.counters.messageIdsReused++;
-          for (const g of main) g.rec.flags |= ResponseFlag.MESSAGE_ID_REUSED;
-        }
-        if (side.length === 0) continue;
-        let keep: Group | null = null;
-        if (main.length === 0) {
-          keep = side[0];
-          for (const g of side) if (outranks(g.rec, keep.rec)) keep = g;
-        }
-        for (const g of side) {
-          if (g === keep) continue;
-          g.dropped = true;
-          this.counters.sidechainReplaysDropped++;
-        }
-      }
-    }
-  }
-
   finish(): Extraction {
     // `summary` rows name the last message they summarise, which is often in another
     // file (older versions wrote summaries of earlier sessions at the top of the next
@@ -949,9 +979,7 @@ class TranscriptReader {
       if (owner === undefined) this.counters.summariesUnresolved++;
       else this.session(owner).summaryTitle = title;
     }
-    this.dropSidechainReplays();
-
-    const groups = [...this.groups.values()].filter((g) => !g.dropped);
+    const groups = [...this.groups.values()];
     groups.sort((a, b) => a.rec.ts - b.rec.ts || (a.rec.key < b.rec.key ? -1 : a.rec.key > b.rec.key ? 1 : 0));
     const prompts = [...this.prompts.values()];
     prompts.sort((a, b) => a.rec.ts - b.rec.ts || (a.rec.key < b.rec.key ? -1 : a.rec.key > b.rec.key ? 1 : 0));
@@ -1032,18 +1060,12 @@ export async function extractTranscripts(files: readonly TranscriptSource[], opt
   reader.totalBytes = toRead.reduce((sum, e) => sum + e.source.size, 0);
   for (const e of toRead) await reader.read(e.source, e.info);
 
-  // The sidechain-replay rule needs the parent's rows next to the sidechain rows. When
-  // only the subagent file of a session changed, its unchanged main transcript is read
-  // again; its rows are already counted, so this costs time but never adds usage.
+  // An unchanged file never needs reading again, not even for context: a response keeps one key in
+  // whatever file it is repeated, so a copy in a file read now is recognised against what earlier
+  // imports counted.
   for (const e of skipped) {
-    if (!e.info.isSubagent && reader.hasSidechainUsage(e.info.sessionId)) {
-      reader.totalBytes += e.source.size;
-      reader.counters.filesRereadForContext++;
-      await reader.read(e.source, e.info);
-    } else {
-      reader.counters.filesSkippedUnchanged++;
-      reader.skip(e.source, e.info);
-    }
+    reader.counters.filesSkippedUnchanged++;
+    reader.skip(e.source, e.info);
   }
   reader.report();
   return reader.finish();

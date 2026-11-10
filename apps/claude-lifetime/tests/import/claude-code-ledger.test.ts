@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -22,9 +22,11 @@ import {
   collect,
   CollectError,
   COLLECTOR_VERSION,
+  EXIT_INCOMPLETE,
   findProjectsDirs,
   formatSummary,
   parseArgs,
+  readFilesPath,
   runCli,
   USAGE,
 } from '@/import/claude-code/collector';
@@ -150,9 +152,10 @@ function writeConfig(root: string): string {
 const EXPECTED_BY_MODEL = {
   'claude-sonnet-4-5 standard': { input: 6, output: 320, cacheRead: 32150, cacheWrite5m: 90, cacheWrite1h: 2000, requests: 2, userMessages: 1, assistantMessages: 1 },
   'claude-haiku-4-5 standard': { input: 10, output: 300, cacheRead: 0, cacheWrite5m: 5000, cacheWrite1h: 0, requests: 1, userMessages: 0, assistantMessages: 0 },
-  'claude-sonnet-5-5 fast': { input: 5, output: 500, cacheRead: 1000, cacheWrite5m: 0, cacheWrite1h: 100, requests: 1, userMessages: 1, assistantMessages: 1 },
-  // the advisor iteration of msg_B1
-  'claude-opus-5-5 standard': { input: 100, output: 50, cacheRead: 1000, cacheWrite5m: 40, cacheWrite1h: 0, requests: 0, userMessages: 0, assistantMessages: 0 },
+  // fast mode with US-only inference
+  'claude-sonnet-5-5 fast_us': { input: 5, output: 500, cacheRead: 1000, cacheWrite5m: 0, cacheWrite1h: 100, requests: 1, userMessages: 1, assistantMessages: 1 },
+  // the advisor iteration of msg_B1, part of the same request
+  'claude-opus-5-5 standard_us': { input: 100, output: 50, cacheRead: 1000, cacheWrite5m: 40, cacheWrite1h: 0, requests: 0, userMessages: 0, assistantMessages: 0 },
 };
 const byModelAndTier = (sink: MemorySink) => totalsBy(sink.usages, (u) => `${u.modelKey} ${u.priceTier}`);
 
@@ -167,7 +170,10 @@ describe('collector', () => {
       roots: [join(config, 'projects')],
       // the two sessions and the subagent; tool-results/ and everything outside projects/ is not read
       transcriptFiles: 3,
-      filesUnreadable: 0,
+      filesRead: 3,
+      filesUnchanged: 0,
+      foldersUnreadable: [],
+      filesUnreadable: [],
       malformedLines: 0,
       responsesFound: 4,
       promptsFound: 2,
@@ -208,11 +214,11 @@ describe('collector', () => {
     });
     const F = ResponseFlag;
     expect(doc.responses).toEqual([
-      ['mr:msg_A1:req_A1', 0, 0, Date.parse(at('09:00:02')), 4, 120, 15000, 0, 2000, 0, 0, F.TOOL_USE | F.HAS_SPEED, 0, 0],
-      ['mr:msg_A3:req_A3', 0, 1, Date.parse(at('09:00:04.500')), 10, 300, 0, 5000, 0, 0, 0, F.SIDECHAIN | F.HAS_SPEED, 0, 0],
-      ['mr:msg_A2:req_A2', 0, 0, Date.parse(at('09:00:08')), 2, 200, 17150, 90, 0, 0, 0, F.HAS_SPEED, 0, 0],
+      ['m:msg_A1', 0, 0, Date.parse(at('09:00:02')), 4, 120, 15000, 0, 2000, 0, 0, F.TOOL_USE | F.HAS_SPEED, 0, 0],
+      ['m:msg_A3', 0, 1, Date.parse(at('09:00:04.500')), 10, 300, 0, 5000, 0, 0, 0, F.SIDECHAIN | F.HAS_SPEED, 0, 0],
+      ['m:msg_A2', 0, 0, Date.parse(at('09:00:08')), 2, 200, 17150, 90, 0, 0, 0, F.HAS_SPEED, 0, 0],
       [
-        'mr:msg_B1:req_B1', 1, 2, Date.parse(at('10:00:05', '2026-01-16')), 5, 500, 1000, 0, 100, 77, 2, F.FAST | F.HAS_SPEED, 0, 1,
+        'm:msg_B1', 1, 2, Date.parse(at('10:00:05', '2026-01-16')), 5, 500, 1000, 0, 100, 77, 2, F.FAST | F.HAS_SPEED, 0, 1,
         // iterations other than the returned message: kept, whether or not they are counted today
         [[1, 'advisor_message', 3, 100, 50, 1000, 40, 0, 0], [2, 'compaction', -1, 9, 9, 0, 0, 0, 0]],
       ],
@@ -222,7 +228,7 @@ describe('collector', () => {
       ['p:prompt-two', 1, Date.parse(at('10:00:00', '2026-01-16')), 0],
     ]);
     // one row per line, so the file can be inspected and diffed
-    expect(text.split('\n').filter((line) => line.startsWith('["mr:'))).toHaveLength(4);
+    expect(text.split('\n').filter((line) => line.startsWith('["m:'))).toHaveLength(4);
     if (process.platform !== 'win32') expect(statSync(ledgerPath).mode & 0o777).toBe(0o600);
   });
 
@@ -280,23 +286,246 @@ describe('collector', () => {
 
     const first = await collect({ dirs: [config], ledgerPath, now: NOW, machine: 'm' });
     expect(first).toMatchObject({ responsesFound: 1, deferredInProgress: 1, responsesAdded: 1, responses: 1 });
-    expect(readLedger(ledgerPath).responses.map((r) => r[0])).toEqual(['mr:msg_S0:req_S0']);
+    expect(readLedger(ledgerPath).responses.map((r) => r[0])).toEqual(['m:msg_S0']);
 
     // 20 minutes later the snapshot is all there is: it is recorded, flagged as partial
     const second = await collect({ dirs: [config], ledgerPath, now: NOW + 20 * 60_000, machine: 'm' });
     expect(second).toMatchObject({ deferredInProgress: 0, responsesAdded: 1, partialAdded: 1, responses: 2 });
-    const partialRow = readLedger(ledgerPath).responses.find((r) => r[0] === 'mr:msg_S1:req_S1')!;
+    const partialRow = readLedger(ledgerPath).responses.find((r) => r[0] === 'm:msg_S1')!;
     expect([partialRow[5], (partialRow[11] as number) & ResponseFlag.PARTIAL]).toEqual([8, ResponseFlag.PARTIAL]);
 
     // the final line arrives after all: the ledger takes the complete record
     appendFileSync(path, jsonl([assistant({ id: 'msg_S1', req: 'req_S1', ts: minutesAgo(1), usage: usage(4, 310, 1000) })]));
     const third = await collect({ dirs: [config], ledgerPath, now: NOW + 30 * 60_000, machine: 'm' });
     expect(third).toMatchObject({ responsesAdded: 0, responsesImproved: 1, responses: 2, written: true });
-    const finalRow = readLedger(ledgerPath).responses.find((r) => r[0] === 'mr:msg_S1:req_S1')!;
+    const finalRow = readLedger(ledgerPath).responses.find((r) => r[0] === 'm:msg_S1')!;
     expect([finalRow[5], (finalRow[11] as number) & ResponseFlag.PARTIAL]).toEqual([310, 0]);
     // still placed at the first line of the response
     expect(finalRow[3]).toBe(NOW - 2 * 60_000);
     expect(formatSummary(third)).toMatch(/New {8}0 responses and 0 prompts since the last run \(1 earlier record completed\)/);
+  });
+
+  describe('later runs', () => {
+    /** Sets the modification time, which a freshly written test file has "now", long after the fixtures' clock. */
+    const settle = (path: string, when = LATER - 3_600_000) => utimesSync(path, new Date(when), new Date(when));
+    const settleAll = (config: string) => {
+      for (const path of [MAIN_A, SUB_A, MAIN_B]) settle(join(config, path));
+    };
+    const listOf = (ledgerPath: string) => JSON.parse(readFileSync(readFilesPath(ledgerPath), 'utf8')) as { ledgerGeneratedAt: string; files: Record<string, [number, number]> };
+
+    it('read only the transcripts that are new or have changed', async () => {
+      const dir = scratch('incremental');
+      const config = writeConfig(join(dir, 'config'));
+      const ledgerPath = join(dir, 'claude-code-ledger.json');
+      settleAll(config);
+
+      const first = await collect({ dirs: [config], ledgerPath, now: LATER, machine: 'm' });
+      expect(first).toMatchObject({ transcriptFiles: 3, filesRead: 3, filesUnchanged: 0, responsesAdded: 4, written: true });
+      expect(readFilesPath(ledgerPath)).toBe(join(dir, 'claude-code-ledger.files.json'));
+      const list = listOf(ledgerPath);
+      expect(list.ledgerGeneratedAt).toBe(readLedger(ledgerPath).generatedAt);
+      expect(Object.keys(list.files).sort()).toEqual([MAIN_A, SUB_A, MAIN_B].map((path) => join(config, path)).sort());
+      if (process.platform !== 'win32') expect(statSync(readFilesPath(ledgerPath)).mode & 0o777).toBe(0o600);
+      const ledgerText = readFileSync(ledgerPath, 'utf8');
+      const listText = readFileSync(readFilesPath(ledgerPath), 'utf8');
+
+      // nothing changed: nothing is read and neither file is written again
+      const second = await collect({ dirs: [config], ledgerPath, now: LATER + 1000, machine: 'm' });
+      expect(second).toMatchObject({ transcriptFiles: 3, filesRead: 0, filesUnchanged: 3, bytesRead: 0, responsesFound: 0, responsesAdded: 0, responses: 4, prompts: 2, written: false });
+      expect(readFileSync(ledgerPath, 'utf8')).toBe(ledgerText);
+      expect(readFileSync(readFilesPath(ledgerPath), 'utf8')).toBe(listText);
+      expect(formatSummary(second)).toMatch(/^Read {7}0 transcript files \(1 KB\) under .*; 3 unchanged since an earlier run\n/);
+
+      // one session goes on, one is new, one was cleaned up by Claude Code
+      appendFileSync(join(config, MAIN_A), jsonl([assistant({ id: 'msg_A9', req: 'req_A9', ts: at('09:30:00'), usage: usage(3, 30) })]));
+      settle(join(config, MAIN_A), LATER - 1_800_000);
+      const C = 'cccccccc-0000-4000-8000-00000000000c';
+      settle(write(config, `projects/-home-alex-demo/${C}.jsonl`, jsonl([assistant({ id: 'msg_C1', req: 'req_C1', ts: at('08:00:03', '2026-02-01'), session: C, usage: usage(7, 70) })])));
+      rmSync(join(config, MAIN_B));
+      const third = await collect({ dirs: [config], ledgerPath, now: LATER + 2000, machine: 'm' });
+      expect(third).toMatchObject({ transcriptFiles: 3, filesRead: 2, filesUnchanged: 1, responsesFound: 4, responsesAdded: 2, responses: 6, written: true });
+      expect(Object.keys(listOf(ledgerPath).files).sort()).toEqual(
+        [MAIN_A, SUB_A, `projects/-home-alex-demo/${C}.jsonl`].map((path) => join(config, path)).sort(),
+      );
+      expect(listOf(ledgerPath).ledgerGeneratedAt).toBe(new Date(LATER + 2000).toISOString());
+    });
+
+    it('do not trust the list of read files when it was not written for the ledger that is there', async () => {
+      const dir = scratch('list-mismatch');
+      const config = writeConfig(join(dir, 'config'));
+      const ledgerPath = join(dir, 'ledger.json');
+      settleAll(config);
+      await collect({ dirs: [config], ledgerPath, now: LATER, machine: 'm' });
+      const complete = readLedger(ledgerPath).responses;
+
+      // the ledger is deleted and the list stays behind: everything is read again
+      rmSync(ledgerPath);
+      const afterDelete = await collect({ dirs: [config], ledgerPath, now: LATER + 1000, machine: 'm' });
+      expect(afterDelete).toMatchObject({ filesRead: 3, filesUnchanged: 0, responsesAdded: 4, responses: 4, written: true });
+      expect(readLedger(ledgerPath).responses).toEqual(complete);
+
+      // the ledger is replaced by an older copy that lacks a session
+      const older = join(dir, 'older.json');
+      const partial = join(dir, 'partial-config');
+      cpSync(join(config, MAIN_A), join(partial, MAIN_A));
+      await collect({ dirs: [partial], ledgerPath: older, now: LATER - 86_400_000, machine: 'm' });
+      cpSync(older, ledgerPath);
+      const afterRestore = await collect({ dirs: [config], ledgerPath, now: LATER + 2000, machine: 'm' });
+      expect(afterRestore).toMatchObject({ filesRead: 3, filesUnchanged: 0, responsesAdded: 2, responses: 4, written: true });
+      expect(readLedger(ledgerPath).responses).toEqual(complete);
+
+      // a list that is damaged, or was written by another version of the tool, counts for nothing
+      for (const content of ['{ not json', JSON.stringify({ ...listOf(ledgerPath), collector: '0.0.1' })]) {
+        writeFileSync(readFilesPath(ledgerPath), content);
+        expect(await collect({ dirs: [config], ledgerPath, now: LATER + 3000, machine: 'm' })).toMatchObject({ filesRead: 3, filesUnchanged: 0, responses: 4 });
+        expect(await collect({ dirs: [config], ledgerPath, now: LATER + 4000, machine: 'm' })).toMatchObject({ filesRead: 0, filesUnchanged: 3, responses: 4 });
+      }
+    });
+
+    it('read a transcript again that is still changing or holds a response in progress', async () => {
+      const dir = scratch('hot');
+      const config = join(dir, 'config');
+      const ledgerPath = join(dir, 'ledger.json');
+      const NOW = Date.parse(at('12:00:00'));
+      const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString();
+      // written two minutes ago, with a response that is still streaming
+      const hot = write(config, MAIN_A, jsonl([
+        assistant({ id: 'msg_H0', req: 'req_H0', ts: minutesAgo(30), usage: usage(1, 100) }),
+        assistant({ id: 'msg_H1', req: 'req_H1', ts: minutesAgo(2), stop: null, usage: legacyUsage(4, 8) }),
+      ]));
+      settle(hot, NOW - 2 * 60_000);
+      const quiet = write(config, MAIN_B, jsonl([assistant({ id: 'msg_Q1', req: 'req_Q1', ts: minutesAgo(90), session: SESSION_B, usage: usage(2, 20) })]));
+      settle(quiet, NOW - 90 * 60_000);
+
+      expect(await collect({ dirs: [config], ledgerPath, now: NOW, machine: 'm' })).toMatchObject({ filesRead: 2, deferredInProgress: 1, responses: 2 });
+      expect(Object.keys(listOf(ledgerPath).files)).toEqual([quiet]);
+      // same size, same date, and still read: this is how the response in progress gets counted in the end
+      expect(await collect({ dirs: [config], ledgerPath, now: NOW + 20 * 60_000, machine: 'm' })).toMatchObject({ filesRead: 1, filesUnchanged: 1, responsesAdded: 1, partialAdded: 1, responses: 3 });
+      expect(Object.keys(listOf(ledgerPath).files).sort()).toEqual([hot, quiet].sort());
+    });
+
+    it('a run that is cut short has saved what it read, and the next run continues from there', async () => {
+      const dir = scratch('checkpoint');
+      const config = writeConfig(join(dir, 'config'));
+      const ledgerPath = join(dir, 'ledger.json');
+      settleAll(config);
+
+      // a save after every session; the run is stopped while it reads the second one
+      let reports = 0;
+      const stopped = collect({
+        dirs: [config], ledgerPath, now: LATER, machine: 'm', checkpointBytes: 1,
+        onProgress: () => {
+          if (++reports === 2) throw new Error('stopped by the time limit');
+        },
+      });
+      await expect(stopped).rejects.toThrow('stopped by the time limit');
+      // session A and its subagent are in the ledger and on the list, session B is not
+      expect(readLedger(ledgerPath).responses.map((r) => r[0])).toEqual(['m:msg_A1', 'm:msg_A3', 'm:msg_A2']);
+      expect(Object.keys(listOf(ledgerPath).files).sort()).toEqual([join(config, MAIN_A), join(config, SUB_A)].sort());
+
+      const next = await collect({ dirs: [config], ledgerPath, now: LATER + 60_000, machine: 'm', checkpointBytes: 1 });
+      expect(next).toMatchObject({ filesRead: 1, filesUnchanged: 2, responsesAdded: 1, promptsAdded: 1, responses: 4, prompts: 2, written: true });
+
+      // the same totals as one uninterrupted run
+      const whole = join(dir, 'whole.json');
+      await collect({ dirs: [config], ledgerPath: whole, now: LATER, machine: 'm' });
+      expect(readLedger(ledgerPath).responses).toEqual(readLedger(whole).responses);
+      expect(readLedger(ledgerPath).prompts).toEqual(readLedger(whole).prompts);
+      expect(readLedger(ledgerPath).sessions).toEqual(readLedger(whole).sessions);
+    });
+
+    it('remove the temporary files a stopped run left behind, but not those of a run that is saving now', async () => {
+      const dir = scratch('stale-temp');
+      const config = writeConfig(join(dir, 'config'));
+      const ledgerPath = join(dir, 'ledger.json');
+      const NOW = Date.now();
+      const stale = write(dir, '.ledger.json.4242.abc.tmp', 'half a ledger');
+      settle(stale, NOW - 3_600_000);
+      const staleList = write(dir, '.ledger.files.json.4242.abd.tmp', 'half a list');
+      settle(staleList, NOW - 3_600_000);
+      const fresh = write(dir, '.ledger.json.4243.abe.tmp', 'being written by another run');
+      const unrelated = write(dir, '.ledger.json.notes', 'not ours');
+      settle(unrelated, NOW - 3_600_000);
+      await collect({ dirs: [config], ledgerPath, now: NOW, machine: 'm' });
+      expect([existsSync(stale), existsSync(staleList), existsSync(fresh), existsSync(unrelated)]).toEqual([false, false, true, true]);
+      expect(readdirSync(dir).filter((name) => name.endsWith('.tmp'))).toEqual(['.ledger.json.4243.abe.tmp']);
+    });
+
+    it('keep files with the same relative path under two config directories apart', async () => {
+      const dir = scratch('two-roots');
+      const one = join(dir, 'one');
+      const two = join(dir, 'two');
+      settle(write(one, MAIN_A, jsonl([assistant({ id: 'msg_R1', req: 'req_R1', ts: at('09:00:00'), usage: usage(1, 10) })])));
+      settle(write(two, MAIN_A, jsonl([assistant({ id: 'msg_R2', req: 'req_R2', ts: at('09:00:00'), usage: usage(2, 20) })])));
+      const ledgerPath = join(dir, 'ledger.json');
+      expect(await collect({ dirs: [one, two], ledgerPath, now: LATER, machine: 'm' })).toMatchObject({ filesRead: 2, responses: 2 });
+      expect(await collect({ dirs: [one, two], ledgerPath, now: LATER + 1000, machine: 'm' })).toMatchObject({ filesRead: 0, filesUnchanged: 2, responses: 2 });
+    });
+  });
+
+  // Root ignores file permissions, so these need a second, unprivileged user.
+  const canDropPrivileges = process.platform === 'linux' && process.getuid?.() === 0 && spawnSync('setpriv', ['--version']).status === 0;
+  describe.skipIf(!canDropPrivileges)('what cannot be read', () => {
+    const NOBODY = '65534';
+    const asNobody = (args: string[], home: string) =>
+      spawnSync('setpriv', ['--reuid', NOBODY, '--regid', NOBODY, '--clear-groups', process.execPath, join(home, 'tool.mjs'), ...args], {
+        encoding: 'utf8',
+        // only what the child needs: in particular not this computer's CLAUDE_CONFIG_DIR
+        env: { PATH: process.env.PATH ?? '', HOME: home } as Record<string, string> as NodeJS.ProcessEnv,
+      });
+
+    it('is named, and the run ends with its own exit status, also with --quiet', () => {
+      // under the app folder: the unprivileged user must be able to reach it
+      const home = mkdtempSync(join(APP_ROOT, 'tests', '.tmp-collector-'));
+      try {
+        chmodSync(home, 0o755);
+        const put = (project: string, session: string, n: number, input: number) =>
+          write(home, `.claude/projects/${project}/${session}.jsonl`, jsonl([assistant({ id: `msg_P${n}`, req: `req_P${n}`, session, ts: at('09:00:00'), usage: usage(input, 10) })]));
+        put('-home-alex-app', 's-app', 1, 100);
+        const hidden = put('-home-alex-infra', 's-infra', 2, 5000);
+        put('-home-alex-site', 's-site', 3, 70);
+        const locked = put('-home-alex-site', 's-locked', 4, 900);
+        cpSync(PUBLISHED_TOOL, join(home, 'tool.mjs'));
+        expect(spawnSync('chown', ['-R', NOBODY, home]).status).toBe(0);
+        // as left behind by Claude Code run as another user: the folder cannot be listed, the file cannot be opened
+        chmodSync(dirname(hidden), 0o000);
+        chmodSync(locked, 0o000);
+        try {
+          const run = asNobody([], home);
+          expect(run.status).toBe(EXIT_INCOMPLETE);
+          expect(run.stderr).toBe('');
+          expect(run.stdout).toMatch(/^Read {7}3 transcript files /);
+          expect(run.stdout).toContain(
+            [
+              '',
+              'Incomplete 1 folder could not be opened, so the usage in it was not collected:',
+              `  ${dirname(hidden)}: EACCES: permission denied`,
+              '1 transcript could not be read to the end; what was read is in the ledger, the rest is tried again by the next run:',
+              `  ${locked}: EACCES: permission denied`,
+              '',
+            ].join('\n'),
+          );
+          expect(readLedger(join(home, '.claude-lifetime', 'claude-code-ledger.json')).responses.map((r) => r[0])).toEqual(['m:msg_P1', 'm:msg_P3']);
+
+          const quiet = asNobody(['--quiet'], home);
+          expect(quiet.status).toBe(EXIT_INCOMPLETE);
+          expect(quiet.stdout).toBe('');
+          expect(quiet.stderr).toContain(`  ${dirname(hidden)}: EACCES: permission denied\n`);
+          expect(quiet.stderr).toContain(`  ${locked}: EACCES: permission denied\n`);
+        } finally {
+          chmodSync(dirname(hidden), 0o700);
+          chmodSync(locked, 0o600);
+        }
+
+        // once they can be read, the next run collects them and ends with 0
+        const healed = asNobody([], home);
+        expect(healed.status).toBe(0);
+        expect(healed.stdout).not.toContain('Incomplete');
+        expect(readLedger(join(home, '.claude-lifetime', 'claude-code-ledger.json')).responses).toHaveLength(4);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
   });
 
   it('never overwrites a ledger it cannot read', async () => {
@@ -704,6 +933,10 @@ describe('the bundled command-line tool', () => {
     const imported = [...source.matchAll(/^import\s[^;]*?from\s+"([^"]+)";/gms)].map((m) => m[1]);
     expect(imported.sort()).toEqual(['node:fs', 'node:os', 'node:path']);
     expect(source).not.toMatch(/\brequire\(/);
+    // Node.js before 19.8 has no fs.openAsBlob. Imported by name, the file would not load there at all,
+    // and the tool could not say which version it needs.
+    expect(source).toContain('import * as fs from "node:fs"');
+    expect(source).not.toMatch(/import\s*\{[^}]*\bopenAsBlob\b[^}]*\}\s*from/);
     // the tool is offered for download as it is built here
     expect(readFileSync(PUBLISHED_TOOL, 'utf8'), 'public/tools/claude-lifetime-collect.mjs is out of date: run "node scripts/build-collector.mjs"').toBe(source);
   });

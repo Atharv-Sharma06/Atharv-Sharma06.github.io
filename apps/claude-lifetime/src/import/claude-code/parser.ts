@@ -53,6 +53,18 @@ export function detectClaudeCodeFormat(value: unknown): ClaudeCodeFormat | null 
   return isTranscriptRow(value) ? CLAUDE_CODE_TRANSCRIPT_FORMAT : null;
 }
 
+/**
+ * The files that may be skipped by the next import, without those whose path names more than one file
+ * of the selection. Files picked one by one come without a folder, so two of them can share a name
+ * (the same session file from two project folders, the ledgers of two computers). Such a path identifies
+ * neither file, and remembering it would let one stand in for the other.
+ */
+function withUniquePaths(candidates: SyncedFileInfo[], pathsGiven: readonly string[]): SyncedFileInfo[] {
+  const times = new Map<string, number>();
+  for (const path of pathsGiven) times.set(path, (times.get(path) ?? 0) + 1);
+  return candidates.filter((f) => times.get(f.path) === 1);
+}
+
 const READING = 'Reading transcripts';
 const COUNTING = 'Counting usage';
 
@@ -179,6 +191,7 @@ export const claudeCodeParser: ImportParser = {
       if (options.now - f.lastModified < IN_PROGRESS_WINDOW_MS || deferral.hotFiles.has(i)) return;
       syncedFiles.push({ path: f.path, size: f.size, lastModified: f.lastModified });
     });
+    const remembered = withUniquePaths(syncedFiles, extraction.files.map((f) => f.path));
 
     const read = extraction.files.filter((f) => f.status !== 'unchanged');
     return {
@@ -195,12 +208,11 @@ export const claudeCodeParser: ImportParser = {
       warnings,
       requestKeys: outcome.requestKeys,
       duplicateRequests: outcome.duplicateRequests,
-      syncedFiles,
+      syncedFiles: remembered,
       stats: {
         files: c.transcriptFiles,
         filesRead: c.filesRead,
         filesSkippedUnchanged: c.filesSkippedUnchanged,
-        filesRereadForContext: c.filesRereadForContext,
         filesUnreadable: c.filesUnreadable,
         filesIgnored: c.filesIgnored,
         subagentFiles: c.subagentFiles,
@@ -314,7 +326,7 @@ export const claudeCodeLedgerParser: ImportParser = {
       warnings: [...deferralWarnings(deferral.deferredResponses, deferral.deferredPrompts), ...outcome.warnings],
       requestKeys: outcome.requestKeys,
       duplicateRequests: outcome.duplicateRequests,
-      syncedFiles,
+      syncedFiles: withUniquePaths(syncedFiles, files.map((f) => f.path ?? f.name)),
       stats: {
         files: files.length,
         filesRead: read.length,

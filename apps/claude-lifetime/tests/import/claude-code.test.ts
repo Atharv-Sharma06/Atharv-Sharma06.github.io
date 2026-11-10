@@ -103,8 +103,8 @@ describe('research example (synthetic session of the format description, §10)',
     expect(parsed.fileSize).toBe(readFixtureBytes(S));
     // 4 responses + 1 prompt
     expect(parsed.requestKeys).toHaveLength(5);
-    expect(parsed.requestKeys).toContain(hash64('mr:msg_SYNTHETIC000000000000001:req_SYNTHETIC000000000000001'));
-    expect(parsed.requestKeys).toContain(hash64('mr:msg_SYNTHETIC000000000000004:req_SYNTHETIC000000000000004'));
+    expect(parsed.requestKeys).toContain(hash64('m:msg_SYNTHETIC000000000000001'));
+    expect(parsed.requestKeys).toContain(hash64('m:msg_SYNTHETIC000000000000004'));
     expect(parsed.requestKeys).toContain(hash64('p:aaaaaaaa-0000-4000-8000-000000000001'));
   });
 
@@ -166,7 +166,7 @@ describe('one response written as several lines', () => {
     expect(totals(sink.usages)).toEqual({ input: 4, output: 310, cacheRead: 15000, cacheWrite5m: 2000, cacheWrite1h: 0, requests: 1, userMessages: 0, assistantMessages: 0 });
     expect(sink.usages[0].occurredAt).toBe('2026-02-21T10:00:00.000Z');
     expect(parsed.stats).toMatchObject({ usageRows: 2, duplicateLines: 1, responses: 1, partialResponses: 1, cacheTtlUnknownRequests: 1 });
-    expect(warning(parsed, 'partial_usage')).toMatchObject({ count: 1, sample: 'mr:msg_SYNTHETIC000000000000009:req_SYNTHETIC000000000000009' });
+    expect(warning(parsed, 'partial_usage')).toMatchObject({ count: 1, sample: 'm:msg_SYNTHETIC000000000000009' });
     expect(warning(parsed, 'partial_usage')?.message).toMatch(/output tokens may be undercounted/);
     expect(parsed.missingFields).toEqual(['cache_creation']);
   });
@@ -297,11 +297,12 @@ describe('subagents and sidechain replays', () => {
     const { parsed, sink } = await run([main(SESSION_A, parent()), file(asidePath, jsonl(aside()))]);
     expect(totals(sink.usages)).toEqual({ input: 15, output: 140, cacheRead: 100100, cacheWrite5m: 0, cacheWrite1h: 0, requests: 2, userMessages: 1, assistantMessages: 1 });
     expect(parsed.stats).toMatchObject({ responses: 2, subagentResponses: 1, sidechainReplaysDropped: 1, humanPrompts: 1 });
-    expect(parsed.requestKeys).toContain(hash64('mr:msg_PARENT:req_P1'));
-    expect(parsed.requestKeys).not.toContain(hash64('mr:msg_PARENT:req_REPLAY'));
+    // the replay is the same response: one key, counted once, with the parent's row
+    expect(parsed.requestKeys).toContain(hash64('m:msg_PARENT'));
+    expect(parsed.requestKeys).toHaveLength(3);
   });
 
-  it('still drops the replay when the parent file is unchanged and would be skipped', async () => {
+  it('recognises the replay against an earlier import, without reading the unchanged parent file again', async () => {
     const mainFile = main(SESSION_A, parent(), LATER - 3_600_000);
     const first = await run([mainFile]);
     expect(first.parsed.syncedFiles).toHaveLength(1);
@@ -311,11 +312,10 @@ describe('subagents and sidechain replays', () => {
       knownFiles,
       knownRequestKeys: new Set(first.parsed.requestKeys),
     });
-    expect(second.parsed.stats).toMatchObject({
-      filesRereadForContext: 1, filesSkippedUnchanged: 0, sidechainReplaysDropped: 1, newResponses: 1, duplicateResponses: 1, duplicateHumanPrompts: 1,
-    });
+    // The parent's response has one key wherever it is written, so the copy in the sidechain file is known.
+    expect(second.parsed.stats).toMatchObject({ filesRead: 1, filesSkippedUnchanged: 1, newResponses: 1, duplicateResponses: 1, duplicateHumanPrompts: 0 });
     expect(totals(second.sink.usages)).toMatchObject({ input: 5, output: 40, cacheRead: 50100, requests: 1 });
-    expect(second.parsed.duplicateRequests).toBe(2);
+    expect(second.parsed.duplicateRequests).toBe(1);
   });
 
   it('keeps one row when sidechain files replay a message whose parent row is not available', async () => {
@@ -328,16 +328,54 @@ describe('subagents and sidechain replays', () => {
     expect(totals(sink.usages)).toMatchObject({ input: 15, output: 140, requests: 2, userMessages: 0, assistantMessages: 0 });
   });
 
-  it('counts both when a message id appears under two request ids on the main thread, and reports it', async () => {
+  it('counts a message id once when it appears under two request ids on the main thread, and reports it', async () => {
     const { parsed, sink } = await run([
       main(SESSION_A, [
         assistant({ id: 'msg_TWICE', req: 'req_T1', ts: at('09:00:00'), usage: usage(1, 10) }),
         assistant({ id: 'msg_TWICE', req: 'req_T2', ts: at('09:00:05'), usage: usage(2, 20) }),
       ]),
     ]);
-    expect(totals(sink.usages)).toMatchObject({ input: 3, output: 30, requests: 2 });
+    // an id issued by Anthropic names one response; the more complete row is the record
+    expect(totals(sink.usages)).toMatchObject({ input: 2, output: 20, requests: 1 });
     expect(parsed.stats.messageIdsReused).toBe(1);
-    expect(warning(parsed, 'message_id_reused')).toMatchObject({ count: 2 });
+    expect(warning(parsed, 'message_id_reused')).toMatchObject({ count: 1 });
+    expect(warning(parsed, 'message_id_reused')?.message).toMatch(/counted once/);
+  });
+
+  it('counts a response once when Claude Code repeats it in another transcript without its requestId', async () => {
+    // A session that continued in another working directory: the new project folder gets a transcript that
+    // repeats earlier rows with the same uuid, message id, timestamp and usage, but without requestId.
+    const first = assistant({ id: 'msg_MOVED1', req: 'req_M1', ts: at('09:00:02'), uuid: 'row-moved-1', usage: usage(10, 100, 5000) });
+    const second = assistant({ id: 'msg_MOVED2', req: 'req_M2', ts: at('09:00:09'), uuid: 'row-moved-2', usage: usage(20, 200, 6000) });
+    const copy = (row: Json): Json => {
+      const rest = { ...row };
+      for (const field of ['requestId', 'userType', 'version']) delete rest[field];
+      return rest;
+    };
+    const later = assistant({ id: 'msg_MOVED3', req: 'req_M3', ts: at('09:10:00'), usage: usage(30, 300, 7000) });
+    const oldFolder = file(`projects/-home-alex-old/${SESSION_A}.jsonl`, jsonl([first, second]));
+    const newFolder = file(`projects/-home-alex-new/${SESSION_A}.jsonl`, jsonl([copy(first), copy(second), later]));
+    const truth = { input: 60, output: 600, cacheRead: 18000, requests: 3 };
+
+    // both folders in one import
+    const together = await run([oldFolder, newFolder]);
+    expect(totals(together.sink.usages)).toMatchObject(truth);
+    expect(together.parsed.requestKeys).toHaveLength(3);
+    // a request id on either copy is enough: nothing is reported as missing one
+    expect(warning(together.parsed, 'missing_request_id')).toBeUndefined();
+    expect(warning(together.parsed, 'message_id_reused')).toBeUndefined();
+
+    // the old folder first, the new one in a later import (the usual course with "Read the folder again")
+    const before = await run([oldFolder]);
+    const after = await run([oldFolder, newFolder], { knownRequestKeys: new Set(before.parsed.requestKeys) });
+    expect(totals(before.sink.usages)).toMatchObject({ input: 30, output: 300, requests: 2 });
+    expect(totals(after.sink.usages)).toMatchObject({ input: 30, output: 300, cacheRead: 7000, requests: 1 });
+    // and the other way round: only the copies are known, then the originals turn up
+    const copiesFirst = await run([newFolder]);
+    const originalsLater = await run([oldFolder], { knownRequestKeys: new Set(copiesFirst.parsed.requestKeys) });
+    expect(totals(copiesFirst.sink.usages)).toMatchObject(truth);
+    expect(originalsLater.sink.usages).toHaveLength(0);
+    expect(originalsLater.parsed.stats).toMatchObject({ newResponses: 0, duplicateResponses: 2 });
   });
 
   it('legacy progress wrappers merge with the subagent file and stand in for it when it is gone', async () => {
@@ -502,6 +540,23 @@ describe('price tiers and cache writes', () => {
     expect(t('claude-haiku-5-5', 0, 'standard', 1, 99999, 0, 1)).toBe('long_context');
     expect(t('claude-haiku-5-5', ResponseFlag.FAST, 'standard', 200000)).toBe('fast');
     expect(t('claude-haiku-5-5', 0, 'batch', 200000)).toBe('batch');
+
+    // US-only inference is billed at a premium: the same tier with the _us suffix
+    const geo = (inferenceGeo: string | null, flags = 0, serviceTier: string | null = 'standard', input = 0) =>
+      priceTierOf('claude-haiku-5-5', { flags, serviceTier, geo: inferenceGeo, input, output: 1, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 });
+    expect(geo('us')).toBe('standard_us');
+    expect(geo('US')).toBe('standard_us');
+    expect(geo('us', ResponseFlag.FAST)).toBe('fast_us');
+    expect(geo('us', 0, 'batch')).toBe('batch_us');
+    expect(geo('us', 0, 'standard', 100_001)).toBe('long_context_us');
+    for (const other of ['global', 'not_available', 'eu', '', null]) expect(geo(other)).toBe('standard');
+  });
+
+  it('keeps US-only inference apart from global requests, so that it can be priced at its own rate', async () => {
+    const r = (n: number, inferenceGeo: string) =>
+      assistant({ id: `msg_G${n}`, req: `req_G${n}`, ts: at('09:00:00'), model: 'claude-opus-5-5', usage: usage(1000, 10, 0, 0, 0, { inference_geo: inferenceGeo }) });
+    const { sink } = await run([main(SESSION_A, [r(1, 'global'), r(2, 'us'), r(3, 'us')])]);
+    expect(byTier(sink)).toMatchObject({ standard: { input: 1000, requests: 1 }, standard_us: { input: 2000, requests: 2 } });
   });
 
   it('uses the 5m / 1h split when present and falls back to 5-minute writes when it is not', async () => {
@@ -560,9 +615,9 @@ describe('usage.iterations', () => {
       // tokens only: the advisor ran inside the same API request
       'claude-opus-5-5': { input: 100, output: 50, cacheRead: 1000, cacheWrite5m: 40, cacheWrite1h: 0, requests: 0, userMessages: 0, assistantMessages: 0 },
     });
-    expect(parsed.requestKeys?.slice().sort()).toEqual([hash64('mr:msg_I1:req_I1'), hash64('mr:msg_I1:req_I1:advisor:1')].sort());
+    expect(parsed.requestKeys?.slice().sort()).toEqual([hash64('m:msg_I1'), hash64('m:msg_I1:advisor:1')].sort());
     expect(parsed.stats).toMatchObject({ responses: 1, advisorRecords: 1, newAdvisorRecords: 1, iterationsNotCounted: 3 });
-    expect(warning(parsed, 'iterations_not_counted')).toMatchObject({ count: 3, sample: 'mr:msg_I1:req_I1' });
+    expect(warning(parsed, 'iterations_not_counted')).toMatchObject({ count: 3, sample: 'm:msg_I1' });
     expect(warning(parsed, 'iterations_not_counted')?.message).toMatch(/fallback_message: 1, compaction: 1, advisor_message: 1/);
 
     // importing again adds neither the response nor the advisor record
@@ -760,14 +815,14 @@ describe('transcript paths', () => {
 });
 
 describe('missing identifiers', () => {
-  it('without requestId, real message ids collapse per session and placeholder ids per session and timestamp', async () => {
+  it('without requestId, a real message id is the identity, and a gateway id is told apart by session and usage', async () => {
     const { parsed, sink } = await run([
       main(SESSION_A, [
         // one response, two lines, no requestId, a real Anthropic id
         assistant({ id: 'msg_NR1', req: null, ts: at('09:00:00'), usage: usage(1, 10) }),
         assistant({ id: 'msg_NR1', req: null, ts: at('09:00:01'), usage: usage(1, 10) }),
         // a gateway that puts the same id on every response
-        assistant({ id: 'ocgo', req: null, ts: at('09:01:00'), usage: usage(2, 20) }),
+        assistant({ id: 'ocgo', req: null, ts: at('09:01:00'), usage: usage(2, 20), uuid: 'gw-first-line' }),
         assistant({ id: 'ocgo', req: null, ts: at('09:01:00'), usage: usage(2, 20) }),
         assistant({ id: 'ocgo', req: null, ts: at('09:02:00'), usage: usage(4, 40) }),
       ]),
@@ -775,21 +830,122 @@ describe('missing identifiers', () => {
       main(SESSION_B, [assistant({ id: 'ocgo', req: null, ts: at('09:01:00'), session: SESSION_B, usage: usage(8, 80) })]),
     ]);
     expect(totals(sink.usages)).toMatchObject({ input: 15, output: 150, requests: 4 });
-    expect(parsed.requestKeys).toContain(hash64(`ms:${SESSION_A}:msg_NR1`));
-    expect(parsed.requestKeys).toContain(hash64(`mst:${SESSION_A}:ocgo:${Date.parse(at('09:01:00'))}`));
+    expect(parsed.requestKeys).toContain(hash64('m:msg_NR1'));
+    // a response without an Anthropic id is known by the uuid of its first row
+    expect(parsed.requestKeys).toContain(hash64('u:gw-first-line'));
     expect(warning(parsed, 'missing_request_id')).toMatchObject({ count: 4 });
     expect(parsed.missingFields).toEqual(['requestId']);
   });
 
-  it('without a message id, a row is recognised by its row uuid (so copies still merge) and reported', async () => {
-    const row = assistant({ id: null, req: 'req_X', ts: at('09:00:00'), uuid: 'row-uuid-1', usage: usage(3, 30) });
+  describe('responses whose id was not issued by Anthropic', () => {
+    // Claude Code writes a response as one line per content block: each line has its own uuid and
+    // timestamp and repeats the usage of the whole response.
+    const lines = (id: string | null, req: string | null, startSecond: number, u: Json, extra: Partial<Parameters<typeof assistant>[0]> = {}) =>
+      [0, 1, 2].map((i) =>
+        assistant({ id, req, ts: at(`09:00:${String(startSecond + i).padStart(2, '0')}`), usage: u, stop: 'tool_use', ...extra }),
+      );
+
+    it('counts a response once, not once per line, when a gateway issues its own ids and passes no request id on', async () => {
+      const first = usage(12, 800, 90_000, 1_500);
+      const second = usage(12, 800, 91_500, 0);
+      const { parsed, sink } = await run([
+        main(SESSION_A, [
+          ...lines('chatcmpl-AAA', null, 0, first),
+          toolResult({ ts: at('09:00:05') }),
+          ...lines('chatcmpl-BBB', null, 10, second),
+        ]),
+      ]);
+      expect(totals(sink.usages)).toMatchObject({ input: 24, output: 1600, cacheRead: 181_500, cacheWrite5m: 1_500, requests: 2 });
+      expect(parsed.stats).toMatchObject({ responses: 2, duplicateLines: 4 });
+      expect(warning(parsed, 'missing_request_id')).toMatchObject({ count: 2 });
+    });
+
+    it('keeps two responses apart that carry the same placeholder id and the same usage', async () => {
+      const same = usage(5, 50);
+      const { sink } = await run([
+        main(SESSION_A, [
+          ...lines('ocgo', null, 0, same),
+          // whatever the person or a tool sent back, the response before it is over
+          toolResult({ ts: at('09:00:05') }),
+          ...lines('ocgo', null, 10, same),
+          user('PROMPT-TEXT-MUST-NOT-LEAK', { ts: at('09:00:20') }),
+          ...lines('ocgo', null, 30, same),
+        ]),
+      ]);
+      expect(totals(sink.usages)).toMatchObject({ input: 15, output: 150, requests: 3 });
+    });
+
+    it('goes by the request id where rows have one: lines with different usage are one response, equal usage under two ids is two', async () => {
+      const { sink } = await run([
+        main(SESSION_A, [
+          // a snapshot with a smaller count, then the final line: one request
+          assistant({ id: 'gen-1', req: 'gw-req-1', ts: at('09:00:00'), usage: usage(7, 3) }),
+          assistant({ id: 'gen-1', req: 'gw-req-1', ts: at('09:00:01'), usage: usage(7, 70) }),
+          // the same placeholder id and usage again, but another request
+          assistant({ id: 'gen-1', req: 'gw-req-2', ts: at('09:00:02'), usage: usage(7, 70) }),
+        ]),
+      ]);
+      expect(totals(sink.usages)).toMatchObject({ input: 14, output: 140, requests: 2 });
+    });
+
+    it('recognises a copy in another transcript, with or without its request id and under another session id', async () => {
+      const original = lines('chatcmpl-CCC', 'gw-req-9', 0, usage(3, 30));
+      // a session that moved to another folder: the rows are repeated without their request id
+      const moved = original.map((row) => {
+        const copy = { ...row };
+        delete copy.requestId;
+        return copy;
+      });
+      // old versions replayed the rows of a resumed session under the new session's id
+      const resumed = original.map((row) => ({ ...row, sessionId: SESSION_B }));
+      const { parsed, sink } = await run([
+        main(SESSION_A, original),
+        file(`projects/-home-alex-elsewhere/${SESSION_A}.jsonl`, jsonl(moved)),
+        main(SESSION_B, resumed),
+      ]);
+      expect(totals(sink.usages)).toMatchObject({ input: 3, output: 30, requests: 1 });
+      expect(parsed.requestKeys).toEqual([hash64(`u:${original[0].uuid as string}`)]);
+      // one row of the response has a request id, which is enough
+      expect(warning(parsed, 'missing_request_id')).toBeUndefined();
+
+      // ... also when the copy is read by a later import on its own
+      const later = await run([file(`projects/-home-alex-elsewhere/${SESSION_A}.jsonl`, jsonl(moved))], {
+        knownRequestKeys: new Set(parsed.requestKeys),
+      });
+      expect(later.sink.usages).toEqual([]);
+      expect(later.parsed.stats).toMatchObject({ newResponses: 0, duplicateResponses: 1 });
+    });
+
+    it('a snapshot written while the response streamed belongs to the lines that follow it', async () => {
+      const { sink } = await run([
+        main(SESSION_A, [
+          assistant({ id: 'chatcmpl-DDD', req: null, ts: at('09:00:00'), usage: usage(9, 1), stop: null }),
+          assistant({ id: 'chatcmpl-DDD', req: null, ts: at('09:00:01'), usage: usage(9, 400) }),
+          assistant({ id: 'chatcmpl-DDD', req: null, ts: at('09:00:02'), usage: usage(9, 400) }),
+        ]),
+      ]);
+      expect(totals(sink.usages)).toMatchObject({ input: 9, output: 400, requests: 1 });
+    });
+  });
+
+  it('without a message id, the lines of a response are recognised by their request id or by standing together, and reported', async () => {
+    // three lines of one response: they share the request id
+    const withRequest = [0, 1, 2].map((i) => assistant({ id: null, req: 'req_X', ts: at(`09:00:0${i}`), uuid: `row-uuid-${i + 1}`, usage: usage(3, 30) }));
     const anonymous = assistant({ id: null, req: null, ts: at('09:05:00'), usage: usage(5, 50) });
     delete anonymous.uuid;
-    const { parsed, sink } = await run([main(SESSION_A, [row, anonymous]), file('backup/copy.jsonl', jsonl([row]))]);
-    expect(totals(sink.usages)).toMatchObject({ input: 8, output: 80, requests: 2 });
+    const untimed = assistant({ id: null, req: null, ts: '', usage: usage(7, 70) });
+    delete untimed.uuid;
+    delete untimed.timestamp;
+    const { parsed, sink } = await run([
+      main(SESSION_A, [...withRequest, user('PROMPT-TEXT-MUST-NOT-LEAK', { ts: at('09:04:00') }), anonymous, toolResult({ ts: at('09:05:30') }), untimed]),
+      file('backup/copy.jsonl', jsonl(withRequest)),
+    ]);
+    expect(totals(sink.usages)).toMatchObject({ input: 15, output: 150, requests: 3 });
+    // the uuid of the first row; without one the session and the time; without a time of its own the place in the file
     expect(parsed.requestKeys).toContain(hash64('u:row-uuid-1'));
-    expect(parsed.requestKeys).toContain(hash64(`line:${SESSION_A}.jsonl:2`));
-    expect(warning(parsed, 'missing_message_id')).toMatchObject({ count: 2 });
+    expect(parsed.requestKeys).toContain(hash64(`mst:${SESSION_A}::${Date.parse(at('09:05:00'))}`));
+    expect(parsed.requestKeys).toContain(hash64(`line:${SESSION_A}.jsonl:7`));
+    expect(warning(parsed, 'missing_message_id')).toMatchObject({ count: 3 });
   });
 
   it('a usage row without a timestamp borrows the nearest one in its file', async () => {
@@ -855,10 +1011,10 @@ describe('responses in progress, synced files and unchanged files', () => {
     expect(warning(parsed, 'in_progress_deferred')).toMatchObject({ count: 2 });
     expect(warning(parsed, 'prompts_deferred')).toMatchObject({ count: 2 });
     // the old unfinished response is counted as it is, with a warning
-    expect(warning(parsed, 'partial_usage')).toMatchObject({ count: 1, sample: 'mr:msg_IP2:req_IP2' });
+    expect(warning(parsed, 'partial_usage')).toMatchObject({ count: 1, sample: 'm:msg_IP2' });
     expect(totals(sink.usages)).toMatchObject({ input: 5, output: 177, requests: 2, userMessages: 1 });
     expect(parsed.requestKeys).toHaveLength(3);
-    expect(parsed.requestKeys).not.toContain(hash64('mr:msg_IP1:req_IP1'));
+    expect(parsed.requestKeys).not.toContain(hash64('m:msg_IP1'));
     expect(parsed.requestKeys).not.toContain(hash64('p:p-new'));
     expect(parsed.requestKeys).toContain(hash64('p:p-old'));
     // 2 deferred responses are part of the skipped records
@@ -1077,12 +1233,12 @@ describe('extractTranscripts', () => {
     ]);
     expect(x.responses).toEqual([
       {
-        key: 'mr:msg_X1:req_X1', sessionId: SESSION_A, model: 'claude-sonnet-4-5-20250929', ts: Date.parse(at('09:00:02')), lastTs: Date.parse(at('09:00:02')),
+        key: 'm:msg_X1', sessionId: SESSION_A, model: 'claude-sonnet-4-5-20250929', ts: Date.parse(at('09:00:02')), lastTs: Date.parse(at('09:00:02')),
         input: 9, output: 8, cacheRead: 7, cacheWrite5m: 6, cacheWrite1h: 5, thinking: 0, webSearch: 0,
         flags: ResponseFlag.TOOL_USE | ResponseFlag.HAS_SPEED, serviceTier: 'standard', geo: 'global', extras: null,
       },
       {
-        key: 'mr:msg_X2:req_X2', sessionId: SESSION_A, model: 'claude-sonnet-4-5-20250929', ts: Date.parse(at('09:00:09')), lastTs: Date.parse(at('09:00:09')),
+        key: 'm:msg_X2', sessionId: SESSION_A, model: 'claude-sonnet-4-5-20250929', ts: Date.parse(at('09:00:09')), lastTs: Date.parse(at('09:00:09')),
         input: 1, output: 2, cacheRead: 3, cacheWrite5m: 4, cacheWrite1h: 5, thinking: 1, webSearch: 0,
         flags: ResponseFlag.HAS_SPEED | ResponseFlag.FAST, serviceTier: 'priority', geo: 'us', extras: null,
       },

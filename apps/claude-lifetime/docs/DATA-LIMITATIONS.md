@@ -90,6 +90,9 @@ prices. It is not money you paid.
 - Usage with no recorded model is left unpriced, and the unpriced amount is shown.
 - Some combinations have no published price on file (for example a price tier on a model
   that does not offer it); they are listed as unpriced with the reason.
+- Requests that asked for US-only inference are valued at 1.1 times the price of their
+  tier, the multiplier Anthropic publishes for Claude 4.6 and later models. Claude Code
+  transcripts state this per response.
 - For estimated chat usage the result depends on whether prompt caching is assumed, so
   both scenarios are computed.
 - Prices change. Each price carries its source link and the date it was read, and you

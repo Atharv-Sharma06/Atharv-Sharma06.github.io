@@ -211,7 +211,7 @@ export function MethodologyPage() {
           <Section id="claude-code" title="Claude Code usage">
             <p>
               Claude Code writes one line per piece of a model response into its session transcripts, each carrying the usage the API reported for the
-              whole response. The app counts every response once, identified by its message id and request id, across all files, including resumed
+              whole response. The app counts every response once, identified by its message id, across all files, including resumed, branched and moved
               sessions and subagent files. Usage is stored in 15-minute buckets per session and model; no conversation text is stored.
             </p>
             <p>
@@ -245,7 +245,7 @@ export function MethodologyPage() {
           <Section id="duplicates" title="Counting nothing twice">
             <p>
               Importing the same file again adds nothing. Conversations are recognised by their id, messages by their id within the conversation, Claude
-              Code responses by message and request id, report rows by period and dimensions. A later export of a conversation that has grown adds only
+              Code responses by their message id, report rows by period and dimensions. A later export of a conversation that has grown adds only
               the new messages.
             </p>
             <p>
@@ -267,7 +267,8 @@ export function MethodologyPage() {
               Each record is priced with the price of its model and price tier that was in effect on its day, per million tokens, with separate prices
               for input, output, cache reads and cache writes. Prices come from Anthropic&rsquo;s <Ext href={SOURCES.pricing}>pricing page</Ext>, read
               on {formatDay(RETRIEVED_ON)}; prices of retired models come from their launch announcements. You can add or correct prices in Settings,
-              and yours take precedence. Web searches are priced per search.
+              and yours take precedence. Web searches are priced per search. Requests that asked for US-only inference are priced at 1.1 times the
+              price of their tier, the multiplier Anthropic publishes for Claude 4.6 and later models.
             </p>
             <p>
               For estimated chat usage the price of re-read context depends on whether prompt caching is assumed, so two scenarios are computed: without

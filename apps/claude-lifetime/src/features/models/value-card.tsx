@@ -4,7 +4,7 @@ import type { ApiValue } from '@/analytics/value';
 import { ConfidenceBadge, type ConfidenceLevel } from '@/components/data/confidence';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { Table, TableFrame, Td, Th, THead, Tr } from '@/components/ui/table';
-import { WEB_SEARCH_USD_PER_1000 } from '@/core/catalog';
+import { tierLabel, WEB_SEARCH_USD_PER_1000 } from '@/core/catalog';
 import { formatDay, formatInt, formatShare, formatTokens, formatUsd } from '@/lib/format';
 import type { CostScenario } from './families';
 
@@ -14,15 +14,6 @@ const SCENARIO: Record<CostScenario, { name: string; assumption: string }> = {
     name: '5-minute prompt cache',
     assumption: 'Estimated chat usage is priced as if a 5-minute prompt cache was used: re-read context a cache could have served at the cache-read price, the rest as cache writes.',
   },
-};
-
-const TIER_LABEL: Record<string, string> = {
-  standard: 'Standard',
-  batch: 'Batch',
-  fast: 'Fast mode',
-  long_context: 'Long context',
-  priority: 'Priority',
-  flex: 'Flex',
 };
 
 const REASON_LABEL = { unknown_model: 'The source records no model', no_price: 'No published price on file' } as const;
@@ -202,7 +193,7 @@ export function ValueCard({ value, scenario, rangeLabel, scoped }: { value: ApiV
                         {u.displayName ?? u.modelKey ?? 'Unknown model'}
                         <span className="block text-xs text-ink-3">{REASON_LABEL[u.reason]}</span>
                       </Td>
-                      <Td className="whitespace-nowrap align-top text-ink-2">{TIER_LABEL[u.priceTier] ?? u.priceTier}</Td>
+                      <Td className="whitespace-nowrap align-top text-ink-2">{tierLabel(u.priceTier)}</Td>
                       <Td numeric className="align-top" title={`${formatInt(u.tokens)} processed tokens`}>
                         {formatTokens(u.tokens)}
                       </Td>

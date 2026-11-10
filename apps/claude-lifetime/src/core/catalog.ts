@@ -171,7 +171,47 @@ export const MODELS: CatalogModel[] = [
 // ── Prices ────────────────────────────────────────────────────────────────────
 
 /** standard | batch (Batch API) | fast (fast mode) | long_context (prompt over the model's threshold) */
-export type PriceTier = 'standard' | 'batch' | 'fast' | 'long_context';
+export type BasePriceTier = 'standard' | 'batch' | 'fast' | 'long_context';
+/** A base tier, or the same tier for requests that asked for US-only inference (`standard_us`, `batch_us`, ...). */
+export type PriceTier = BasePriceTier | `${BasePriceTier}_us`;
+
+/** Suffix of the tiers for requests served with `inference_geo: "us"`. */
+export const US_INFERENCE_SUFFIX = '_us';
+/** "specifying US-only inference through the inference_geo parameter incurs a 1.1x multiplier on all token pricing categories" (pricing page). */
+export const US_INFERENCE_MULTIPLIER = '1.1';
+/**
+ * The multiplier is published for "Claude 4.6 and later models"; earlier models do not accept the
+ * parameter. Claude Opus 4.6, released on this day, was the first of them.
+ */
+export const US_INFERENCE_FROM = '2026-02-05';
+
+/** The tier a request is priced under when it asked for US-only inference. Any other geography leaves the tier as it is. */
+export function tierForGeography(tier: string, inferenceGeo: string | null | undefined): string {
+  return typeof inferenceGeo === 'string' && inferenceGeo.trim().toLowerCase() === 'us' ? `${tier}${US_INFERENCE_SUFFIX}` : tier;
+}
+
+const TIER_NAMES: Record<string, string> = {
+  standard: 'Standard',
+  batch: 'Batch API',
+  fast: 'Fast mode',
+  long_context: 'Long context',
+  priority: 'Priority',
+  flex: 'Flex',
+};
+
+/** A readable name for a price tier. Tiers the app has no name for (they come from imported files) are shown as written. */
+export function tierLabel(tier: string): string {
+  const { base, usOnly } = splitTier(tier);
+  const words = base.replace(/[_-]+/g, ' ').trim();
+  const name = TIER_NAMES[base] ?? (words === '' ? 'Standard' : words.charAt(0).toUpperCase() + words.slice(1));
+  return usOnly ? `${name}, US-only inference` : name;
+}
+
+/** Splits a stored tier into its base tier and whether it is the US-only variant. */
+export function splitTier(tier: string): { base: string; usOnly: boolean } {
+  const usOnly = tier.length > US_INFERENCE_SUFFIX.length && tier.endsWith(US_INFERENCE_SUFFIX);
+  return { base: usOnly ? tier.slice(0, -US_INFERENCE_SUFFIX.length) : tier, usOnly };
+}
 
 export interface CatalogPrice {
   model: string;
@@ -258,7 +298,7 @@ const RETIRED: Array<Listed & { sourceUrl: string; note: string; effectiveFrom?:
 
 const CACHE_NOTE = 'Cache prices use the multipliers published on the pricing page (5m write 1.25x, 1h write 2x, read per footnote).';
 
-function expand(list: Listed[], tier: PriceTier, extra: Partial<CatalogPrice> = {}): CatalogPrice[] {
+function expand(list: Listed[], tier: BasePriceTier, extra: Partial<CatalogPrice> = {}): CatalogPrice[] {
   return list.flatMap((row) =>
     row.models.map((model) => ({
       model,
@@ -307,12 +347,36 @@ const standard = [
   ),
 ];
 
-export const PRICES: CatalogPrice[] = [
+const global: CatalogPrice[] = [
   ...standard,
   ...batchOf(standard),
   ...expand(FAST, 'fast', { note: 'Fast mode price. Prompt caching multipliers apply on top of fast mode pricing.' }),
   ...expand(LONG_CONTEXT, 'long_context', { note: 'Applies to requests whose prompt is over 100,000 tokens.' }),
 ];
+
+/**
+ * US-only inference: every price of a model that accepts `inference_geo`, times 1.1. The pricing page
+ * states that the multiplier stacks with the Batch API discount, applies on top of fast mode pricing and,
+ * on Claude Haiku 5.5, to the higher prices for prompts over 100,000 tokens.
+ */
+function usOnlyOf(prices: CatalogPrice[]): CatalogPrice[] {
+  const accepts = new Set(MODELS.filter((m) => m.releasedOn !== undefined && m.releasedOn >= US_INFERENCE_FROM).map((m) => m.key));
+  const more = (v: string) => d(Decimal.from(v).mul(US_INFERENCE_MULTIPLIER));
+  return prices
+    .filter((p) => accepts.has(p.model))
+    .map((p) => ({
+      ...p,
+      tier: `${p.tier}${US_INFERENCE_SUFFIX}` as PriceTier,
+      input: more(p.input),
+      output: more(p.output),
+      cacheRead: more(p.cacheRead),
+      cacheWrite5m: more(p.cacheWrite5m),
+      cacheWrite1h: more(p.cacheWrite1h),
+      note: `US-only inference (inference_geo "us"): ${US_INFERENCE_MULTIPLIER} times the ${p.tier === 'standard' ? 'standard' : p.tier.replace('_', ' ')} price in every token category, as published for Claude 4.6 and later models.`,
+    }));
+}
+
+export const PRICES: CatalogPrice[] = [...global, ...usOnlyOf(global)];
 
 /** Web search is billed per search on top of tokens. */
 export const WEB_SEARCH_USD_PER_1000 = '10';

@@ -37,18 +37,21 @@ the folder on the import page. Individual `.jsonl` files work too. File dialogs 
 dot-folders by default: press Cmd+Shift+. on macOS or Ctrl+H on Linux, or type the path.
 
 **Read from it:** for every model response the input, output, cache-read and cache-write
-tokens (5-minute and 1-hour), the model, the service tier, web searches, the session and
-project, and how many prompts you typed. Each response is counted once, identified by its
-message id and request id, across all files; resumed sessions and subagent files that
-repeat a response do not add to it. No prompt or reply text is stored.
+tokens (5-minute and 1-hour), the model, the service tier, whether inference was kept in
+the US, web searches, the session and project, and how many prompts you typed. Each
+response is counted once, identified by its message id, across all files: resumed, branched
+and moved sessions and subagent files that repeat a response do not add to it. Behind a
+gateway that issues its own message ids, the lines of a response are recognised by standing
+together in the file. No prompt or reply text is stored.
 
 **Stored:** one conversation per session and usage in 15-minute buckets per session and
 model.
 
 **Good to know**
 
-- Responses written in the last ten minutes are treated as still in progress and are left
-  for the next import.
+- A response that Claude Code was still writing less than ten minutes ago, or that was
+  interrupted then, is left out and picked up by the next import. A prompt whose answer is
+  not there yet waits with it. Finished responses are counted at once, however recent.
 - Claude Code deletes transcripts after `cleanupPeriodDays` (default 30). Set it to a
   large value such as 3650 in `~/.claude/settings.json` to keep them.
 - In Chrome and Edge the folder can be remembered. "Read the folder again" then reads
@@ -76,6 +79,13 @@ It only ever grows, so usage stays on record after Claude Code cleans up the tra
 Import the ledger file like any other file; transcripts and ledger can be mixed freely,
 since both identify a response by the same key.
 
+Next to the ledger the collector keeps `claude-code-ledger.files.json`, a list of the
+transcripts it has read (path, size, date). A later run reads only transcripts that are new
+or have changed. The first run reads everything, which can take minutes for gigabytes of
+transcripts; it saves about every half gigabyte, so a run that is stopped early (a hook's
+time limit, for example) has still made progress and the next run continues from there.
+Deleting the list is harmless: the next run reads everything again and adds nothing twice.
+
 | Option | Meaning |
 |---|---|
 | `--dir <folder>` | Claude Code config folder to read (repeatable). Default: `$CLAUDE_CONFIG_DIR`, else `~/.claude`. |
@@ -84,6 +94,11 @@ since both identify a response by the same key.
 | `--quiet` | Print nothing unless something goes wrong. |
 
 A damaged ledger, or one written by a newer collector, is never overwritten.
+
+The exit status is 0 when the ledger is up to date, 1 when nothing was found or on an
+error, and 3 when the ledger was updated but a folder could not be opened or a transcript
+could not be read (for example a project folder created by another user). The folders and
+files are named, also with `--quiet`.
 
 To run it automatically whenever a Claude Code session ends, add a hook to
 `~/.claude/settings.json`:
