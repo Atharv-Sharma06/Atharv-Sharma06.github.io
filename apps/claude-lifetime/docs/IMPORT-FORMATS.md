@@ -200,7 +200,17 @@ timestamp,model,input_tokens,output_tokens,cache_read_tokens,cache_write_5m_toke
 
 Columns can have other names: the import shows a mapping step where you match your
 columns to these fields. You also say whether the counts are exact (metered by the API
-or a tool that reads them from it) or estimates, and can name the source.
+or a tool that reads them from it) or estimates, and can name the source. The name can
+be in any script. Tables with different names are different sources; upper and lower
+case, spacing and punctuation make no difference. A table without a name goes to the
+source "Custom usage data".
+
+A row with more values than the header has columns is skipped and reported in the
+preview. One of its values probably contains the delimiter, for example a number
+written as 1,200,000, and the values after it can no longer be matched to their
+columns. Enclose such values in quotation marks. A delimiter at the end of a row counts
+as one more value. A row with fewer values is read; the values missing at its end count
+as empty.
 
 Rows are recognised as already stored within one source, and only when the same columns
 are read as the same fields. The choices you make for a table (source name, column
@@ -227,7 +237,23 @@ The same records as the CSV, for exports from other systems.
 
 `source` is optional; `ref` keeps files of different origins apart. A bare array of
 records and JSON Lines (one record per line) are accepted as well and are read record by
-record, which suits very large files.
+record, which suits very large files. `version` is 1, and `records` is a list.
+
+**Good to know**
+
+- The format has no field that says whether the counts were metered. Before the file
+  is read, the import asks whether they are exact (metered by the API or a tool that
+  reads them from it) or estimates. The answer applies to every record of the import;
+  "Estimated" is the default.
+- One import is filed under one source. Files that name different sources (another
+  `ref` or another `label`) are refused when they are selected together: import them
+  one at a time, so that each is filed under its own source. Files that name the same
+  source, or none, can be selected together.
+- Write `id` and `conversation_id` as text. A number works as long as JSON holds it
+  exactly, which is up to 9007199254740991. A larger number, or one with a fraction, is
+  not used as an id: the record is still imported and is identified by its content,
+  and it joins no conversation if it was a conversation id. The preview says how many
+  records this concerns.
 
 ## Manual entry
 

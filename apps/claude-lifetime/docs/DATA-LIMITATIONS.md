@@ -83,8 +83,17 @@ replacing import is deleted; the import history notes this on both imports.
 
 ## CSV, JSON and manual entries
 
-These are your own figures. They are stored as estimates unless you declare them exact,
-and rows without a model are counted but not priced.
+These are your own figures. They are stored as estimates unless you declare them exact:
+for a CSV table in the mapping step, for a JSON usage file in the step shown before it
+is read, for a manual entry in its form. A file cannot declare itself exact. Rows
+without a model are counted but not priced.
+
+Nothing in such a file is guessed at, and the preview reports what was left out before
+anything is saved. A CSV row with more values than the header has columns is skipped,
+because a value that contains the delimiter moves every value after it into the wrong
+column. A JSON id written as a number too large to be read exactly is not used; the
+record is kept and identified by its content. JSON files that name different sources
+are not read in one import: each is imported on its own, under its own source.
 
 ## Equivalent API value
 

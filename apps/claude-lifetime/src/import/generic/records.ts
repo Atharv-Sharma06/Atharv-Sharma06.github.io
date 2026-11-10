@@ -6,6 +6,7 @@ import {
   type ImportSink,
   type ParseContext,
   type ParsedImport,
+  type ParseWarning,
   type SourceKind,
   type StagedUsage,
 } from '@/core/types';
@@ -29,6 +30,9 @@ import {
 export const GENERIC_PARSER_VERSION = 'generic-1';
 
 export const DEFAULT_SOURCE_LABEL = 'Custom usage data';
+
+/** The two formats the records come from. */
+export type GenericKind = Extract<SourceKind, 'generic_csv' | 'generic_json'>;
 
 /** One record as it comes out of a file: text from a CSV cell, any JSON value from a JSON record. */
 export type RawRecord = Partial<Record<GenericField, unknown>>;
@@ -97,6 +101,53 @@ const COUNT_FIELDS: Array<[field: GenericField, max: number]> = [
   ['requests', INT32_MAX],
 ];
 
+/**
+ * The warnings that tell the person what to change in their file. What can be
+ * changed differs by format: a table has columns and a column mapping, a JSON file
+ * has fields, and advice about a mapping means nothing to someone who wrote a JSON
+ * file. Everything else a warning says is the same for both.
+ */
+interface Advice {
+  timestampOutOfRange: string;
+  totalMismatch: string;
+  /** What the individual token counts of a record are called in an example. */
+  tokenCounts: string;
+  duplicateIds: string;
+  duplicateRows: string;
+  tooManyModels(example: string): string;
+}
+
+const ADVICE: Record<GenericKind, Advice> = {
+  generic_csv: {
+    timestampOutOfRange:
+      'Rows dated before 2021 or in the future were skipped: no Claude usage can have happened then. If the column holds something other than the time of the usage, choose another column.',
+    totalMismatch:
+      'In some rows total_tokens differs from the sum of the individual token columns. The individual columns were imported; if a kind of token is missing, check the column mapping.',
+    tokenCounts: 'columns',
+    duplicateIds:
+      'Rows whose id already occurred earlier in the import were skipped, so each id is counted once. If the id column does not identify single records, remove it from the column mapping.',
+    duplicateRows:
+      'Rows identical to an earlier row in every field were skipped, so they are counted once. If they are separate records, add a column that identifies each record and map it as "id".',
+    tooManyModels: (example) =>
+      `The model column holds more than ${MAX_UNKNOWN_MODELS} different values that are not known models (for example "${example}"). ` +
+      'It probably is not a column of model names; check the column mapping.',
+  },
+  generic_json: {
+    timestampOutOfRange:
+      'Rows dated before 2021 or in the future were skipped: no Claude usage can have happened then. If "timestamp" holds something other than the time of the usage, correct it in the file.',
+    totalMismatch:
+      'In some rows total_tokens differs from the sum of the individual token counts. The individual counts were imported; if a kind of token is missing, add its field to the records.',
+    tokenCounts: 'the individual counts',
+    duplicateIds:
+      'Rows whose id already occurred earlier in the import were skipped, so each id is counted once. If "id" does not identify single records, leave it out of the records.',
+    duplicateRows:
+      'Rows identical to an earlier row in every field were skipped, so they are counted once. If they are separate records, give each one an "id" of its own.',
+    tooManyModels: (example) =>
+      `The "model" field holds more than ${MAX_UNKNOWN_MODELS} different values that are not known models (for example "${example}"). ` +
+      'It probably does not hold model names; check what the file writes there.',
+  },
+};
+
 interface ConversationSummary {
   title: string | null;
   modelKey: string | null;
@@ -104,7 +155,18 @@ interface ConversationSummary {
   lastMs: number;
 }
 
-const idText = (v: unknown): string => (typeof v === 'string' ? v.trim() : typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
+/**
+ * Reads an id: text as it stands, and a number only when it is a whole number that
+ * JSON holds exactly. JSON.parse keeps 53 bits of a number, so of the 64-bit ids that
+ * some systems write as numbers, neighbours arrive as the same value. Such a number
+ * identifies nothing (`inexact`): used as an id, it would make different records
+ * look like repeats of each other.
+ */
+function readId(value: unknown): { text: string; inexact: boolean } {
+  if (typeof value === 'string') return { text: value.trim(), inexact: false };
+  if (typeof value !== 'number') return { text: '', inexact: false };
+  return Number.isSafeInteger(value) ? { text: String(value), inexact: false } : { text: '', inexact: true };
+}
 
 export class GenericUsageBuilder {
   seen = 0;
@@ -117,24 +179,31 @@ export class GenericUsageBuilder {
   lastMs = -Infinity;
 
   private sourceRef: string;
+  private readonly advice: Advice;
   private readonly conversations = new Map<string, ConversationSummary>();
   private readonly keys = new Set<string | number>();
+  /** How many records each warning kept out, by its code. */
+  private readonly skips = new Map<string, number>();
 
   constructor(
     private readonly sink: ImportSink,
     private readonly options: GenericOptions,
     readonly warnings: WarningList,
     private readonly models: ModelRegistry,
+    readonly kind: GenericKind,
   ) {
     this.sourceRef = options.sourceRef ?? '';
+    this.advice = ADVICE[kind];
   }
 
   /**
-   * The source reference scopes deduplication keys, so it has to be settled before
-   * the first record. Returns false when records were already read.
+   * Files the records under `ref`. The reference scopes every deduplication key, so
+   * it cannot change once a record was read. Returns false when records were already
+   * read under another reference: the caller then has to refuse the input, because
+   * neither reference would be right for all of its records.
    */
   setSourceRef(ref: string): boolean {
-    if (this.seen > 0) return false;
+    if (this.seen > 0) return ref === this.sourceRef;
     this.sourceRef = ref;
     return true;
   }
@@ -143,20 +212,41 @@ export class GenericUsageBuilder {
     return this.conversations.size;
   }
 
+  /** Counts a record as kept out, under the warning that says why. */
+  private keepOut(code: string, message: string, sample?: string): void {
+    this.skipped++;
+    this.skips.set(code, (this.skips.get(code) ?? 0) + 1);
+    this.warnings.add(code, message, sample);
+  }
+
   /** A record that is not usable at all (not an object, say). */
   reject(code: string, message: string, sample?: string): void {
     this.seen++;
-    this.skipped++;
-    this.warnings.add(code, message, sample);
+    this.keepOut(code, message, sample);
+  }
+
+  /**
+   * The warning that kept the most records out, the earliest one among equals. It
+   * explains an import in which no record was usable. A warning about records that
+   * were read is never the answer to that, however early it was raised.
+   */
+  get mainSkipReason(): ParseWarning | undefined {
+    let reason: ParseWarning | undefined;
+    let most = 0;
+    for (const warning of this.warnings.toArray()) {
+      const count = this.skips.get(warning.code) ?? 0;
+      if (count > most) {
+        reason = warning;
+        most = count;
+      }
+    }
+    return reason;
   }
 
   /** `where` locates the record for the user: "line 12", "record 3". */
   async add(raw: RawRecord, where: string): Promise<void> {
     this.seen++;
-    const skip = (code: string, message: string, sample: string): void => {
-      this.skipped++;
-      this.warnings.add(code, message, `${sample} (${where})`);
-    };
+    const skip = (code: string, message: string, sample: string): void => this.keepOut(code, message, `${sample} (${where})`);
 
     // ── when ──
     const time = parseTimestamp(raw.timestamp);
@@ -168,11 +258,7 @@ export class GenericUsageBuilder {
       );
     }
     if (time.ms < MIN_TIME_MS || time.ms > this.options.maxTimeMs) {
-      return skip(
-        'timestamp_out_of_range',
-        'Rows dated before 2021 or in the future were skipped: no Claude usage can have happened then. If the column holds something other than the time of the usage, choose another column.',
-        sampleOf(raw.timestamp),
-      );
+      return skip('timestamp_out_of_range', this.advice.timestampOutOfRange, sampleOf(raw.timestamp));
     }
 
     // ── how much ──
@@ -180,9 +266,20 @@ export class GenericUsageBuilder {
     for (const [field, max] of COUNT_FIELDS) {
       const count = parseCount(raw[field], max);
       if (!count.ok) {
-        return count.reason === 'negative'
-          ? skip('negative_value', 'Rows with a negative token or request count were skipped: a count cannot be below zero.', `${field}: ${sampleOf(raw[field])}`)
-          : skip('invalid_number', 'Rows with a token or request count that is not a whole number were skipped.', `${field}: ${sampleOf(raw[field])}`);
+        const sample = `${field}: ${sampleOf(raw[field])}`;
+        if (count.reason === 'negative') {
+          return skip('negative_value', 'Rows with a negative token or request count were skipped: a count cannot be below zero.', sample);
+        }
+        if (count.reason === 'too_large') {
+          // A whole number, only not one that can be a count: saying "not a whole number" would send the person looking for the wrong thing.
+          return skip(
+            'number_too_large',
+            'Rows with a token or request count that is too large were skipped: a token count above 9,007,199,254,740,991 cannot be read exactly, and a request count can be 2,147,483,647 at most. ' +
+              'A number of that size is usually something else, such as an id or a timestamp.',
+            sample,
+          );
+        }
+        return skip('invalid_number', 'Rows with a token or request count that is not a whole number were skipped.', sample);
       }
       counts[field] = count.value;
     }
@@ -230,11 +327,7 @@ export class GenericUsageBuilder {
         `${total} tokens`,
       ]);
     } else if (total !== null && total !== itemised) {
-      notes.push([
-        'total_mismatch',
-        'In some rows total_tokens differs from the sum of the individual token columns. The individual columns were imported; if a kind of token is missing, check the column mapping.',
-        `total ${total}, columns add up to ${itemised}`,
-      ]);
+      notes.push(['total_mismatch', this.advice.totalMismatch, `total ${total}, ${this.advice.tokenCounts} add up to ${itemised}`]);
     }
 
     // ── bucket ──
@@ -252,25 +345,33 @@ export class GenericUsageBuilder {
     if (typeof model === 'string' && looksLikeModelId(model)) {
       modelKey = await this.models.resolve(model);
       if (this.models.unknownCount > MAX_UNKNOWN_MODELS) {
-        throw new ImportError(
-          `The model column holds more than ${MAX_UNKNOWN_MODELS} different values that are not known models (for example "${this.models.unknownKeys[0]}"). ` +
-            'It probably is not a column of model names; check the column mapping.',
-          'too_many_models',
-        );
+        throw new ImportError(this.advice.tooManyModels(this.models.unknownKeys[0]), 'too_many_models');
       }
     } else if (model !== '' && model !== null && model !== undefined) {
       notes.push(['invalid_model', 'Values that do not look like a model identifier were ignored; those rows are imported without a model.', sampleOf(raw.model)]);
     }
 
     // ── conversation ──
-    let conversationId = idText(raw.conversation_id);
+    const conversation = readId(raw.conversation_id);
+    let conversationId = conversation.text;
     if (conversationId.length > 200) conversationId = `sha256:${sha256Hex(conversationId)}`;
     const conversationKey = conversationId === '' ? null : `generic:${this.sourceRef}:${conversationId}`;
 
     // ── identity ──
     const occurredAt = new Date(time.ms).toISOString();
     const requests = counts.requests ?? 0;
-    const id = idText(raw.id);
+    const own = readId(raw.id);
+    const id = own.text;
+    if (own.inexact || conversation.inexact) {
+      // The row is worth keeping: it is told apart by its content, like a row without an id, and joins no conversation.
+      notes.push([
+        'inexact_numeric_id',
+        'Ids written as numbers above 9,007,199,254,740,991, or as numbers with a fraction, were not used: such a number is not read exactly, so different ids can look the same. ' +
+          'The rows were imported and are identified by their content instead; a conversation id of this kind was left out, so those rows belong to no conversation. ' +
+          'Write ids of this size as text, in quotation marks.',
+        own.inexact ? `id read as ${String(raw.id)}` : `conversation_id read as ${String(raw.conversation_id)}`,
+      ]);
+    }
     let dedupKey: string;
     let remembered: string | number;
     if (id !== '') {
@@ -290,17 +391,7 @@ export class GenericUsageBuilder {
       remembered = parseInt(hash.slice(0, 13), 16);
     }
     if (this.keys.has(remembered)) {
-      return id !== ''
-        ? skip(
-            'duplicate_ids',
-            'Rows whose id already occurred earlier in the import were skipped, so each id is counted once. If the id column does not identify single records, remove it from the column mapping.',
-            sampleOf(id),
-          )
-        : skip(
-            'duplicate_rows',
-            'Rows identical to an earlier row in every field were skipped, so they are counted once. If they are separate records, add a column that identifies each record and map it as "id".',
-            sampleOf(raw.timestamp),
-          );
+      return id !== '' ? skip('duplicate_ids', this.advice.duplicateIds, sampleOf(id)) : skip('duplicate_rows', this.advice.duplicateRows, sampleOf(raw.timestamp));
     }
     if (this.keys.size < MAX_REMEMBERED_KEYS) this.keys.add(remembered);
     for (const [code, message, sample] of notes) this.warnings.add(code, message, `${sample} (${where})`);
@@ -381,7 +472,6 @@ export interface GenericResultParts {
   meter: InputMeter;
   builder: GenericUsageBuilder;
   models: ModelRegistry;
-  kind: Extract<SourceKind, 'generic_csv' | 'generic_json'>;
   format: string;
   formatLabel: string;
   sourceLabel: string;
@@ -400,10 +490,10 @@ export function finishGenericImport(p: GenericResultParts): ParsedImport {
 
   if (builder.seen === 0) throw new ImportError(p.emptyMessage, 'no_rows');
   if (builder.emitted === 0) {
-    const first = builder.warnings.toArray()[0];
+    const reason = builder.mainSkipReason;
     throw new ImportError(
       `None of the ${builder.seen} row${builder.seen === 1 ? '' : 's'} could be imported.` +
-        (first ? ` ${first.message}${first.sample ? ` For example: ${first.sample}.` : ''}` : '') +
+        (reason ? ` ${reason.message}${reason.sample ? ` For example: ${reason.sample}.` : ''}` : '') +
         ` ${p.shapeHint}`,
       'no_valid_rows',
     );
@@ -417,7 +507,7 @@ export function finishGenericImport(p: GenericResultParts): ParsedImport {
     format: p.format,
     formatLabel: p.formatLabel,
     parserVersion: GENERIC_PARSER_VERSION,
-    source: { kind: p.kind, label: p.sourceLabel, externalRef: builder.resolvedSourceRef },
+    source: { kind: builder.kind, label: p.sourceLabel, externalRef: builder.resolvedSourceRef },
     ...describeFiles(p.files),
     contentHash: meter.contentHash(),
     recordsSeen: builder.seen,

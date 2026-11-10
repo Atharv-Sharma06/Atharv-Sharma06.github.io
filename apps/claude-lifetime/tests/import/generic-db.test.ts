@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { ImportParser } from '@/core/types';
 import { commitImport, previewImport } from '@/import/commit';
 import { genericCsvParser, genericJsonParser } from '@/import/generic';
+import { sourceRefFromName } from '@/import/generic/source-ref';
 import { resetStaging, StagingWriter } from '@/import/staging';
 import { createTestDb, type TestDb } from '../helpers/db';
 import { fileOf } from '../helpers/sink';
@@ -129,6 +130,34 @@ describe('generic CSV in the database', () => {
     expect((await importWith(genericCsvParser, 'a.csv', file, { sourceRef: 'laptop', sourceLabel: 'Laptop' })).result.nothingNew).toBe(true);
   });
 
+  it('keeps tables apart whose names are written in another script', async () => {
+    const table = (records: Array<[id: string, input: number]>) =>
+      ['timestamp,model,input_tokens,id', ...records.map(([id, input]) => `2026-03-01T09:15:00Z,claude-sonnet-4-6,${input},${id}`)].join('\n') + '\n';
+    /** What the mapping step passes on for a table the person named. */
+    const named = (name: string) => ({ confidence: 'exact', sourceLabel: name, sourceRef: sourceRefFromName(name) });
+
+    await importWith(genericCsvParser, 'tokyo.csv', table([['1', 1000], ['2', 2000]]), named('プロキシ東京'));
+    const osaka = await importWith(genericCsvParser, 'osaka.csv', table([['1', 300], ['2', 400], ['3', 500]]), named('プロキシ大阪'));
+    // the ids repeat, the tables do not: nothing of the second table is taken for a row of the first
+    expect(osaka.preview.usageRows).toMatchObject({ total: 3, new: 3, duplicate: 0 });
+    // an unnamed table, and one named in Cyrillic, stay apart as well
+    await importWith(genericCsvParser, 'unnamed.csv', table([['1', 50]]));
+    await importWith(genericCsvParser, 'log.csv', table([['1', 7], ['9', 8]]), named('Журнал прокси'));
+
+    const stored = await rows<{ label: string; external_ref: string; rows: number; input: number }>(
+      `SELECT s.label, s.external_ref, count(*)::int AS rows, sum(u.input_tokens)::int AS input FROM usage_records u JOIN data_sources s ON s.id = u.source_id GROUP BY 1, 2`,
+    );
+    expect(stored.sort((a, b) => (a.external_ref < b.external_ref ? -1 : 1))).toEqual([
+      { label: 'Custom usage data', external_ref: '', rows: 1, input: 50 },
+      { label: 'Журнал прокси', external_ref: 'журнал-прокси', rows: 2, input: 15 },
+      { label: 'プロキシ大阪', external_ref: 'プロキシ大阪', rows: 3, input: 1200 },
+      { label: 'プロキシ東京', external_ref: 'プロキシ東京', rows: 2, input: 3000 },
+    ]);
+    // a newer version of a table is still recognised under its name, however the name is typed
+    const again = await importWith(genericCsvParser, 'tokyo.csv', table([['1', 1000], ['2', 2000], ['3', 4000]]), named('  プロキシ東京 '));
+    expect(again.preview.usageRows).toMatchObject({ total: 3, new: 1, duplicate: 2 });
+  });
+
   it('stores total-only rows under a tier that has no price, and unknown models verbatim', async () => {
     const { preview } = await importWith(genericCsvParser, 'totals.csv', 'date,model,tokens\n2026-04-01,claude-opus-4-6,5000\n2026-04-02,some-other-model,700\n2026-04-03,,10\n');
     expect(preview.usageRows).toMatchObject({ total: 3, new: 3, withoutModel: 1 });
@@ -163,5 +192,46 @@ describe('generic JSON in the database', () => {
     expect((await importWith(genericCsvParser, 'usage.csv', fixture('usage.csv'))).result.nothingNew).toBe(true);
     expect(await count('usage_records')).toBe(4);
     expect(await count('conversations')).toBe(2);
+  });
+
+  it('refuses files of different sources in one import, and stores each under its own source when they come one at a time', async () => {
+    const file = (ref: string, label: string, records: unknown[]) => JSON.stringify({ format: 'claude-lifetime/usage', version: 1, source: { label, ref }, records });
+    const request = (id: string, input: number) => ({ timestamp: '2026-03-01T09:15:00Z', model: 'claude-sonnet-4-6', input_tokens: input, output_tokens: 0, id });
+    // Two proxies, each numbering its requests from 1.
+    const eu = file('proxy-eu-1', 'EU proxy', [request('req-0001', 1000), request('req-0002', 2000)]);
+    const us = file('proxy-us-1', 'US proxy', [request('req-0001', 400), request('req-0002', 500), request('req-0003', 600)]);
+
+    await resetStaging(t.db);
+    const together = genericJsonParser.parse([fileOf('eu.json', eu), fileOf('us.json', us)], new StagingWriter(t.db), { options: { now: NOW } });
+    await expect(together).rejects.toMatchObject({ code: 'mixed_sources' });
+    expect(await count('usage_records')).toBe(0);
+    expect(await count('data_sources')).toBe(0);
+
+    expect((await importWith(genericJsonParser, 'eu.json', eu)).result.inserted.usageRows).toBe(2);
+    const second = await importWith(genericJsonParser, 'us.json', us);
+    // the ids of the second proxy are not taken for those of the first
+    expect(second.preview.usageRows).toMatchObject({ total: 3, new: 3, duplicate: 0 });
+    expect(
+      await rows(
+        `SELECT s.external_ref, s.label, count(*)::int AS rows, sum(u.input_tokens)::int AS input FROM usage_records u JOIN data_sources s ON s.id = u.source_id GROUP BY 1, 2 ORDER BY 1`,
+      ),
+    ).toEqual([
+      { external_ref: 'proxy-eu-1', label: 'EU proxy', rows: 2, input: 3000 },
+      { external_ref: 'proxy-us-1', label: 'US proxy', rows: 3, input: 1500 },
+    ]);
+  });
+
+  it('stores every record of a file whose ids are numbers too large to be read exactly, once', async () => {
+    // 64-bit ids written as JSON numbers: all three are read as 1234567890123456800.
+    const text = `[{"timestamp":"2026-03-01T09:15:00Z","input_tokens":100,"id":1234567890123456789},
+      {"timestamp":"2026-03-01T09:15:01Z","input_tokens":200,"id":1234567890123456790},
+      {"timestamp":"2026-03-01T09:15:02Z","input_tokens":300,"id":1234567890123456791}]`;
+    const first = await importWith(genericJsonParser, 'ids.json', text);
+    expect(first.preview.usageRows).toMatchObject({ total: 3, new: 3, duplicate: 0 });
+    expect(first.preview.warnings.map((w) => w.code)).toEqual(['inexact_numeric_id']);
+    expect(await count('usage_records')).toBe(3);
+    expect(await tokens()).toBe(600);
+    expect((await importWith(genericJsonParser, 'ids.json', text)).result).toMatchObject({ nothingNew: true, duplicates: { usageRows: 3 } });
+    expect(await count('usage_records')).toBe(3);
   });
 });

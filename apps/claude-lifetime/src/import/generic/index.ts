@@ -16,4 +16,6 @@ export {
   type MappingResult,
 } from './fields';
 export { detectCsvFormat, detectJsonFormat, isGenericUsageJson, type UsageCsvFormat, type UsageJsonFormat } from './detect';
+export { questionBeforeReading, type QuestionBeforeReading } from './questions';
 export { DEFAULT_SOURCE_LABEL, GENERIC_PARSER_VERSION } from './records';
+export { sourceRefFromName } from './source-ref';

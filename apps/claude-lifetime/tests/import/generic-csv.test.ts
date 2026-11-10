@@ -272,8 +272,24 @@ describe('generic CSV: counts', () => {
     expect(parsed.recordsSeen).toBe(11);
     expect(parsed.recordsSkipped).toBe(8);
     expect(warning(parsed, 'negative_value')).toMatchObject({ count: 3, sample: 'input_tokens: -100 (line 3)' });
-    expect(warning(parsed, 'invalid_number')).toMatchObject({ count: 4, sample: 'input_tokens: abc (line 6)' });
+    expect(warning(parsed, 'invalid_number')).toMatchObject({ count: 3, sample: 'input_tokens: abc (line 6)' });
+    // a request count beyond what the database column holds is a number, only too large a one
+    expect(warning(parsed, 'number_too_large')).toMatchObject({ count: 1, sample: 'requests: 3000000000 (line 9)' });
     expect(warning(parsed, 'no_usage_values')).toMatchObject({ count: 1, sample: '2026-03-10 (line 11)' });
+  });
+
+  it('says that a count is too large instead of calling it not a whole number', async () => {
+    const { parsed, out } = await parse(
+      'timestamp,input_tokens,requests\n2026-03-01T09:15:00Z,9007199254740993,1\n2026-03-01T09:16:00Z,5,3000000000\n2026-03-01T09:17:00Z,5,1\n2026-03-01T09:18:00Z,1.5,1\n',
+    );
+    expect(out.usage.map((u) => [u.inputTokens, u.requestCount])).toEqual([[5, 1]]);
+    expect(parsed.recordsSkipped).toBe(3);
+    const tooLarge = warning(parsed, 'number_too_large');
+    expect(tooLarge).toMatchObject({ count: 2, sample: 'input_tokens: 9007199254740993 (line 2)' });
+    expect(tooLarge?.message).toMatch(/^Rows with a token or request count that is too large were skipped/);
+    expect(tooLarge?.message).not.toMatch(/not a whole number/);
+    // what really is no whole number keeps its own warning
+    expect(warning(parsed, 'invalid_number')).toMatchObject({ count: 1, sample: 'input_tokens: 1.5 (line 5)' });
   });
 
   it('stores a bare total as uncategorised input tokens and warns once', async () => {
@@ -356,6 +372,8 @@ describe('generic CSV: rows, models and conversations', () => {
       [expect.stringMatching(/^generic:[0-9a-f]{4}$/), 5],
     ]);
     expect(warning(withIds.parsed, 'duplicate_ids')).toMatchObject({ count: 1, sample: 'a (line 4)' });
+    // for a table the advice is about its columns
+    expect(warning(withIds.parsed, 'duplicate_ids')?.message).toMatch(/If the id column does not identify single records, remove it from the column mapping\.$/);
     expect(warning(withIds.parsed, 'duplicate_rows')).toMatchObject({ count: 1 });
   });
 
@@ -412,15 +430,51 @@ describe('generic CSV: rows, models and conversations', () => {
       '2026-03-02;claude-opus-4-6;200\r\n' +
       '2026-03-03;claude-opus-4-6;300;30;c1;x;surplus\r\n';
     const { parsed, out } = await parse(text);
-    expect(out.usage.map((u) => [u.inputTokens, u.outputTokens])).toEqual([[100, 10], [200, 0], [300, 30]]);
-    expect(out.conversations[0].title).toBe('x');
+    // the row that lacks values is read, the row with one value too many is not
+    expect(out.usage.map((u) => [u.inputTokens, u.outputTokens])).toEqual([[100, 10], [200, 0]]);
+    expect(out.conversations[0].title).toBe('Title; with "quotes"\r\nand a line break');
     expect(parsed.recordsSeen).toBe(3);
+    expect(parsed.recordsSkipped).toBe(1);
     expect(parsed.stats.delimiter).toBe('semicolon');
-    expect(warning(parsed, 'column_count_mismatch')).toMatchObject({ count: 2, sample: 'line 5: 3 values, 6 columns' });
+    expect(warning(parsed, 'short_rows')).toMatchObject({ count: 1, sample: 'line 5: 3 values, 6 columns' });
+    expect(warning(parsed, 'column_count_mismatch')).toMatchObject({ count: 1, sample: 'line 6: 7 values, 6 columns' });
 
     const tabs = await parse('timestamp\tinput_tokens\n2026-03-01\t5\n', { delimiter: '\t' });
     expect(tabs.out.usage[0].inputTokens).toBe(5);
     expect(tabs.parsed.stats.delimiter).toBe('tab');
+  });
+
+  it('skips a row with more values than columns instead of reading it by position', async () => {
+    // 1,200,000 without quotation marks is three values. Read by position, the row would say 1 input and 200 output tokens.
+    const text = ['date,model,input_tokens,output_tokens', '2026-03-01,claude-sonnet-4-6,1,200,000,350', '2026-03-02,claude-sonnet-4-6,900,120', '2026-03-03,claude-sonnet-4-6,"1,200,000",350'].join('\n') + '\n';
+    const { parsed, out } = await parse(text);
+    expect(out.usage.map((u) => [u.occurredAt.slice(0, 10), u.inputTokens, u.outputTokens])).toEqual([
+      ['2026-03-02', 900, 120],
+      ['2026-03-03', 1200000, 350],
+    ]);
+    expect(parsed.recordsSeen).toBe(3);
+    expect(parsed.recordsSkipped).toBe(1);
+    expect(parsed.warnings.map((w) => w.code)).toEqual(['column_count_mismatch']);
+    const surplus = warning(parsed, 'column_count_mismatch');
+    expect(surplus).toMatchObject({ count: 1, sample: 'line 2: 6 values, 4 columns' });
+    expect(surplus?.message).toMatch(/^Rows with more values than the header has columns were skipped/);
+    expect(surplus?.message).toMatch(/A value probably contains the delimiter, for example a number written as 1,200,000/);
+    expect(surplus?.message).toMatch(/enclosed in quotation marks/);
+
+    // A surplus value that is empty proves nothing: 1,200 input tokens followed by an empty output cell are
+    // written exactly like this row. It is not guessed at either.
+    const trailing = await parse(simple('2026-03-01,claude-sonnet-4-6,1,200,', '2026-03-02,claude-sonnet-4-6,900,120'));
+    expect(trailing.out.usage.map((u) => [u.inputTokens, u.outputTokens])).toEqual([[900, 120]]);
+    expect(warning(trailing.parsed, 'column_count_mismatch')).toMatchObject({ count: 1, sample: 'line 2: 5 values, 4 columns' });
+  });
+
+  it('still reads a row with fewer values than columns, taking the missing ones as empty', async () => {
+    const { parsed, out } = await parse(simple('2026-03-01,claude-opus-4-6,100', '2026-03-02,claude-opus-4-6,200,20'));
+    expect(out.usage.map((u) => [u.inputTokens, u.outputTokens])).toEqual([[100, 0], [200, 20]]);
+    expect(parsed.recordsSkipped).toBe(0);
+    expect(parsed.warnings).toEqual([
+      { code: 'short_rows', message: 'Some rows have fewer values than the header has columns. They were read, and the values missing at their end count as empty.', count: 1, sample: 'line 2: 3 values, 4 columns' },
+    ]);
   });
 });
 
@@ -438,6 +492,25 @@ describe('generic CSV: files with nothing to import', () => {
     expect(allBad.message).toMatch(/None of the 2 rows could be imported/);
     expect(allBad.message).toMatch(/For example: 31\/12\/2025 \(line 2\)/);
     expect(await codeOf(parse('timestamp,input_tokens\n"2026-03-01,1\n'))).toBe('csv_unclosed_quote');
+  });
+
+  it('gives a reason that kept rows out, never a note about rows that were read', async () => {
+    // Both rows lack their last value, which is noted, and both are read. What keeps them out is the day-first date.
+    const shortRows = await errorOf(parse('date,input_tokens,output_tokens\n01/03/2026,1200\n02/03/2026,900\n'));
+    expect(shortRows.code).toBe('no_valid_rows');
+    expect(shortRows.message).toMatch(/^None of the 2 rows could be imported\. Rows whose timestamp is missing or cannot be read were skipped\./);
+    expect(shortRows.message).toMatch(/For example: 01\/03\/2026 \(line 2\)\. Check the column mapping and the format of the values\.$/);
+    expect(shortRows.message).not.toMatch(/fewer values/);
+
+    // Of several reasons, the one that kept the most rows out is given.
+    const mostly = await errorOf(parse(simple('2026-03-01,m,1,2,3', '01/03/2026,m,1,1', '02/03/2026,m,1,1')));
+    expect(mostly.message).toMatch(/^None of the 3 rows could be imported\. Rows whose timestamp is missing or cannot be read were skipped\./);
+
+    // Rows that end with a delimiter have one value more than the header has columns. The message says so.
+    const trailing = await errorOf(parse('date,input_tokens,output_tokens\n2026-03-01,1200,350,\n2026-03-02,900,120,\n'));
+    expect(trailing.code).toBe('no_valid_rows');
+    expect(trailing.message).toMatch(/^None of the 2 rows could be imported\. Rows with more values than the header has columns were skipped/);
+    expect(trailing.message).toMatch(/A delimiter at the end of a row counts as one more value\. For example: line 2: 4 values, 3 columns\./);
   });
 
   it('reports progress and can be cancelled', async () => {

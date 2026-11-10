@@ -11,11 +11,12 @@ import { ImportError, type ImportFile, type ImportProgress } from '@/core/types'
 import type { CommitResult } from '@/import/commit';
 import type { Detected } from '@/import/detect';
 import { FORMATS } from '@/import/formats';
+import { questionBeforeReading } from '@/import/generic/questions';
 import { ImportSession, toImportFiles, type PreparedImport } from '@/import/session';
 import { cn } from '@/lib/cn';
 import { formatBytes, formatInt, plural } from '@/lib/format';
 import { useApp } from '@/state/app';
-import { CsvMappingForm } from './csv-mapping';
+import { ConfidenceForm, CsvMappingForm } from './csv-mapping';
 import { filesFromDrop } from './dropped-files';
 import { ImportPreviewView, Notice } from './preview';
 
@@ -23,6 +24,7 @@ type Stage =
   | { name: 'idle' }
   | { name: 'detecting'; what: string }
   | { name: 'mapping'; files: ImportFile[]; detected: Detected }
+  | { name: 'confidence'; files: ImportFile[]; detected: Detected }
   | { name: 'parsing'; detected: Detected; progress: ImportProgress | null }
   | { name: 'preview'; prepared: PreparedImport }
   | { name: 'saving'; prepared: PreparedImport }
@@ -37,6 +39,7 @@ const NEXT_STEP: Record<string, string> = {
   no_conversations_file: 'Choose the ZIP exactly as it was downloaded, or the conversations.json inside it.',
   no_usage_found: 'Claude Code keeps transcripts for 30 days unless you raise cleanupPeriodDays in its settings. Usage older than that can only come from the collector ledger.',
   import_in_progress: 'Only one import can be prepared at a time, because all tabs share one database.',
+  mixed_sources: 'Files can be read in one import when they all name the same source, or when none of them names one.',
   stale_preview: 'Start the import again. The preview has to be recomputed against what is stored now.',
   worker_failed: 'Reload the page and try again. If the file is very large, close other tabs first to free memory.',
   demo_requires_empty_workspace: 'Remove your imported data in Settings first if you want to see the demo again.',
@@ -123,7 +126,10 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
       setStage({ name: 'detecting', what: describeSelection(files) });
       try {
         const detected = await getSession().detect(files);
-        if (detected.parser === 'generic-csv') setStage({ name: 'mapping', files, detected });
+        // A file of the user's own making is read only after they have said what it cannot say itself.
+        const question = questionBeforeReading(detected.parser, options);
+        if (question === 'mapping') setStage({ name: 'mapping', files, detected });
+        else if (question === 'confidence') setStage({ name: 'confidence', files, detected });
         else await run(files, detected, options);
       } catch (error) {
         fail(error);
@@ -221,15 +227,17 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
       ? 'Checking the file'
       : stage.name === 'mapping'
         ? 'Match the columns'
-        : stage.name === 'parsing'
-          ? 'Reading'
-          : stage.name === 'preview'
-            ? 'Review before saving'
-            : stage.name === 'saving'
-              ? 'Saving'
-              : stage.name === 'done'
-                ? 'Saved'
-                : 'This import did not work';
+        : stage.name === 'confidence'
+          ? 'Say how reliable the counts are'
+          : stage.name === 'parsing'
+            ? 'Reading'
+            : stage.name === 'preview'
+              ? 'Review before saving'
+              : stage.name === 'saving'
+                ? 'Saving'
+                : stage.name === 'done'
+                  ? 'Saved'
+                  : 'This import did not work';
 
   return (
     <Card aria-live="polite">
@@ -256,6 +264,15 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
             csv={stage.detected.csv}
             onCancel={reset}
             onSubmit={(options) => void run(stage.files, stage.detected, { ...pendingOptions.current, ...options })}
+          />
+        ) : null}
+
+        {stage.name === 'confidence' ? (
+          <ConfidenceForm
+            fileName={stage.files[stage.detected.fileIndexes[0]]?.name ?? 'The file'}
+            fileCount={stage.detected.fileIndexes.length}
+            onCancel={reset}
+            onSubmit={(answer) => void run(stage.files, stage.detected, { ...pendingOptions.current, ...answer })}
           />
         ) : null}
 

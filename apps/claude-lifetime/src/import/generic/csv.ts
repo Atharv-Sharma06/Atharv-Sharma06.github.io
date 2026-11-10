@@ -42,8 +42,18 @@ import { isObject } from './values';
  *
  * A row is identified by its `id` when that column is mapped, otherwise by a hash
  * of its values, so importing the same file again adds nothing.
+ *
+ * A row with more values than the header has columns is skipped, with a warning; a
+ * row with fewer is read, and the values missing at its end count as empty.
  */
 export const GENERIC_CSV_FORMAT = 'generic/csv';
+
+const SURPLUS_VALUES =
+  'Rows with more values than the header has columns were skipped, because their values cannot be matched to the columns. ' +
+  'A value probably contains the delimiter, for example a number written as 1,200,000: such values have to be enclosed in quotation marks. ' +
+  'A delimiter at the end of a row counts as one more value.';
+
+const MISSING_VALUES = 'Some rows have fewer values than the header has columns. They were read, and the values missing at their end count as empty.';
 
 export interface CsvPreview {
   /** Column names, trimmed. */
@@ -82,7 +92,7 @@ export const genericCsvParser: ImportParser = {
     const meter = new InputMeter(files, sink, ctx, 'Reading rows');
     const warnings = new WarningList();
     const models = new ModelRegistry(sink);
-    const builder = new GenericUsageBuilder(sink, options, warnings, models);
+    const builder = new GenericUsageBuilder(sink, options, warnings, models, 'generic_csv');
     let delimiter = ',';
     let mapping: GenericMapping = {};
 
@@ -107,19 +117,24 @@ export const genericCsvParser: ImportParser = {
         }
         // Spreadsheets pad files with rows of nothing but delimiters.
         if (record.fields.every((f) => f.trim() === '')) continue;
-        if (record.fields.length !== width) {
-          warnings.add(
-            'column_count_mismatch',
-            'Some rows have more or fewer values than the header has columns. They were read by position; if values contain the delimiter, they have to be enclosed in quotation marks.',
-            `line ${record.line}: ${record.fields.length} values, ${width} columns`,
-          );
+        const shape = `line ${record.line}: ${record.fields.length} values, ${width} columns`;
+        if (record.fields.length > width) {
+          // One value too many means a delimiter inside a value, and it is not known which: from there on every
+          // value would be read as its neighbour's column. An empty value at the end does not make the row safe
+          // either, because "1,200" followed by an empty cell is written the same way. Read by position, such a
+          // row would store a guess as a token count.
+          builder.reject('column_count_mismatch', SURPLUS_VALUES, shape);
+        } else {
+          // A row that stops early is read: exports leave out empty cells at the end of a row. It is noted all
+          // the same, because a row cut in two by a line break inside a value looks no different.
+          if (record.fields.length < width) warnings.add('short_rows', MISSING_VALUES, shape);
+          const raw: RawRecord = {};
+          for (const field of GENERIC_FIELDS) {
+            const index = columns[field];
+            if (index !== undefined) raw[field] = record.fields[index] ?? '';
+          }
+          await builder.add(raw, `line ${record.line}`);
         }
-        const raw: RawRecord = {};
-        for (const field of GENERIC_FIELDS) {
-          const index = columns[field];
-          if (index !== undefined) raw[field] = record.fields[index] ?? '';
-        }
-        await builder.add(raw, `line ${record.line}`);
         meter.records = builder.seen;
         if ((builder.seen & 1023) === 0) meter.checkCancelled();
       }
@@ -132,7 +147,6 @@ export const genericCsvParser: ImportParser = {
       meter,
       builder,
       models,
-      kind: 'generic_csv',
       format: GENERIC_CSV_FORMAT,
       formatLabel: 'Usage data (CSV)',
       sourceLabel: options.sourceLabel ?? DEFAULT_SOURCE_LABEL,

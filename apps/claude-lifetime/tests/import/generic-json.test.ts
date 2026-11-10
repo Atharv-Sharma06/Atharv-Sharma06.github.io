@@ -178,6 +178,18 @@ describe('generic JSON: validation is the CSV importer\'s', () => {
     expect(parsed.recordsSkipped).toBe(8);
   });
 
+  it('says that a count is too large, also when it is a number JSON has already rounded', async () => {
+    const text = `[{"timestamp":"2026-03-01T10:00:00Z","input_tokens":9007199254740993},
+      {"timestamp":"2026-03-01T10:00:01Z","input_tokens":5,"requests":3000000000},
+      {"timestamp":"2026-03-01T10:00:02Z","input_tokens":5,"requests":"2"}]`;
+    const { parsed, out } = await parse(text);
+    expect(out.usage.map((u) => [u.inputTokens, u.requestCount])).toEqual([[5, 2]]);
+    expect(warning(parsed, 'invalid_number')).toBeUndefined();
+    const tooLarge = warning(parsed, 'number_too_large');
+    expect(tooLarge).toMatchObject({ count: 2, sample: 'input_tokens: 9007199254740992 (record 1)' });
+    expect(tooLarge?.message).toMatch(/^Rows with a token or request count that is too large were skipped/);
+  });
+
   it('counts identical records without an id once', async () => {
     const { parsed, out } = await parse(JSON.stringify([record(), record(), record({ output_tokens: 11 }), record()]));
     expect(out.usage.map((u) => u.outputTokens)).toEqual([10, 11]);
@@ -329,8 +341,9 @@ describe('generic JSON: the source a file names for itself', () => {
     expect(reversed.message).toMatch(/^"usage-2\.json" says its records come from "EU proxy" \(reference "proxy-eu-1"\), but the records read before it come from "US proxy" \(reference "proxy-us-1"\)\./);
 
     // Records without ids do not collide, and are still not filed under another file's source.
-    const withoutIds = (text: string) => text.replace(/"id":"req-\d+",?/g, '').replace(/,\}/g, '}');
-    expect(await codeOf(parse([withoutIds(eu), withoutIds(us)]))).toBe('mixed_sources');
+    const euWithoutIds = sourced({ label: 'EU proxy', ref: 'proxy-eu-1' }, [record({ input_tokens: 1000 })]);
+    const usWithoutIds = sourced({ label: 'US proxy', ref: 'proxy-us-1' }, [record({ input_tokens: 400 })]);
+    expect(await codeOf(parse([euWithoutIds, usWithoutIds]))).toBe('mixed_sources');
 
     // One at a time, each file keeps its own source and every one of its records.
     for (const [text, label, ref, count] of [[eu, 'EU proxy', 'proxy-eu-1', 2], [us, 'US proxy', 'proxy-us-1', 3]] as const) {
@@ -367,6 +380,21 @@ describe('generic JSON: the source a file names for itself', () => {
       '"usage-2.json" says its records come from "US proxy" (reference "proxy-us-1"), but the records read before it name no source. ' +
         'One import is filed under one source. Import the files one at a time, so that each is filed under its own source.',
     );
+  });
+
+  it('takes a label without a reference for a source of its own, not for the one it is selected with', async () => {
+    // On its own this file is stored under no reference. It is not filed under "proxy-eu-1" because the names match.
+    const labelOnly = sourced({ label: 'EU proxy' }, [record({ id: 'req-0007' })]);
+    const error = await errorOf(parse([eu, labelOnly]));
+    expect(error.code).toBe('mixed_sources');
+    expect(error.message).toBe(
+      '"usage-2.json" says its records come from "EU proxy" (no reference), but the records read before it come from "EU proxy" (reference "proxy-eu-1"). ' +
+        'One import is filed under one source. Import the files one at a time, so that each is filed under its own source.',
+    );
+    // The same when the earlier file gave a reference and no name: the name is not put on that reference.
+    const referenceThenName = await errorOf(parse([sourced({ ref: 'proxy-eu-1' }, [record({ id: 'a' })]), sourced({ label: 'Proxy' }, [record({ id: 'b' })])]));
+    expect(referenceThenName.code).toBe('mixed_sources');
+    expect(referenceThenName.message).toMatch(/come from "Proxy" \(no reference\), but the records read before it come from the source with the reference "proxy-eu-1"\./);
   });
 
   it('refuses a JSON Lines file whose parts name different sources', async () => {
@@ -485,6 +513,8 @@ describe('generic JSON: advice in warnings', () => {
       'Rows whose id already occurred earlier in the import were skipped, so each id is counted once. If "id" does not identify single records, leave it out of the records.',
     );
     expect(warning(parsed, 'duplicate_rows')?.message).toMatch(/give each one an "id" of its own\.$/);
+    // the example speaks of counts as well, not of columns
+    expect(warning(parsed, 'total_mismatch')?.sample).toBe('total 999, the individual counts add up to 110 (record 6)');
 
     const manyModels = await errorOf(parse(JSON.stringify(Array.from({ length: 250 }, (_, i) => record({ model: `customer-${i}`, id: `r${i}` })))));
     expect(manyModels.code).toBe('too_many_models');
