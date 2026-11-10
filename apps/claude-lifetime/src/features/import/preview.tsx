@@ -53,6 +53,18 @@ function notices(p: ImportPreview, timezone: string): ReactNode[] {
         confirm.
       </Notice>,
     );
+  } else if (p.previousImport && !p.previousImport.sameSource) {
+    // The same bytes under another source: records are recognised within one source only, so they would all count again.
+    out.push(
+      <Notice key="previous" tone="warning">
+        <strong className="font-medium text-ink">
+          This exact file was imported before, under the source “{p.previousImport.sourceLabel}”
+        </strong>{' '}
+        (on {formatInstant(p.previousImport.importedAt, timezone, 'datetime')}). It is about to be stored under “{p.source.label}” instead, and records
+        are only recognised as already stored within one source: saving would count this file a second time. To add to the earlier import, go back
+        and give it the same source name. Save only if this really is a different set of usage.
+      </Notice>,
+    );
   } else if (p.previousImport) {
     out.push(
       <Notice key="previous">
@@ -64,8 +76,9 @@ function notices(p: ImportPreview, timezone: string): ReactNode[] {
   if (p.replaced && (p.replaced.usageRows > 0 || p.replaced.costRows > 0)) {
     out.push(
       <Notice key="replaced">
-        This report restates a period that is already stored. {plural(p.replaced.usageRows + p.replaced.costRows, 'existing row')} for the same period
-        will be replaced by the rows in this file, not added to them.
+        This report restates a period that is already stored. {plural(p.replaced.usageRows + p.replaced.costRows, 'stored row')} that it states
+        differently, or no longer lists, will be replaced by the rows in this file, not added to them. Rows it states exactly as stored are left as
+        they are. The replaced rows do not come back if this import is deleted later.
       </Notice>,
     );
   }
@@ -124,7 +137,12 @@ export function ImportPreviewView({ prepared, timezone }: { prepared: PreparedIm
             <Count
               label="Model requests"
               value={formatInt(p.requests.new)}
-              detail={p.requests.duplicate > 0 ? `${formatInt(p.requests.duplicate)} already counted and skipped` : 'none counted before'}
+              detail={
+                <>
+                  {p.requests.duplicate > 0 ? `${formatInt(p.requests.duplicate)} already counted and skipped` : 'none counted before'}
+                  {p.prompts && p.prompts.new > 0 ? `; ${plural(p.prompts.new, 'prompt')} you sent` : ''}
+                </>
+              }
             />
           ) : p.usageRows.total > 0 ? (
             <Count
@@ -150,11 +168,15 @@ export function ImportPreviewView({ prepared, timezone }: { prepared: PreparedIm
             </dd>
             <p className="mt-1.5 text-xs text-ink-3">
               {tokens === 0
-                ? 'this file carries no token counts'
+                ? p.figures.costs
+                  ? 'this file states amounts of money, not tokens'
+                  : 'this file carries no token counts'
                 : p.tokens.exact > 0 && p.tokens.estimated > 0
                   ? `${formatTokens(p.tokens.exact)} exact, ${formatTokens(p.tokens.estimated)} estimated`
                   : p.tokens.estimated > 0
-                    ? 'reconstructed from message text'
+                    ? p.figures.textEstimates
+                      ? 'reconstructed from message text'
+                      : 'counts from the file, kept as estimates'
                     : 'metered by the source'}
             </p>
           </div>
@@ -165,18 +187,33 @@ export function ImportPreviewView({ prepared, timezone }: { prepared: PreparedIm
       <section aria-label="What this file can tell">
         <h3 className="text-sm font-medium text-ink">What this file can and cannot tell</h3>
         <ul className="mt-2.5 space-y-1.5 text-[13px] text-ink-2">
-          <Fact ok={p.coverage.hasExactUsage}>
-            {p.coverage.hasExactUsage
-              ? 'Token counts are metered by the source: these figures are exact.'
-              : 'No token counts in the file. Tokens are estimated from the text and labelled as estimates everywhere.'}
-          </Fact>
-          <Fact ok={p.coverage.hasModel}>
-            {p.coverage.hasModel
-              ? p.coverage.modelShare !== null && p.coverage.modelShare < 1
-                ? `The model is named for ${formatShare(p.coverage.modelShare)} of the new records${p.models.length ? ` (${p.models.slice(0, 4).join(', ')}${p.models.length > 4 ? ', and more' : ''})` : ''}. The rest stay “Unknown model”.`
-                : `Every record names its model${p.models.length ? ` (${p.models.slice(0, 5).join(', ')}${p.models.length > 5 ? ', and more' : ''})` : ''}.`
-              : 'The model is not recorded. These records appear as “Unknown model”; no model is guessed and they are not priced.'}
-          </Fact>
+          {/* One line per kind of figure the new records hold, each saying how that figure was obtained. */}
+          {p.figures.exactTokens ? <Fact ok>Token counts are metered by the source: these figures are exact.</Fact> : null}
+          {p.figures.statedTokens ? (
+            <Fact ok={false}>
+              The file states token counts, and they are stored as it states them. They are labelled as estimates, because nothing in the file says
+              they were metered{p.figures.exactTokens ? ' for all rows' : ''}.
+            </Fact>
+          ) : null}
+          {p.figures.textEstimates ? (
+            <Fact ok={false}>No token counts for the messages in the file. Their tokens are estimated from the text and labelled as estimates everywhere.</Fact>
+          ) : null}
+          {p.figures.costs ? (
+            <Fact ok>
+              {p.figures.exactTokens || p.figures.statedTokens || p.figures.textEstimates
+                ? 'Billed amounts are stored as money actually charged, apart from every token figure.'
+                : 'The file states billed amounts, not tokens. They are stored as money actually charged and never turned into token counts.'}
+            </Fact>
+          ) : null}
+          {p.coverage.modelShare !== null ? (
+            <Fact ok={p.coverage.hasModel}>
+              {p.coverage.hasModel
+                ? p.coverage.modelShare < 1
+                  ? `The model is named for ${formatShare(p.coverage.modelShare)} of the new records${p.models.length ? ` (${p.models.slice(0, 4).join(', ')}${p.models.length > 4 ? ', and more' : ''})` : ''}. The rest stay “Unknown model”.`
+                  : `Every record names its model${p.models.length ? ` (${p.models.slice(0, 5).join(', ')}${p.models.length > 5 ? ', and more' : ''})` : ''}.`
+                : 'The model is not recorded. These records appear as “Unknown model”; no model is guessed and they are not priced.'}
+            </Fact>
+          ) : null}
           <Fact ok={p.coverage.hasTimestamps}>
             {p.coverage.hasTimestamps
               ? p.messages.withoutTimestamp > 0

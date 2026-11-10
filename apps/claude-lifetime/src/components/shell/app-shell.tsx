@@ -39,8 +39,8 @@ function AutoSync() {
       const { autoSyncEnabled } = await import('@/features/import/local-files');
       if (!(await autoSyncEnabled())) return;
       const { syncClaudeCodeFolder } = await import('@/features/import/background-sync');
-      const outcome = await syncClaudeCodeFolder(app.db, app.userId, false);
-      if (outcome && !outcome.problem && outcome.added > 0) app.notifyDataChanged();
+      const result = await syncClaudeCodeFolder(app.db, app.userId, false);
+      if (result.status === 'done' && !result.outcome.problem && result.outcome.added > 0) app.notifyDataChanged();
     })();
   }, [app]);
   return null;

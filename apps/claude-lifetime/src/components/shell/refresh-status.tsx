@@ -26,8 +26,8 @@ export function RefreshStatus() {
     setSyncing(true);
     try {
       const { syncClaudeCodeFolder } = await import('@/features/import/background-sync');
-      const outcome = await syncClaudeCodeFolder(db, userId, false);
-      if (outcome && !outcome.problem && outcome.added > 0) notifyDataChanged();
+      const result = await syncClaudeCodeFolder(db, userId, false);
+      if (result.status === 'done' && !result.outcome.problem && result.outcome.added > 0) notifyDataChanged();
     } finally {
       setSyncing(false);
     }

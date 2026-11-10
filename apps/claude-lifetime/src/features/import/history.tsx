@@ -19,13 +19,16 @@ import { stopAutoSyncAfterDeletion } from './local-files';
  * Every import that was saved, with what it added, and a way to take each one back.
  * `autoSync` says whether the remembered Claude Code folder is read automatically:
  * deleting a Claude Code import switches that off, and the dialog says so beforehand.
+ * While `locked` (an import is being prepared or previewed on this page) nothing can be
+ * deleted: the preview was computed against what is stored now.
  */
-export function ImportHistory({ autoSync = false, onDeleted }: { autoSync?: boolean; onDeleted?: () => void }) {
+export function ImportHistory({ autoSync = false, locked = false, onDeleted }: { autoSync?: boolean; locked?: boolean; onDeleted?: () => void }) {
   const app = useApp();
   const imports = useImports();
   const [open, setOpen] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<ImportRecord | null>(null);
   const tz = app.settings.timezone;
+  const replacedEarlier = deleting?.warnings.find((w) => w.code === 'replaced_earlier') ?? null;
 
   return (
     <Card>
@@ -100,7 +103,13 @@ export function ImportHistory({ autoSync = false, onDeleted }: { autoSync?: bool
                           {formatInt(r.recordsDuplicate)}
                         </Td>
                         <Td align="right">
-                          <Button variant="ghost" size="sm" onClick={() => setDeleting(r)}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={locked}
+                            title={locked ? 'Save or cancel the import above first' : undefined}
+                            onClick={() => setDeleting(r)}
+                          >
                             Delete
                           </Button>
                         </Td>
@@ -156,6 +165,12 @@ export function ImportHistory({ autoSync = false, onDeleted }: { autoSync?: bool
           The {deleting ? formatInt(deleting.recordsInserted) : ''} records it added are removed, along with conversations that have nothing left in them.
           Records from other imports stay. You can import the file again at any time.
         </p>
+        {replacedEarlier ? (
+          <p>
+            This import replaced {plural(replacedEarlier.count, 'record')} that an earlier import had stored for the same period. Deleting it does not
+            bring them back: that period will be empty until the earlier file is imported again.
+          </p>
+        ) : null}
         {deleting?.sourceKind === 'claude_code' && !deleting.isSynthetic && autoSync ? (
           <p>
             Reading the Claude Code folder automatically is switched off with this, because it would add the deleted usage again the next time the app

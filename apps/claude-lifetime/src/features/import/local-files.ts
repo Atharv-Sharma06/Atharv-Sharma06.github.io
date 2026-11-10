@@ -33,6 +33,10 @@ type PickerWindow = Window & {
 export const canPickFolders = () => typeof window !== 'undefined' && typeof (window as PickerWindow).showDirectoryPicker === 'function';
 
 const FOLDER_KEY = 'claude-code-folder';
+/** The source the remembered folder is filed under, so every later reading lands in the same one. */
+const FOLDER_SOURCE_KEY = 'claude-code-folder-source';
+/** The name last typed into "Name of this computer". */
+const COMPUTER_KEY = 'claude-code-computer';
 const AUTO_SYNC_KEY = 'claude-code-auto-sync';
 /** When automatic reading was switched off by a deletion, so the import page can say why the switch is off. */
 const AUTO_SYNC_STOPPED_KEY = 'claude-code-auto-sync-stopped';
@@ -61,13 +65,27 @@ export async function readTranscriptFolder(handle: FsDirectoryHandle): Promise<I
   return out;
 }
 
+/**
+ * Which source Claude Code usage is filed under: the label shown in the app and the
+ * stable reference that identifies the source. Empty for the default source, "Claude
+ * Code (this computer)".
+ */
+export interface FolderSource {
+  sourceLabel?: string;
+  sourceRef?: string;
+}
+
 export interface PickedFolder {
   name: string;
   files: ImportFile[];
 }
 
-/** Opens the browser's folder picker. Resolves to null when the user closes it. */
-export async function pickClaudeCodeFolder(): Promise<PickedFolder | null> {
+/**
+ * Opens the browser's folder picker. Resolves to null when the user closes it. The
+ * folder is remembered together with the source it is imported under, so that reading
+ * it again later adds to that same source and not to a second one.
+ */
+export async function pickClaudeCodeFolder(source: FolderSource = {}): Promise<PickedFolder | null> {
   const picker = (window as PickerWindow).showDirectoryPicker;
   if (!picker) return null;
   let handle: FsDirectoryHandle;
@@ -77,8 +95,9 @@ export async function pickClaudeCodeFolder(): Promise<PickedFolder | null> {
     if (error instanceof DOMException && error.name === 'AbortError') return null;
     throw error;
   }
-  // Remembered so "Sync again" can re-read the same folder later. Handles can only be stored in IndexedDB.
+  // Remembered so "Read the folder again" can re-read the same folder later. Handles can only be stored in IndexedDB.
   await kvSet(FOLDER_KEY, handle).catch(() => undefined);
+  await kvSet(FOLDER_SOURCE_KEY, { ...source }).catch(() => undefined);
   return { name: handle.name, files: await readTranscriptFolder(handle) };
 }
 
@@ -86,33 +105,61 @@ export interface RememberedFolder {
   name: string;
   /** Whether the browser will let the app read it without asking again. */
   permission: PermissionState;
+  source: FolderSource;
+}
+
+async function folderSource(): Promise<FolderSource> {
+  const stored = await kvGet<FolderSource>(FOLDER_SOURCE_KEY);
+  const out: FolderSource = {};
+  if (stored && typeof stored.sourceLabel === 'string' && stored.sourceLabel !== '') out.sourceLabel = stored.sourceLabel;
+  if (stored && typeof stored.sourceRef === 'string' && stored.sourceRef !== '') out.sourceRef = stored.sourceRef;
+  return out;
 }
 
 export async function rememberedFolder(): Promise<RememberedFolder | null> {
   const handle = await kvGet<FsDirectoryHandle>(FOLDER_KEY);
   if (!handle || handle.kind !== 'directory') return null;
   const permission = (await handle.queryPermission?.({ mode: 'read' }).catch(() => 'prompt' as const)) ?? 'prompt';
-  return { name: handle.name, permission };
+  return { name: handle.name, permission, source: await folderSource() };
 }
+
+export type FolderReading =
+  | { status: 'read'; folder: PickedFolder; source: FolderSource }
+  /** No folder is remembered on this device. */
+  | { status: 'no_folder' }
+  /** A folder is remembered, but the browser does not let the app read it (and was not, or could not be, asked). */
+  | { status: 'no_permission'; name: string };
 
 /**
  * Re-reads the remembered folder. With `ask`, the browser may show its permission
  * prompt (this needs a click); without it the folder is only read when permission is
- * already granted. Resolves to null when there is no folder or no permission.
+ * already granted.
  */
-export async function readRememberedFolder(ask: boolean): Promise<PickedFolder | null> {
+export async function readRememberedFolder(ask: boolean): Promise<FolderReading> {
   const handle = await kvGet<FsDirectoryHandle>(FOLDER_KEY);
-  if (!handle || handle.kind !== 'directory') return null;
+  if (!handle || handle.kind !== 'directory') return { status: 'no_folder' };
   let permission = (await handle.queryPermission?.({ mode: 'read' }).catch(() => 'prompt' as const)) ?? 'prompt';
   if (permission !== 'granted' && ask) permission = (await handle.requestPermission?.({ mode: 'read' }).catch(() => 'denied' as const)) ?? 'denied';
-  if (permission !== 'granted') return null;
-  return { name: handle.name, files: await readTranscriptFolder(handle) };
+  if (permission !== 'granted') return { status: 'no_permission', name: handle.name };
+  return { status: 'read', folder: { name: handle.name, files: await readTranscriptFolder(handle) }, source: await folderSource() };
 }
 
 export async function forgetFolder(): Promise<void> {
   await kvDelete(FOLDER_KEY);
+  await kvDelete(FOLDER_SOURCE_KEY);
   await kvDelete(AUTO_SYNC_KEY);
   await kvDelete(AUTO_SYNC_STOPPED_KEY);
+}
+
+/** The name last given to this computer on the import page, so the field starts with it on the next visit. */
+export async function rememberedComputerName(): Promise<string> {
+  const name = await kvGet<string>(COMPUTER_KEY);
+  return typeof name === 'string' ? name : '';
+}
+
+export async function rememberComputerName(name: string): Promise<void> {
+  if (name.trim() === '') await kvDelete(COMPUTER_KEY);
+  else await kvSet(COMPUTER_KEY, name.trim()).catch(() => undefined);
 }
 
 export async function autoSyncEnabled(): Promise<boolean> {

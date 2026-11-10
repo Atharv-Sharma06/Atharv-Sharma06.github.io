@@ -24,7 +24,7 @@ test('a claude.ai export is previewed, saved as estimated usage, and never count
   const added = page.getByRole('region', { name: 'What this import adds' });
   await expect(added.locator('div', { hasText: /^Conversations28/ }).first()).toBeVisible();
   await expect(added.locator('div', { hasText: /^Messages168/ }).first()).toBeVisible();
-  await expect(page.getByText('No token counts in the file.')).toBeVisible();
+  await expect(page.getByText('No token counts for the messages in the file.')).toBeVisible();
   await expect(page.getByText('The model is not recorded.')).toBeVisible();
   await expect(page.getByText('Nothing has been saved yet.')).toBeVisible();
 

@@ -94,7 +94,9 @@ describe('Claude Code import into the database', () => {
       conversations: { total: 1, new: 1, existing: 0 },
       usageRows: { total: 2, new: 2, duplicate: 0, withoutModel: 0 },
       messages: { total: 0, new: 0 },
-      requests: { new: 5, duplicate: 0 },
+      // five records were counted: four model responses and the one prompt the person typed
+      requests: { new: 4, duplicate: 0 },
+      prompts: { new: 1, duplicate: 0 },
       tokens: { exact: 19 + 680 + 7240 + 49150, estimated: 0 },
       dateRange: { start: '2026-01-15T09:00:00.000Z', end: '2026-01-15T09:00:00.000Z' },
       coverage: { hasExactUsage: true, hasModel: true, modelShare: 1 },
@@ -149,7 +151,8 @@ describe('Claude Code import into the database', () => {
     expect(second.parsed.duplicateRequests).toBe(5);
     expect(second.parsed.stats).toMatchObject({ responses: 4, newResponses: 0, duplicateResponses: 4, duplicateHumanPrompts: 1 });
     expect(second.preview).toMatchObject({
-      requests: { new: 0, duplicate: 5 },
+      requests: { new: 0, duplicate: 4 },
+      prompts: { new: 0, duplicate: 1 },
       usageRows: { total: 0, new: 0 },
       conversations: { total: 0, new: 0 },
       tokens: { exact: 0, estimated: 0 },
@@ -176,7 +179,8 @@ describe('Claude Code import into the database', () => {
     // the main transcript grew and a session was added; the unchanged subagent file is skipped
     expect(later.parsed.stats).toMatchObject({ filesRead: 2, filesSkippedUnchanged: 1, newResponses: 2, duplicateResponses: 3, newHumanPrompts: 1, duplicateHumanPrompts: 1 });
     expect(later.preview).toMatchObject({
-      requests: { new: 3, duplicate: 4 },
+      requests: { new: 2, duplicate: 3 },
+      prompts: { new: 1, duplicate: 1 },
       conversations: { total: 2, new: 1, existing: 1 },
       usageRows: { total: 2, new: 2, duplicate: 0 },
       tokens: { exact: 1 + 50 + 17400 + 30 + 5 + 500 + 1000 + 100, estimated: 0 },
@@ -206,7 +210,7 @@ describe('Claude Code import into the database', () => {
 
     // and once more: everything is known now
     const again = await runImport(supersetFiles());
-    expect(again.preview).toMatchObject({ requests: { new: 0, duplicate: 8 }, nothingNew: true });
+    expect(again.preview).toMatchObject({ requests: { new: 0, duplicate: 6 }, prompts: { new: 0, duplicate: 2 }, nothingNew: true });
   });
 
   it('the ledger of already imported transcripts adds nothing, and a ledger alone gives the same totals', async () => {
@@ -222,12 +226,12 @@ describe('Claude Code import into the database', () => {
 
     const after = await runImport([ledgerFile()], { parser: claudeCodeLedgerParser });
     expect(after.parsed).toMatchObject({ format: 'claude-code/ledger', requestKeys: [], duplicateRequests: 8 });
-    expect(after.preview).toMatchObject({ requests: { new: 0, duplicate: 8 }, nothingNew: true });
+    expect(after.preview).toMatchObject({ requests: { new: 0, duplicate: 6 }, prompts: { new: 0, duplicate: 2 }, nothingNew: true });
     expect(await sums()).toEqual(fromTranscripts);
 
     await t.reset();
     const alone = await runImport([ledgerFile()], { parser: claudeCodeLedgerParser });
-    expect(alone.preview).toMatchObject({ requests: { new: 8, duplicate: 0 }, conversations: { total: 2, new: 2 }, nothingNew: false });
+    expect(alone.preview).toMatchObject({ requests: { new: 6, duplicate: 0 }, prompts: { new: 2, duplicate: 0 }, conversations: { total: 2, new: 2 }, nothingNew: false });
     expect(alone.parsed.stats).toMatchObject({ machine: 'test-machine', responses: 6, humanPrompts: 2 });
     expect(await sums()).toEqual({
       ...fromTranscripts,
@@ -243,7 +247,7 @@ describe('Claude Code import into the database', () => {
 
     // transcripts after the ledger: nothing new either
     const transcripts = await runImport(files);
-    expect(transcripts.preview).toMatchObject({ requests: { new: 0, duplicate: 8 }, nothingNew: true });
+    expect(transcripts.preview).toMatchObject({ requests: { new: 0, duplicate: 6 }, prompts: { new: 0, duplicate: 2 }, nothingNew: true });
   });
 
   it('stores model identifiers the catalog does not know and keeps a missing model empty', async () => {
@@ -270,7 +274,8 @@ describe('Claude Code import into the database', () => {
     expect((await loadKnownRequestKeys(t.db, t.userId)).size).toBe(0);
 
     const again = await runImport(example());
-    expect(again.preview.requests).toEqual({ new: 5, duplicate: 0 });
+    expect(again.preview.requests).toEqual({ new: 4, duplicate: 0 });
+    expect(again.preview.prompts).toEqual({ new: 1, duplicate: 0 });
     expect(await sums()).toEqual(EXAMPLE_SUMS);
   });
 

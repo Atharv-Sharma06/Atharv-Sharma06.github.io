@@ -127,12 +127,13 @@ describe('API usage reports in the database', () => {
     );
     const second = await importWith(apiUsageReportParser, 'april-4-7.json', revised);
     expect(second.parsed.replaceRange).toEqual({ start: '2026-04-04T00:00:00.000Z', end: '2026-04-08T00:00:00.000Z' });
-    // three stored rows (4 April, and two of 5 April) fall into the restated range
-    expect(second.preview.replaced).toEqual({ usageRows: 3, costRows: 0, tokens: Math.round((4000 + 5000 + 700) * 1.1) });
-    expect(second.preview.usageRows).toMatchObject({ total: 3, new: 3, duplicate: 0 });
+    // Of the three stored rows in the restated range, two are replaced: 4 April is stated differently and the Opus row
+    // of 5 April is not stated any more. The Sonnet row of 5 April is stated exactly as stored and stays where it is.
+    expect(second.preview.replaced).toEqual({ usageRows: 2, costRows: 0, tokens: Math.round((4000 + 700) * 1.1) });
+    expect(second.preview.usageRows).toMatchObject({ total: 3, new: 2, duplicate: 1 });
     expect(second.preview.nothingNew).toBe(false);
-    expect(second.result.replaced).toEqual({ usageRows: 3, costRows: 0 });
-    expect(second.result.inserted.usageRows).toBe(3);
+    expect(second.result.replaced).toEqual({ usageRows: 2, costRows: 0 });
+    expect(second.result.inserted.usageRows).toBe(2);
 
     // days 1-3 as first reported, days 4-6 as restated: the totals are the revised values
     expect(await inputPerDay()).toEqual({ '04-01': 1000, '04-02': 2500, '04-03': 3000, '04-04': 4400, '04-05': 5000, '04-06': 6000 });
@@ -140,12 +141,92 @@ describe('API usage reports in the database', () => {
     expect(await count('data_sources')).toBe(1);
     expect(await count('import_batches')).toBe(2);
 
-    // importing the revised report once more changes nothing
+    // The import history stays truthful: the first import lost two of its seven records to the second and says so,
+    // and the second says that deleting it would not bring them back.
+    const history = await rows<{ file_name: string; records_inserted: number; rows: number; notes: string }>(
+      `SELECT b.file_name, b.records_inserted, (SELECT count(*) FROM usage_records u WHERE u.batch_id = b.id)::int AS rows,
+              (SELECT string_agg((w->>'code') || ':' || (w->>'count'), ',') FROM jsonb_array_elements(b.warnings) w
+                WHERE w->>'code' IN ('superseded', 'replaced_earlier')) AS notes
+         FROM import_batches b ORDER BY b.id`,
+    );
+    // the first report held seven rows
+    expect(history).toEqual([
+      { file_name: 'april-1-5.json', records_inserted: 5, rows: 5, notes: 'superseded:2' },
+      { file_name: 'april-4-7.json', records_inserted: 2, rows: 2, notes: 'replaced_earlier:2' },
+    ]);
+
+    // importing the revised report once more is recognised as nothing new: no rows change hands, no import is added
     const third = await importWith(apiUsageReportParser, 'april-4-7.json', revised);
-    expect(third.preview.previousImport?.batchId).toBe(second.result.batchId);
-    expect(third.result.replaced.usageRows).toBe(3);
+    expect(third.preview.previousImport).toMatchObject({ batchId: second.result.batchId, sameSource: true });
+    expect(third.preview).toMatchObject({ nothingNew: true, replaced: { usageRows: 0, costRows: 0, tokens: 0 }, usageRows: { total: 3, new: 0, duplicate: 3 } });
+    expect(third.result).toMatchObject({ nothingNew: true, batchId: null, replaced: { usageRows: 0, costRows: 0 } });
     expect(await inputPerDay()).toEqual({ '04-01': 1000, '04-02': 2500, '04-03': 3000, '04-04': 4400, '04-05': 5000, '04-06': 6000 });
     expect(await count('usage_records')).toBe(7);
+    expect(await count('import_batches')).toBe(2);
+  });
+
+  it('deleting a later report takes away only what that report changed', async () => {
+    const full = report(...[1, 2, 3, 4, 5].map((d) => bucket(d, [usageResult('claude-sonnet-4-6', d * 1000)])));
+    const first = await importWith(apiUsageReportParser, 'april-all.json', full);
+    // by mistake the same days again from a report that agrees with the first on 3 and 4 April and differs on the 5th
+    const second = await importWith(
+      apiUsageReportParser,
+      'april-3-5.json',
+      report(bucket(3, [usageResult('claude-sonnet-4-6', 3000)]), bucket(4, [usageResult('claude-sonnet-4-6', 4000)]), bucket(5, [usageResult('claude-sonnet-4-6', 5500)])),
+    );
+    expect(second.result).toMatchObject({ replaced: { usageRows: 1 }, inserted: { usageRows: 1 } });
+    const { deleteBatch } = await import('@/import/delete');
+    await deleteBatch(t.db, t.userId, second.result.batchId!);
+    // 3 and 4 April still belong to the first import and are still there; only the restated 5th is gone
+    expect(await inputPerDay()).toEqual({ '04-01': 1000, '04-02': 2000, '04-03': 3000, '04-04': 4000 });
+    expect((await rows<{ records_inserted: number }>(`SELECT records_inserted FROM import_batches WHERE id = ${first.result.batchId}`))[0].records_inserted).toBe(4);
+    // and the first report brings its 5 April back when it is imported again
+    const again = await importWith(apiUsageReportParser, 'april-all.json', full);
+    expect(again.preview.usageRows).toMatchObject({ new: 1, duplicate: 4 });
+    expect(await inputPerDay()).toEqual({ '04-01': 1000, '04-02': 2000, '04-03': 3000, '04-04': 4000, '04-05': 5000 });
+  });
+
+  it('removes an earlier import from the history once a later report has replaced all of it', async () => {
+    await importWith(apiUsageReportParser, 'first.json', report(bucket(1, [usageResult('claude-sonnet-4-6', 1000)]), bucket(2, [usageResult('claude-sonnet-4-6', 2000)])));
+    const second = await importWith(apiUsageReportParser, 'second.json', report(bucket(1, [usageResult('claude-sonnet-4-6', 1100)]), bucket(2, [usageResult('claude-sonnet-4-6', 2200)])));
+    expect(await rows(`SELECT file_name FROM import_batches ORDER BY id`)).toEqual([{ file_name: 'second.json' }]);
+    expect(second.result.replaced.usageRows).toBe(2);
+    expect(await inputPerDay()).toEqual({ '04-01': 1100, '04-02': 2200 });
+  });
+
+  it('refuses a report that starts or ends inside a stored total, instead of counting the time twice or losing part of it', async () => {
+    const daily = report(...[1, 2, 3].map((d) => bucket(d, [usageResult('claude-sonnet-4-6', 2400)])));
+    await importWith(apiUsageReportParser, 'daily.json', daily);
+    const hour = (d: number, h: number) => `2026-04-${String(d).padStart(2, '0')}T${String(h).padStart(2, '0')}:00:00Z`;
+    const hourly = (from: [number, number], hours: number) =>
+      JSON.stringify({
+        data: Array.from({ length: hours }, (_, i) => {
+          const start = Date.parse(hour(from[0], from[1])) + i * 3_600_000;
+          return { starting_at: new Date(start).toISOString(), ending_at: new Date(start + 3_600_000).toISOString(), results: [usageResult('claude-sonnet-4-6', 100)] };
+        }),
+        has_more: false,
+        next_page: null,
+      });
+
+    // an hourly report that begins at 14:00 on 2 April: the daily total of that day cannot be replaced for its afternoon only
+    await expect(importWith(apiUsageReportParser, 'hourly-from-afternoon.json', hourly([2, 14], 34))).rejects.toMatchObject({
+      code: 'range_conflict',
+      message: expect.stringContaining('the daily total for 2026-04-02 (UTC)'),
+    });
+    // ... and one that ends at noon on 2 April must not delete that day's total either
+    await expect(importWith(apiUsageReportParser, 'hourly-until-noon.json', hourly([1, 0], 36))).rejects.toMatchObject({ code: 'range_conflict' });
+    expect(await inputPerDay()).toEqual({ '04-01': 2400, '04-02': 2400, '04-03': 2400 });
+    expect(await count('import_batches')).toBe(1);
+
+    // an hourly report of whole days replaces the daily totals of those days, and nothing is counted twice
+    const whole = await importWith(apiUsageReportParser, 'hourly-whole-days.json', hourly([2, 0], 48));
+    expect(whole.result).toMatchObject({ replaced: { usageRows: 2 }, inserted: { usageRows: 48 } });
+    expect(await inputPerDay()).toEqual({ '04-01': 2400, '04-02': 2400, '04-03': 2400 });
+    // and the daily report of the same days takes them back the same way
+    const back = await importWith(apiUsageReportParser, 'daily.json', daily);
+    expect(back.result).toMatchObject({ replaced: { usageRows: 48 }, inserted: { usageRows: 2 } });
+    expect(await inputPerDay()).toEqual({ '04-01': 2400, '04-02': 2400, '04-03': 2400 });
+    expect(await count('usage_records')).toBe(3);
   });
 
   it('replaces a period also when the later report is grouped differently or has become empty', async () => {
@@ -271,8 +352,10 @@ describe('API cost reports in the database', () => {
     expect(await total()).toBe('6.000000');
 
     const revised = await importWith(apiCostReportParser, 'cost-2.json', report(bucket(2, [costResult('250')]), bucket(3, [costResult('300'), costResult('50', { token_type: 'uncached_input_tokens' })]), bucket(4, [])));
-    expect(revised.preview.replaced).toMatchObject({ usageRows: 0, costRows: 2 });
-    expect(revised.result.replaced).toEqual({ usageRows: 0, costRows: 2 });
+    // 2 April is stated differently and replaced; the 3.00 of 3 April is stated as stored and stays
+    expect(revised.preview.replaced).toMatchObject({ usageRows: 0, costRows: 1 });
+    expect(revised.preview.costRows).toMatchObject({ total: 3, new: 2, duplicate: 1 });
+    expect(revised.result.replaced).toEqual({ usageRows: 0, costRows: 1 });
     // 1.00 + 2.50 + 3.00 + 0.50
     expect(await total()).toBe('7.000000');
     expect(await count('reported_costs')).toBe(4);

@@ -13,7 +13,10 @@ import { stagingToken } from './staging';
  *                       are skipped, so importing a file twice adds nothing
  *  - usage / cost rows  unique per (user, dedup_key)
  *  - restated reports   (ParsedImport.replaceRange) replace the same source's rows
- *                       inside the reported time range instead of adding to them
+ *                       inside the reported time range instead of adding to them.
+ *                       Rows the new report states exactly as stored stay where they
+ *                       are; a stored total that reaches beyond the range cannot be
+ *                       replaced in part, and the import is refused
  *  - Claude Code        requests are deduplicated by 64-bit request hash before
  *                       staging; the hashes are stored on the batch that counted them
  */
@@ -24,23 +27,31 @@ export interface ImportPreview {
   source: ParsedImport['source'];
   fileName: string;
   fileSize: number;
-  /** Set when a file with the same SHA-256 was imported before. */
-  previousImport: { batchId: number; importedAt: string } | null;
+  /** Set when a file with the same SHA-256 was imported before, with the source it was filed under. */
+  previousImport: { batchId: number; importedAt: string; sourceLabel: string; sameSource: boolean } | null;
   recordsSeen: number;
   recordsSkipped: number;
   conversations: { total: number; new: number; existing: number };
   messages: { total: number; new: number; duplicate: number; withoutModel: number; withoutTimestamp: number };
   usageRows: { total: number; new: number; duplicate: number; withoutModel: number };
   costRows: { total: number; new: number; duplicate: number };
-  /** Claude Code API requests: newly counted vs already counted by an earlier import. */
+  /** Claude Code model requests (responses and advisor calls): newly counted vs already counted by an earlier import. */
   requests: { new: number; duplicate: number } | null;
-  /** Existing rows that will be replaced because the input restates their time range. */
+  /** Prompts the person sent in Claude Code, counted the same way. They are not model requests. */
+  prompts: { new: number; duplicate: number } | null;
+  /** Stored rows that will be replaced because the input restates their time range with other values. */
   replaced: { usageRows: number; costRows: number; tokens: number } | null;
   /** Tokens this import would add (processed basis). */
   tokens: { exact: number; estimated: number };
   dateRange: { start: string | null; end: string | null };
   /** Share of new rows that carry the metadata the dashboard relies on. */
   coverage: { hasExactUsage: boolean; hasModel: boolean; modelShare: number | null; hasTimestamps: boolean };
+  /**
+   * What kind of figures the new records hold, so the preview can say how they were
+   * obtained: token counts the source metered, token counts the file states but the user
+   * did not declare exact, tokens estimated from message text, and amounts of money.
+   */
+  figures: { exactTokens: boolean; statedTokens: boolean; textEstimates: boolean; costs: boolean };
   models: string[];
   missingFields: string[];
   warnings: ParsedImport['warnings'];
@@ -71,6 +82,69 @@ async function sourceIdFor(db: SqlExecutor, userId: number, parsed: ParsedImport
     [userId, parsed.source.kind, parsed.source.externalRef],
   );
   return row?.id ?? null;
+}
+
+// ── Restated ranges ─────────────────────────────────────────────────────────────
+
+/** A staged usage row (`s`) says exactly what a stored one (`u`) says: the stored row stays, nothing is replaced. */
+const sameUsage = (s: string, u: string) => `(
+  ${s}.dedup_key = ${u}.dedup_key AND ${s}.occurred_at = ${u}.occurred_at AND ${s}.bucket_seconds = ${u}.bucket_seconds
+  AND ${s}.price_tier = ${u}.price_tier AND ${s}.input_tokens = ${u}.input_tokens AND ${s}.output_tokens = ${u}.output_tokens
+  AND ${s}.cache_read_tokens = ${u}.cache_read_tokens AND ${s}.cache_write_5m_tokens = ${u}.cache_write_5m_tokens
+  AND ${s}.cache_write_1h_tokens = ${u}.cache_write_1h_tokens AND ${s}.request_count = ${u}.request_count
+  AND ${s}.user_message_count = ${u}.user_message_count AND ${s}.assistant_message_count = ${u}.assistant_message_count
+  AND ${s}.web_search_requests = ${u}.web_search_requests AND ${s}.confidence = ${u}.confidence::text
+  AND (SELECT mc.id FROM model_catalog mc WHERE mc.model_key = ${s}.model_key) IS NOT DISTINCT FROM ${u}.model_id)`;
+
+const sameCost = (s: string, r: string) => `(
+  ${s}.dedup_key = ${r}.dedup_key AND ${s}.occurred_at = ${r}.occurred_at AND ${s}.bucket_seconds = ${r}.bucket_seconds
+  AND ${s}.amount_usd = ${r}.amount_usd AND ${s}.cost_type IS NOT DISTINCT FROM ${r}.cost_type
+  AND ${s}.token_type IS NOT DISTINCT FROM ${r}.token_type AND ${s}.description IS NOT DISTINCT FROM ${r}.description
+  AND (SELECT mc.id FROM model_catalog mc WHERE mc.model_key = ${s}.model_key) IS NOT DISTINCT FROM ${r}.model_id)`;
+
+/**
+ * A stored row covers [occurred_at, occurred_at + bucket_seconds); a width of 0 is a
+ * point in time. `inside`: the row lies wholly in the half-open range. `reaches`: it
+ * shares at least a moment with it.
+ */
+const inside = (x: string, start: string, end: string) =>
+  `(${x}.occurred_at >= ${start} AND ${x}.occurred_at < ${end} AND ${x}.occurred_at + make_interval(secs => ${x}.bucket_seconds) <= ${end})`;
+const reaches = (x: string, start: string, end: string) =>
+  `(${x}.occurred_at < ${end} AND CASE WHEN ${x}.bucket_seconds = 0 THEN ${x}.occurred_at >= ${start}
+                                        ELSE ${x}.occurred_at + make_interval(secs => ${x}.bucket_seconds) > ${start} END)`;
+
+function describeTotal(seconds: number, at: string): string {
+  const day = at.slice(0, 10);
+  if (seconds === 86_400) return `the daily total for ${day} (UTC)`;
+  if (seconds === 3600) return `the hourly total that starts at ${at.slice(11, 16)} UTC on ${day}`;
+  if (seconds % 86_400 === 0) return `the total for the ${seconds / 86_400} days from ${day} (UTC)`;
+  return `a total that starts at ${at.slice(11, 16)} UTC on ${day}`;
+}
+
+/**
+ * A restated range must not cut through a stored total. A day stored as one row cannot
+ * be replaced for its afternoon only: keeping the row and adding the new rows counts
+ * that time twice, and deleting it loses the morning. So such an import is refused,
+ * with the row in the way named.
+ */
+async function assertRangeReplaceable(db: SqlExecutor, sourceId: number, range: { start: string; end: string }): Promise<void> {
+  const args = [sourceId, range.start, range.end];
+  const cut = (table: string) =>
+    `SELECT x.occurred_at, x.bucket_seconds, b.file_name
+       FROM ${table} x JOIN import_batches b ON b.id = x.batch_id
+      WHERE x.source_id = $1 AND ${reaches('x', '$2::timestamptz', '$3::timestamptz')} AND NOT ${inside('x', '$2::timestamptz', '$3::timestamptz')}`;
+  const row = await one<{ occurred_at: Date; bucket_seconds: number; file_name: string } | undefined>(
+    db,
+    `SELECT * FROM (${cut('usage_records')} UNION ALL ${cut('reported_costs')}) y ORDER BY occurred_at LIMIT 1`,
+    args,
+  );
+  if (!row) return;
+  throw new ImportError(
+    `This report starts or ends in the middle of a period that an earlier import (“${row.file_name}”) stored as a single total: ` +
+      `${describeTotal(row.bucket_seconds, toIso(row.occurred_at)!)}. A total cannot be replaced in part, and adding the new rows on top of it ` +
+      'would count that time twice. Export the report so that it covers that period completely, or delete the earlier import first. Nothing was saved.',
+    'range_conflict',
+  );
 }
 
 async function assertStagingValid(db: SqlExecutor) {
@@ -116,56 +190,77 @@ export async function previewImport(db: SqlExecutor, userId: number, parsed: Par
     [userId],
   );
 
-  const replacing = parsed.replaceRange && sourceId !== null;
+  // A report that restates a range of its source: a staged row is new unless the source already
+  // holds it value for value; stored rows inside the range that the report states differently, or
+  // not at all, are replaced. Without a range, a row is new when its key is not stored yet.
+  const range = parsed.replaceRange && sourceId !== null ? parsed.replaceRange : null;
+  if (range && sourceId !== null) await assertRangeReplaceable(db, sourceId, range);
+  const rangeArgs = [sourceId ?? 0, range?.start ?? null, range?.end ?? null];
+  const restated = (x: string) => `(${range ? 'true' : 'false'} AND ${x}.source_id = $2 AND ${inside(x, '$3::timestamptz', '$4::timestamptz')})`;
+
   const use = await one<Record<string, unknown>>(
     db,
-    `WITH d AS (SELECT DISTINCT ON (dedup_key) * FROM stg_usage ORDER BY dedup_key)
+    `WITH d AS (SELECT DISTINCT ON (dedup_key) * FROM stg_usage ORDER BY dedup_key),
+          j AS (SELECT d.*, (u.id IS NULL OR (${restated('u')} AND NOT ${sameUsage('d', 'u')})) AS fresh
+                  FROM d LEFT JOIN usage_records u ON u.user_id = $1 AND u.dedup_key = d.dedup_key)
      SELECT (SELECT count(*) FROM stg_usage)::int AS staged,
             count(*)::int AS total,
-            count(*) FILTER (WHERE $2 OR u.id IS NULL)::int AS fresh,
-            count(*) FILTER (WHERE ($2 OR u.id IS NULL) AND d.model_key IS NULL)::int AS without_model,
-            COALESCE(sum(d.input_tokens + d.output_tokens + d.cache_read_tokens + d.cache_write_5m_tokens + d.cache_write_1h_tokens)
-                     FILTER (WHERE ($2 OR u.id IS NULL) AND d.confidence = 'exact'), 0)::bigint AS exact_tokens,
-            COALESCE(sum(d.input_tokens + d.output_tokens + d.cache_read_tokens + d.cache_write_5m_tokens + d.cache_write_1h_tokens)
-                     FILTER (WHERE ($2 OR u.id IS NULL) AND d.confidence <> 'exact'), 0)::bigint AS estimated_tokens,
-            min(d.occurred_at) FILTER (WHERE $2 OR u.id IS NULL) AS first_at,
-            max(d.occurred_at) FILTER (WHERE $2 OR u.id IS NULL) AS last_at
-       FROM d LEFT JOIN usage_records u ON u.user_id = $1 AND u.dedup_key = d.dedup_key`,
-    [userId, Boolean(replacing)],
+            count(*) FILTER (WHERE fresh)::int AS fresh,
+            count(*) FILTER (WHERE fresh AND model_key IS NULL)::int AS without_model,
+            count(*) FILTER (WHERE fresh AND confidence = 'exact')::int AS exact_rows,
+            count(*) FILTER (WHERE fresh AND confidence <> 'exact')::int AS stated_rows,
+            COALESCE(sum(input_tokens + output_tokens + cache_read_tokens + cache_write_5m_tokens + cache_write_1h_tokens)
+                     FILTER (WHERE fresh AND confidence = 'exact'), 0)::bigint AS exact_tokens,
+            COALESCE(sum(input_tokens + output_tokens + cache_read_tokens + cache_write_5m_tokens + cache_write_1h_tokens)
+                     FILTER (WHERE fresh AND confidence <> 'exact'), 0)::bigint AS estimated_tokens,
+            min(occurred_at) FILTER (WHERE fresh) AS first_at,
+            max(occurred_at) FILTER (WHERE fresh) AS last_at
+       FROM j`,
+    [userId, ...rangeArgs],
   );
 
-  const cost = await one<{ staged: number; total: number; fresh: number }>(
+  const cost = await one<{ staged: number; total: number; fresh: number; without_model: number; first_at: Date | null; last_at: Date | null }>(
     db,
-    `WITH d AS (SELECT DISTINCT ON (dedup_key) * FROM stg_costs ORDER BY dedup_key)
+    `WITH d AS (SELECT DISTINCT ON (dedup_key) * FROM stg_costs ORDER BY dedup_key),
+          j AS (SELECT d.*, (r.id IS NULL OR (${restated('r')} AND NOT ${sameCost('d', 'r')})) AS fresh
+                  FROM d LEFT JOIN reported_costs r ON r.user_id = $1 AND r.dedup_key = d.dedup_key)
      SELECT (SELECT count(*) FROM stg_costs)::int AS staged, count(*)::int AS total,
-            count(*) FILTER (WHERE $2 OR r.id IS NULL)::int AS fresh
-       FROM d LEFT JOIN reported_costs r ON r.user_id = $1 AND r.dedup_key = d.dedup_key`,
-    [userId, Boolean(replacing)],
+            count(*) FILTER (WHERE fresh)::int AS fresh,
+            count(*) FILTER (WHERE fresh AND model_key IS NULL)::int AS without_model,
+            min(occurred_at) FILTER (WHERE fresh) AS first_at, max(occurred_at) FILTER (WHERE fresh) AS last_at
+       FROM j`,
+    [userId, ...rangeArgs],
   );
 
   let replaced: ImportPreview['replaced'] = null;
-  if (replacing && parsed.replaceRange) {
+  if (range) {
     const r = await one<{ usage_rows: number; tokens: unknown; cost_rows: number }>(
       db,
-      `SELECT (SELECT count(*) FROM usage_records WHERE source_id = $1 AND occurred_at >= $2::timestamptz AND occurred_at < $3::timestamptz)::int AS usage_rows,
-              (SELECT COALESCE(sum(input_tokens + output_tokens + cache_read_tokens + cache_write_5m_tokens + cache_write_1h_tokens), 0)
-                 FROM usage_records WHERE source_id = $1 AND occurred_at >= $2::timestamptz AND occurred_at < $3::timestamptz)::bigint AS tokens,
-              (SELECT count(*) FROM reported_costs WHERE source_id = $1 AND occurred_at >= $2::timestamptz AND occurred_at < $3::timestamptz)::int AS cost_rows`,
-      [sourceId, parsed.replaceRange.start, parsed.replaceRange.end],
+      `SELECT (SELECT count(*) FROM usage_records u WHERE u.source_id = $1 AND ${inside('u', '$2::timestamptz', '$3::timestamptz')}
+                  AND NOT EXISTS (SELECT 1 FROM stg_usage s WHERE ${sameUsage('s', 'u')}))::int AS usage_rows,
+              (SELECT COALESCE(sum(u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_5m_tokens + u.cache_write_1h_tokens), 0)
+                 FROM usage_records u WHERE u.source_id = $1 AND ${inside('u', '$2::timestamptz', '$3::timestamptz')}
+                  AND NOT EXISTS (SELECT 1 FROM stg_usage s WHERE ${sameUsage('s', 'u')}))::bigint AS tokens,
+              (SELECT count(*) FROM reported_costs r WHERE r.source_id = $1 AND ${inside('r', '$2::timestamptz', '$3::timestamptz')}
+                  AND NOT EXISTS (SELECT 1 FROM stg_costs s WHERE ${sameCost('s', 'r')}))::int AS cost_rows`,
+      [sourceId, range.start, range.end],
     );
     replaced = { usageRows: r.usage_rows, costRows: r.cost_rows, tokens: toNumber(r.tokens) };
   }
 
   const previous = parsed.contentHash
-    ? await one<{ id: number; created_at: Date } | undefined>(
+    ? await one<{ id: number; created_at: Date; label: string; source_id: number } | undefined>(
         db,
-        `SELECT id, created_at FROM import_batches WHERE user_id = $1 AND content_hash = $2 ORDER BY created_at DESC LIMIT 1`,
-        [userId, parsed.contentHash],
+        `SELECT b.id, b.created_at, s.label, b.source_id FROM import_batches b JOIN data_sources s ON s.id = b.source_id
+          WHERE b.user_id = $1 AND b.content_hash = $2
+          ORDER BY (b.source_id = $3) DESC, b.created_at DESC LIMIT 1`,
+        [userId, parsed.contentHash, sourceId ?? 0],
       )
     : undefined;
 
   const models = await db.query<{ k: string }>(
-    `SELECT DISTINCT k FROM (SELECT model_key AS k FROM stg_messages UNION SELECT model_key FROM stg_usage UNION SELECT model_key FROM stg_conversations) x
+    `SELECT DISTINCT k FROM (SELECT model_key AS k FROM stg_messages UNION SELECT model_key FROM stg_usage
+                             UNION SELECT model_key FROM stg_conversations UNION SELECT model_key FROM stg_costs) x
       WHERE k IS NOT NULL ORDER BY k LIMIT 50`,
   );
 
@@ -174,10 +269,15 @@ export async function previewImport(db: SqlExecutor, userId: number, parsed: Par
   const newMessages = toNumber(msg.fresh);
   const newUsage = toNumber(use.fresh);
   const newCost = cost.fresh;
-  const rowsWithModelBase = newMessages + newUsage;
-  const rowsWithoutModel = toNumber(msg.without_model) + toNumber(use.without_model);
-  const starts = [toIso(msg.first_at), toIso(use.first_at), parsed.replaceRange?.start ?? null].filter(Boolean) as string[];
-  const ends = [toIso(msg.last_at), toIso(use.last_at)].filter(Boolean) as string[];
+  // Cost rows name a model too, so a cost report is not described as recording none.
+  const rowsWithModelBase = newMessages + newUsage + newCost;
+  const rowsWithoutModel = toNumber(msg.without_model) + toNumber(use.without_model) + cost.without_model;
+  // What the import covers: its new records, and for a restated report the whole range it speaks for.
+  const lastOfRange = parsed.replaceRange ? new Date(Date.parse(parsed.replaceRange.end) - 1).toISOString() : null;
+  const starts = [toIso(msg.first_at), toIso(use.first_at), toIso(cost.first_at), parsed.replaceRange?.start ?? null].filter(Boolean) as string[];
+  const ends = [toIso(msg.last_at), toIso(use.last_at), toIso(cost.last_at), lastOfRange].filter(Boolean) as string[];
+  const replacedRows = (replaced?.usageRows ?? 0) + (replaced?.costRows ?? 0);
+  const stat = (name: string) => (typeof parsed.stats[name] === 'number' ? (parsed.stats[name] as number) : null);
 
   return {
     format: parsed.format,
@@ -185,7 +285,9 @@ export async function previewImport(db: SqlExecutor, userId: number, parsed: Par
     source: parsed.source,
     fileName: parsed.fileName,
     fileSize: parsed.fileSize,
-    previousImport: previous ? { batchId: previous.id, importedAt: toIso(previous.created_at)! } : null,
+    previousImport: previous
+      ? { batchId: previous.id, importedAt: toIso(previous.created_at)!, sourceLabel: previous.label, sameSource: previous.source_id === sourceId }
+      : null,
     recordsSeen: parsed.recordsSeen,
     recordsSkipped: parsed.recordsSkipped,
     conversations: { total: conv.total, new: conv.fresh, existing: conv.total - conv.fresh },
@@ -203,10 +305,15 @@ export async function previewImport(db: SqlExecutor, userId: number, parsed: Par
       withoutModel: toNumber(use.without_model),
     },
     costRows: { total: cost.staged, new: newCost, duplicate: cost.staged - newCost },
+    // The keys of an import cover everything it counted: model responses, advisor calls and the prompts the
+    // person sent. Only the first two are model requests, so the parser's own tallies are used where it has them.
     requests:
       parsed.requestKeys || parsed.duplicateRequests !== undefined
-        ? { new: parsed.requestKeys?.length ?? 0, duplicate: parsed.duplicateRequests ?? 0 }
+        ? stat('newResponses') !== null
+          ? { new: stat('newResponses')! + (stat('newAdvisorRecords') ?? 0), duplicate: (stat('duplicateResponses') ?? 0) + (stat('duplicateAdvisorRecords') ?? 0) }
+          : { new: parsed.requestKeys?.length ?? 0, duplicate: parsed.duplicateRequests ?? 0 }
         : null,
+    prompts: stat('newHumanPrompts') !== null ? { new: stat('newHumanPrompts')!, duplicate: stat('duplicateHumanPrompts') ?? 0 } : null,
     replaced,
     tokens: { exact: toNumber(use.exact_tokens), estimated: toNumber(msg.tokens) + toNumber(use.estimated_tokens) },
     dateRange: {
@@ -219,18 +326,33 @@ export async function previewImport(db: SqlExecutor, userId: number, parsed: Par
       modelShare: rowsWithModelBase > 0 ? 1 - rowsWithoutModel / rowsWithModelBase : null,
       hasTimestamps: toNumber(msg.without_timestamp) === 0,
     },
+    figures: {
+      exactTokens: toNumber(use.exact_rows) > 0,
+      statedTokens: toNumber(use.stated_rows) > 0,
+      textEstimates: newMessages > 0,
+      costs: newCost > 0,
+    },
     models: models.rows.map((r) => r.k),
     missingFields: parsed.missingFields,
     warnings: parsed.warnings,
     willRemoveDemoData: !parsed.source.isSynthetic && demo.n > 0,
-    nothingNew: newMessages === 0 && newUsage === 0 && newCost === 0,
+    nothingNew: newMessages === 0 && newUsage === 0 && newCost === 0 && replacedRows === 0,
   };
 }
 
-/** Changes whenever any import is committed; lets a commit detect a stale preview. */
+/**
+ * Changes whenever an import is saved or deleted; lets a commit detect a stale preview.
+ * Import ids only ever grow, so the newest id together with the number of imports
+ * changes with every save (the id rises) and every deletion (the count falls). It can
+ * only be the same again when the same imports are stored as before.
+ */
 export async function importGeneration(db: SqlExecutor, userId: number): Promise<number> {
-  const row = await one<{ g: number }>(db, `SELECT COALESCE(max(id), 0)::int AS g FROM import_batches WHERE user_id = $1`, [userId]);
-  return row.g;
+  const row = await one<{ g: unknown }>(
+    db,
+    `SELECT (COALESCE(max(id), 0)::bigint * 1000003 + count(*))::bigint AS g FROM import_batches WHERE user_id = $1`,
+    [userId],
+  );
+  return toNumber(row.g);
 }
 
 export async function loadKnownRequestKeys(db: SqlExecutor, userId: number): Promise<Set<bigint>> {
@@ -273,7 +395,7 @@ export async function commitImport(
       const now = await importGeneration(tx, userId);
       if (now !== options.generation) {
         throw new ImportError(
-          'Other data was imported after this preview was prepared. Run the import again so duplicates are detected correctly.',
+          'Other data was imported or deleted after this preview was prepared. Run the import again so that what is already stored is recognised correctly. Nothing was saved.',
           'stale_preview',
         );
       }
@@ -328,12 +450,24 @@ export async function commitImport(
     );
 
     const replaced = { usageRows: 0, costRows: 0 };
+    const supersededBatches = new Map<number, number>();
     if (parsed.replaceRange && existingSourceId !== null) {
+      await assertRangeReplaceable(tx, sourceId, parsed.replaceRange);
       const range = [sourceId, parsed.replaceRange.start, parsed.replaceRange.end];
-      const u = await tx.query(`DELETE FROM usage_records WHERE source_id = $1 AND occurred_at >= $2::timestamptz AND occurred_at < $3::timestamptz`, range);
-      const c = await tx.query(`DELETE FROM reported_costs WHERE source_id = $1 AND occurred_at >= $2::timestamptz AND occurred_at < $3::timestamptz`, range);
-      replaced.usageRows = u.affectedRows ?? 0;
-      replaced.costRows = c.affectedRows ?? 0;
+      // Stored rows that the report states exactly as they are stay with the import that brought them.
+      const u = await tx.query<{ batch_id: number }>(
+        `DELETE FROM usage_records u WHERE u.source_id = $1 AND ${inside('u', '$2::timestamptz', '$3::timestamptz')}
+            AND NOT EXISTS (SELECT 1 FROM stg_usage s WHERE ${sameUsage('s', 'u')}) RETURNING u.batch_id`,
+        range,
+      );
+      const c = await tx.query<{ batch_id: number }>(
+        `DELETE FROM reported_costs r WHERE r.source_id = $1 AND ${inside('r', '$2::timestamptz', '$3::timestamptz')}
+            AND NOT EXISTS (SELECT 1 FROM stg_costs s WHERE ${sameCost('s', 'r')}) RETURNING r.batch_id`,
+        range,
+      );
+      replaced.usageRows = u.rows.length;
+      replaced.costRows = c.rows.length;
+      for (const row of [...u.rows, ...c.rows]) supersededBatches.set(row.batch_id, (supersededBatches.get(row.batch_id) ?? 0) + 1);
     }
 
     const conv = await tx.query<{ inserted: boolean }>(
@@ -341,8 +475,16 @@ export async function commitImport(
        SELECT $1, $2, s.kind::conversation_kind, s.external_id, s.dedup_key, s.title, s.project_label, mc.id, s.created_at, s.updated_at, s.metadata
          FROM stg_conversations s LEFT JOIN model_catalog mc ON mc.model_key = s.model_key
        ON CONFLICT (user_id, dedup_key) DO UPDATE SET
-         title = COALESCE(EXCLUDED.title, conversations.title),
-         project_label = COALESCE(EXCLUDED.project_label, conversations.project_label),
+         -- The newer state of a conversation names it: an older export imported later must not put an old title back.
+         title = CASE WHEN EXCLUDED.title IS NULL THEN conversations.title
+                      WHEN conversations.title IS NULL THEN EXCLUDED.title
+                      WHEN COALESCE(EXCLUDED.updated_at, '-infinity') >= COALESCE(conversations.updated_at, '-infinity') THEN EXCLUDED.title
+                      ELSE conversations.title END,
+         project_label = CASE WHEN EXCLUDED.project_label IS NULL THEN conversations.project_label
+                              WHEN conversations.project_label IS NULL THEN EXCLUDED.project_label
+                              WHEN COALESCE(EXCLUDED.updated_at, '-infinity') >= COALESCE(conversations.updated_at, '-infinity') THEN EXCLUDED.project_label
+                              ELSE conversations.project_label END,
+         -- The model of a Claude Code session is recomputed from its stored usage below (refreshConversationCounters).
          model_id = COALESCE(conversations.model_id, EXCLUDED.model_id),
          created_at = LEAST(conversations.created_at, EXCLUDED.created_at),
          updated_at = GREATEST(conversations.updated_at, EXCLUDED.updated_at),
@@ -420,17 +562,52 @@ export async function commitImport(
       );
     }
 
+    // Earlier imports of the report that lost rows to this one say so in the history; one that has nothing
+    // left is removed from it, so the history never lists an import whose records no longer exist.
+    for (const [earlier, lost] of supersededBatches) {
+      if (earlier === batchId) continue;
+      const left = await one<{ n: number; first_at: Date | null; last_at: Date | null }>(
+        tx,
+        `SELECT count(*)::int AS n, min(occurred_at) AS first_at, max(occurred_at) AS last_at
+           FROM (SELECT occurred_at FROM usage_records WHERE batch_id = $1
+                 UNION ALL SELECT occurred_at FROM token_estimates WHERE batch_id = $1
+                 UNION ALL SELECT occurred_at FROM reported_costs WHERE batch_id = $1) x`,
+        [earlier],
+      );
+      if (left.n === 0) {
+        await tx.query(`DELETE FROM import_batches WHERE id = $1 AND user_id = $2`, [earlier, userId]);
+      } else {
+        await tx.query(
+          `UPDATE import_batches SET records_inserted = $2, coverage_start = $3, coverage_end = $4,
+                  warnings = (SELECT COALESCE(jsonb_agg(w), '[]'::jsonb) FROM jsonb_array_elements(warnings) w WHERE w->>'code' <> 'superseded')
+                             || jsonb_build_array(jsonb_build_object('code', 'superseded', 'count',
+                                  $5::int + COALESCE((SELECT (w->>'count')::int FROM jsonb_array_elements(warnings) w WHERE w->>'code' = 'superseded' LIMIT 1), 0),
+                                  'message', $6::text))
+            WHERE id = $1 AND user_id = $7`,
+          [earlier, left.n, left.first_at, left.last_at, lost,
+           'records of this import were replaced by a later import that states the same period differently. They are no longer stored under this import.', userId],
+        );
+      }
+    }
+
     const nothingNew = insertedMessages === 0 && insertedUsage === 0 && insertedCosts === 0 && replaced.usageRows === 0 && replaced.costRows === 0;
+    // A source this very import created and that received nothing is not kept, not even to remember which
+    // files were read: a source without a single record would be listed as data that does not exist.
+    const dropSource = nothingNew && existingSourceId === null;
     if (nothingNew) {
-      // Leave no empty batch (or empty, just-created source) behind.
       await tx.query(`DELETE FROM import_batches WHERE id = $1`, [batchId]);
-      if (existingSourceId === null && !parsed.syncedFiles?.length) await tx.query(`DELETE FROM data_sources WHERE id = $1`, [sourceId]);
+      if (dropSource) await tx.query(`DELETE FROM data_sources WHERE id = $1`, [sourceId]);
     } else {
       await refreshConversationCounters(tx, userId, `c.dedup_key IN (SELECT dedup_key FROM stg_conversations)`);
+      const replacedRows = replaced.usageRows + replaced.costRows;
       await tx.query(
         `UPDATE import_batches b SET
            records_inserted = $2, records_duplicate = $3,
-           coverage_start = r.first_at, coverage_end = r.last_at
+           coverage_start = r.first_at, coverage_end = r.last_at,
+           -- Deleting this import does not bring back what it replaced; the history says so before it is deleted.
+           warnings = CASE WHEN $4::int > 0
+                           THEN b.warnings || jsonb_build_array(jsonb_build_object('code', 'replaced_earlier', 'count', $4::int, 'message', $5::text))
+                           ELSE b.warnings END
           FROM (SELECT min(occurred_at) AS first_at, max(occurred_at) AS last_at
                   FROM (SELECT occurred_at FROM usage_records WHERE batch_id = $1
                         UNION ALL SELECT occurred_at FROM token_estimates WHERE batch_id = $1
@@ -440,13 +617,15 @@ export async function commitImport(
           batchId,
           insertedMessages + insertedUsage + insertedCosts,
           stagedMessages.n - insertedMessages + (stagedUsage.n - insertedUsage) + (stagedCosts.n - insertedCosts) + (parsed.duplicateRequests ?? 0),
+          replacedRows,
+          'records that an earlier import had stored for the same period were replaced by this one. Deleting this import does not bring them back.',
         ],
       );
     }
 
     return {
       batchId: nothingNew ? null : batchId,
-      sourceId: nothingNew && existingSourceId === null && !parsed.syncedFiles?.length ? null : sourceId,
+      sourceId: dropSource ? null : sourceId,
       inserted: { conversations: insertedConversations, messages: insertedMessages, usageRows: insertedUsage, costRows: insertedCosts },
       duplicates: {
         messages: stagedMessages.n - insertedMessages,
@@ -477,7 +656,10 @@ export async function refreshConversationCounters(tx: SqlExecutor, userId: numbe
        user_message_count = COALESCE(m.un, 0) + COALESCE(u.um, 0),
        assistant_message_count = COALESCE(m.an, 0) + COALESCE(u.am, 0),
        created_at = COALESCE(c.created_at, LEAST(e.first_at, u.first_at)),
-       updated_at = GREATEST(c.updated_at, e.last_at, u.last_at)
+       updated_at = GREATEST(c.updated_at, e.last_at, u.last_at),
+       -- A Claude Code session is filed under the model that handled most of its tokens, over everything stored
+       -- for it. An import only sees the files that changed, so it cannot decide this on its own.
+       model_id = CASE WHEN c.kind = 'code_session' THEN COALESCE(d.model_id, c.model_id) ELSE c.model_id END
       FROM conversations t
       LEFT JOIN LATERAL (
         SELECT count(*)::int AS n, count(*) FILTER (WHERE role = 'user')::int AS un, count(*) FILTER (WHERE role = 'assistant')::int AS an
@@ -488,6 +670,12 @@ export async function refreshConversationCounters(tx: SqlExecutor, userId: numbe
         SELECT sum(user_message_count)::int AS um, sum(assistant_message_count)::int AS am,
                min(occurred_at) AS first_at, max(occurred_at) AS last_at
           FROM usage_records WHERE conversation_id = t.id) u ON true
+      LEFT JOIN LATERAL (
+        SELECT model_id FROM usage_records
+         WHERE conversation_id = t.id AND model_id IS NOT NULL
+         GROUP BY model_id
+         ORDER BY sum(input_tokens + output_tokens + cache_read_tokens + cache_write_5m_tokens + cache_write_1h_tokens) DESC, model_id
+         LIMIT 1) d ON true
      WHERE c.id = t.id AND c.user_id = $1 AND ${where}`,
     [userId],
   );

@@ -23,6 +23,8 @@ import {
   canPickFolders,
   forgetFolder,
   pickClaudeCodeFolder,
+  rememberComputerName,
+  rememberedComputerName,
   rememberedFolder,
   setAutoSync,
   type RememberedFolder,
@@ -115,8 +117,21 @@ export function ImportPage() {
   // The webkitdirectory attribute is not in React's typings; it turns the input into a folder picker.
   useEffect(() => folderInput.current?.setAttribute('webkitdirectory', ''), []);
 
+  // The computer's name decides which source its usage is filed under, so it is remembered between visits:
+  // typed once, the same logs keep going to the same source.
+  useEffect(() => {
+    let cancelled = false;
+    void rememberedComputerName().then((name) => {
+      if (!cancelled && name !== '') setComputer((current) => (current === '' ? name : current));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const claudeCodeOptions = () => {
     const name = computer.trim();
+    void rememberComputerName(name);
     return name ? { sourceLabel: `Claude Code (${name})`, sourceRef: computerRef(name) || 'local' } : {};
   };
 
@@ -132,10 +147,11 @@ export function ImportPage() {
       return;
     }
     try {
-      const picked = await pickClaudeCodeFolder();
+      const options = claudeCodeOptions();
+      const picked = await pickClaudeCodeFolder(options);
       if (!picked) return;
       refreshFolder();
-      begin(() => wizard.current?.start(picked.files, claudeCodeOptions()));
+      begin(() => wizard.current?.start(picked.files, options));
     } catch (error) {
       setPickError(
         error instanceof Error && error.name === 'SecurityError'
@@ -148,10 +164,21 @@ export function ImportPage() {
   const syncNow = async () => {
     setSyncing(true);
     try {
-      const outcome = await syncClaudeCodeFolder(app.db, app.userId, true);
-      if (outcome && !outcome.problem) app.notifyDataChanged();
-      if (outcome) refreshFolder();
-      else setSync({ at: Date.now(), added: 0, problem: 'The browser did not grant access to the folder. Choose it again to continue.' });
+      const result = await syncClaudeCodeFolder(app.db, app.userId, true);
+      if (result.status === 'done') {
+        if (!result.outcome.problem) app.notifyDataChanged();
+        refreshFolder();
+      } else {
+        // The folder was not read. Each reason gets its own words; none of them is recorded as a reading.
+        const problem =
+          result.status === 'busy'
+            ? 'Another import is running or waiting to be saved, in this tab or another one. The folder was not read. Try again when that import is done.'
+            : result.status === 'no_permission'
+              ? `The browser did not grant access to “${result.folder}”. Choose the folder again to continue.`
+              : 'No folder is remembered on this device any more. Choose the folder again.';
+        setSync({ at: Date.now(), added: 0, problem });
+        if (result.status === 'no_folder') refreshFolder();
+      }
     } finally {
       setSyncing(false);
     }
@@ -339,7 +366,11 @@ export function ImportPage() {
               <div className="min-w-0 max-w-[70ch] text-[13px] text-ink-2">
                 <p className="text-sm text-ink">
                   The folder “{folder.name}” is remembered on this device.
-                  {sync ? ` Last read ${formatRelative(sync.at)}${sync.problem ? '' : `, ${plural(sync.added, 'new request')} added`}.` : ''}
+                  {sync ? ` Last read ${formatRelative(sync.at)}${sync.problem ? '' : `, ${plural(sync.added, 'new model request')} added`}.` : ''}
+                </p>
+                <p className="mt-1">
+                  Its usage is stored under the source “{folder.source.sourceLabel ?? 'Claude Code (this computer)'}”, and reading it again adds to that
+                  same source.
                 </p>
                 <p className="mt-1">
                   Reading it again adds only sessions that are new since the last time. The browser asks for permission before the app may read the
@@ -397,7 +428,7 @@ export function ImportPage() {
       ) : null}
 
       <div className="mt-9">
-        <ImportHistory autoSync={folder !== null && auto} onDeleted={refreshFolder} />
+        <ImportHistory autoSync={folder !== null && auto} locked={!idle} onDeleted={refreshFolder} />
       </div>
 
       <ManualEntryDialog open={manualOpen} onOpenChange={setManualOpen} />
