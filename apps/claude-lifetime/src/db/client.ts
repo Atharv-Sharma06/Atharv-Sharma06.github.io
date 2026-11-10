@@ -9,7 +9,7 @@ import { ensureStatistics } from './maintenance';
 import { migrate, MigrationError, NewerSchemaError } from './migrate';
 import { pgliteDriver } from './pglite-driver';
 import { ensureSeeded } from './seed';
-import type { FlushAnswer, FlushRequest, StartFailure, WorkerMeta } from './worker/pglite.worker';
+import type { BackupAnswer, BackupRequest, BackupStarted, FlushAnswer, FlushRequest, StartFailure, WorkerMeta } from './worker/pglite.worker';
 
 /**
  * Browser entry point to the database: one PostgreSQL instance (PGlite) per browser
@@ -42,7 +42,10 @@ export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 export interface Database {
   db: SqlDriver;
   userId: number;
-  /** Compressed copy of the whole database, for a manual backup. */
+  /**
+   * A backup: a compressed copy of everything that is stored now, and of nothing that was
+   * deleted. Rejects with a message for the person when no backup could be made.
+   */
   exportBackup(): Promise<Blob>;
 }
 
@@ -149,6 +152,86 @@ async function saveWrites(name: string): Promise<void> {
   // database has just been closed, the tab taking over is still starting and cannot answer yet. In none
   // of these cases is it known that anything was lost, so telling the person that their change could
   // not be saved would be wrong more often than right.
+}
+
+// ── Backups ─────────────────────────────────────────────────────────────────────
+
+/** How long a page waits for the database worker to take up a backup request. */
+const BACKUP_START_TIMEOUT_MS = 20_000;
+/** How long the backup itself may take. The whole database is copied row by row and then packed. */
+const BACKUP_TIMEOUT_MS = 900_000;
+
+/** What the database worker said about the backup request `id`. Null for any other message on the channel. */
+export type BackupMessage =
+  | { status: 'started' }
+  | { status: 'done'; backup: Blob }
+  /** `explained` is true when `reason` is already a sentence for the person. */
+  | { status: 'failed'; reason: string; explained: boolean };
+
+export function readBackupMessage(message: unknown, id: string): BackupMessage | null {
+  if (typeof message !== 'object' || message === null) return null;
+  const answer = message as Partial<BackupAnswer | BackupStarted> & { backup?: unknown; error?: unknown; explained?: unknown };
+  if (answer.id !== id) return null;
+  if (answer.op === ('backup-started' satisfies BackupStarted['op'])) return { status: 'started' };
+  if (answer.op !== ('backed-up' satisfies BackupAnswer['op'])) return null;
+  // Only an archive with something in it is a backup. Anything else is the worker saying that there is none.
+  if (answer.ok === true && answer.backup instanceof Blob && answer.backup.size > 0) return { status: 'done', backup: answer.backup };
+  const reason = typeof answer.error === 'string' && answer.error !== '' ? answer.error : 'no reason was given';
+  return { status: 'failed', reason, explained: answer.explained === true && reason !== 'no reason was given' };
+}
+
+/**
+ * Asks the worker that hosts database `name` for a backup: an archive of a copy that
+ * holds the rows stored now and nothing that was deleted. Rejects, with a message
+ * written for the person, when no backup was made. There is no other way to get a
+ * backup: the database's own files still hold deleted rows and are never handed out.
+ */
+export function requestBackup(name: string, timeouts: { startMs: number; totalMs: number } = { startMs: BACKUP_START_TIMEOUT_MS, totalMs: BACKUP_TIMEOUT_MS }): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const channel = new BroadcastChannel(controlChannel(name));
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const end = () => {
+      clearTimeout(startTimer);
+      clearTimeout(totalTimer);
+      channel.close();
+    };
+    const fail = (message: string) => {
+      end();
+      reject(new Error(message));
+    };
+    const startTimer = setTimeout(
+      () =>
+        fail(
+          'The database did not answer, so no backup was made. This can happen for a moment after the tab that held the database was closed. Try again.',
+        ),
+      timeouts.startMs,
+    );
+    const totalTimer = setTimeout(
+      () => fail(`The backup was not finished after ${Math.round(timeouts.totalMs / 60_000)} minutes, so nothing was downloaded. Try again.`),
+      timeouts.totalMs,
+    );
+    channel.onmessage = (event: MessageEvent<unknown>) => {
+      const said = readBackupMessage(event.data, id);
+      if (said === null) return;
+      if (said.status === 'started') {
+        clearTimeout(startTimer);
+      } else if (said.status === 'done') {
+        end();
+        resolve(said.backup);
+      } else {
+        fail(said.explained ? `No backup was made. ${said.reason}` : `No backup was made: the data could not be copied. (${said.reason})`);
+      }
+    };
+    channel.postMessage({ op: 'backup', id } satisfies BackupRequest);
+  });
+}
+
+/** `Database.exportBackup()` for database `name`. */
+async function makeBackup(name: string): Promise<Blob> {
+  const backup = await requestBackup(name);
+  // Checked the way a restore checks it, so that a file that could not be restored is never saved as a backup.
+  if (!(await looksLikeDatabaseDump(backup))) throw new Error('No backup was made: the copy of the data did not come out as a readable archive. Try again.');
+  return backup;
 }
 
 /** Why a restored database that did not reach storage was dropped again, in words for the person restoring. */
@@ -366,7 +449,7 @@ export function openDatabase(onPhase?: (phase: BootPhase) => void): Promise<Data
   pending = (async () => {
     onPhase?.('starting');
     const name = activeName();
-    const { pg, db, stop } = await connect(name);
+    const { db, stop } = await connect(name);
 
     onPhase?.('migrating');
     const userId = await exclusively(name, async () => {
@@ -392,7 +475,7 @@ export function openDatabase(onPhase?: (phase: BootPhase) => void): Promise<Data
       userId,
       name,
       stop,
-      exportBackup: async () => (await pg.dumpDataDir('gzip')) as Blob,
+      exportBackup: () => makeBackup(name),
     };
   })();
   pending.catch(() => {

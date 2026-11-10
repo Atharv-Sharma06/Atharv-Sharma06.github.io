@@ -1,7 +1,14 @@
 import { PGliteWorker } from '@electric-sql/pglite/worker';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readStartFailure, requestFlush } from '@/db/client';
+import { gunzipSync } from 'node:zlib';
+import { PGlite } from '@electric-sql/pglite';
+import { readStartFailure, requestBackup, requestFlush } from '@/db/client';
+import { migrate } from '@/db/migrate';
+import { pgliteDriver } from '@/db/pglite-driver';
+import { ensureSeeded } from '@/db/seed';
 import type { WorkerMeta } from '@/db/worker/pglite.worker';
+import { deleteBatch } from '@/import/delete';
+import { conv, importRecords, msg } from '../helpers/staged';
 import { after, installWebLocks, trackBroadcastChannels, waitFor } from '../helpers/browser';
 import {
   InProcessDatabaseWorker,
@@ -80,4 +87,59 @@ describe('the database worker behind PGlite’s own client', () => {
     await pg.close();
     expect(worker.terminated).toBe(true);
   });
+
+  it('makes a backup on request that holds what is stored and nothing that was deleted', async () => {
+    const TITLE = 'Severance negotiation with ACME-CORP-7731';
+    const KEPT = 'Planning the allotment for spring';
+    serveEngineFiles();
+    const worker = new InProcessDatabaseWorker();
+    rejections = routeUnhandledRejections(worker);
+    const pg = new PGliteWorker(worker as unknown as Worker, { dataDir: 'memory://backup', meta: meta('backup') });
+    await pg.waitReady;
+    // The app's own schema and an import that is deleted again, all through PGlite's client as the pages do it.
+    const db = pgliteDriver(pg as never);
+    await migrate(db);
+    const userId = await ensureSeeded(db, { timezone: 'UTC' });
+    const secret = await importRecords(db, userId, { conversations: [conv('a', { title: TITLE })], messages: [msg('a', 0), msg('a', 1)] }, { contentHash: 'one' });
+    await importRecords(db, userId, { conversations: [conv('k', { title: KEPT })], messages: [msg('k', 0)] }, { contentHash: 'two' });
+    await deleteBatch(db, userId, secret.result.batchId!);
+
+    // What the engine's own dump of this database gives away, and the backup must not.
+    const raw = gunzipSync(Buffer.from(await ((await pg.dumpDataDir('gzip')) as Blob).arrayBuffer()));
+    expect(raw.includes(TITLE)).toBe(true);
+
+    const backup = await requestBackup('backup', { startMs: 10_000, totalMs: 120_000 });
+
+    const files = gunzipSync(Buffer.from(await backup.arrayBuffer()));
+    expect(files.includes(TITLE)).toBe(false);
+    expect(files.includes(KEPT)).toBe(true);
+    const restored = new PGlite({ loadDataDir: backup });
+    expect((await migrate(pgliteDriver(restored))).applied).toEqual([]);
+    expect((await restored.query<{ title: string }>('SELECT title FROM conversations')).rows).toEqual([{ title: KEPT }]);
+    await restored.close();
+
+    // The database the backup was made of goes on working, and a second backup can be made.
+    expect((await pg.query<{ n: number }>('SELECT count(*)::int AS n FROM conversations')).rows).toEqual([{ n: 1 }]);
+    expect((await requestBackup('backup', { startMs: 10_000, totalMs: 120_000 })).size).toBeGreaterThan(0);
+    expect(rejections.unhandled).toEqual([]);
+    await pg.close();
+  }, 180_000);
+
+  it('says why when the stored data cannot be copied, in a sentence for the person', async () => {
+    serveEngineFiles();
+    const worker = new InProcessDatabaseWorker();
+    rejections = routeUnhandledRejections(worker);
+    const pg = new PGliteWorker(worker as unknown as Worker, { dataDir: 'memory://odd', meta: meta('odd') });
+    await pg.waitReady;
+    await migrate(pgliteDriver(pg as never));
+    await pg.exec('CREATE TABLE "left_by_something_else" (id integer)');
+
+    await expect(requestBackup('odd', { startMs: 10_000, totalMs: 120_000 })).rejects.toThrow(
+      'No backup was made. The stored data has other tables than this version of the app sets up, so it cannot be copied.',
+    );
+    // A database without the app's tables at all: the engine's own error is passed on as such.
+    await pg.exec('DROP TABLE "_prisma_migrations" CASCADE');
+    await expect(requestBackup('odd', { startMs: 10_000, totalMs: 120_000 })).rejects.toThrow(/^No backup was made: the data could not be copied\. \(.*_prisma_migrations/);
+    await pg.close();
+  }, 180_000);
 });

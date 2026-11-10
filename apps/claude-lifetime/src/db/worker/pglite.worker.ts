@@ -1,6 +1,8 @@
 /// <reference lib="webworker" />
 import { PGlite } from '@electric-sql/pglite';
 import { worker, type PGliteWorkerOptions } from '@electric-sql/pglite/worker';
+import { cleanBackup, CleanCopyError } from '../clean-copy';
+import { NewerSchemaError } from '../migrate';
 
 /**
  * Hosts PostgreSQL (PGlite) for every tab of the app.
@@ -13,6 +15,10 @@ import { worker, type PGliteWorkerOptions } from '@electric-sql/pglite/worker';
  * after every query, which would cost ~80 ms each). After a write that must not be
  * lost, the page asks for an explicit flush over the control channel below and waits
  * for the answer, which says whether the copy to IndexedDB worked.
+ *
+ * Backups are made here as well, on request over the same channel: an archive of a
+ * second, temporary database that is filled with the rows stored now (see
+ * ../clean-copy.ts for why the database's own files are not handed out).
  *
  * The messages this worker exchanges with pages are declared here. The other side is
  * src/db/client.ts, which imports these types.
@@ -37,6 +43,32 @@ export interface FlushRequest {
  * "QuotaExceededError: The quota has been exceeded."
  */
 export type FlushAnswer = { op: 'flushed'; id: string; ok: true } | { op: 'flushed'; id: string; ok: false; error: string };
+
+/** A page asks, on the control channel, for a backup of what is stored now. */
+export interface BackupRequest {
+  op: 'backup';
+  /** Chosen by the page; the answers carry it back. */
+  id: string;
+}
+
+/**
+ * Sent as soon as a backup request is taken up, before the work begins. A page that
+ * hears nothing knows that no tab hosts the database at that moment, and does not
+ * have to wait for as long as a large backup may take.
+ */
+export interface BackupStarted {
+  op: 'backup-started';
+  id: string;
+}
+
+/**
+ * The answer to a backup request: the archive, or why there is none. `explained` is
+ * true when `error` is a sentence written for the person, false when it is the
+ * engine's own error text.
+ */
+export type BackupAnswer =
+  | { op: 'backed-up'; id: string; ok: true; backup: Blob }
+  | { op: 'backed-up'; id: string; ok: false; error: string; explained: boolean };
 
 /**
  * Posted to the worker's own page when the database could not be started. PGlite's
@@ -80,6 +112,8 @@ async function fetchAsset(url: string): Promise<ArrayBuffer> {
 }
 
 let db: PGlite | null = null;
+/** The engine as it was loaded for the database, kept so that a second one can be started for a backup without the network. */
+let engine: { pgliteWasmModule: WebAssembly.Module; initdbWasmModule: WebAssembly.Module; fsBundle: Blob } | null = null;
 /** Whether the database is up. Until then, anything that stops this worker is a failed start. */
 let started = false;
 /** What stopped the start, once that has been reported to the page. */
@@ -121,6 +155,33 @@ async function flush(): Promise<void> {
   await instance.runExclusive(() => fs.syncToFs(false));
 }
 
+/** Backups are made one after the other: each needs a whole second database in memory while it is made. */
+let backups: Promise<unknown> = Promise.resolve();
+
+function backup(): Promise<Blob> {
+  const made = backups.then(() => {
+    const instance = db;
+    const files = engine;
+    if (!instance || !files) throw new Error('The database is not open.');
+    // In memory only: the copy exists until its archive is packed, and never touches this device's storage.
+    return cleanBackup(instance, () => new PGlite({ ...files }));
+  });
+  backups = made.catch(() => undefined);
+  return made;
+}
+
+/** Why no backup was made, and whether that is already a sentence for the person. */
+function backupFailure(error: unknown): { error: string; explained: boolean } {
+  if (error instanceof NewerSchemaError) {
+    return {
+      error: 'The stored data was last written by a newer version of Claude Lifetime than the one running in the tab that holds the database. Reload every open tab of the app, then download the backup again.',
+      explained: true,
+    };
+  }
+  if (error instanceof CleanCopyError) return { error: error.message, explained: true };
+  return { error: describeError(error), explained: false };
+}
+
 async function start(options: PGliteWorkerOptions): Promise<PGlite> {
   const meta = options.meta as WorkerMeta;
   const [wasm, initdb, data] = await Promise.all([
@@ -129,31 +190,43 @@ async function start(options: PGliteWorkerOptions): Promise<PGlite> {
     fetchAsset(`${meta.assetBase}pglite.data.gz`),
   ]);
   const [pgliteWasmModule, initdbWasmModule] = await Promise.all([WebAssembly.compile(wasm), WebAssembly.compile(initdb)]);
+  const files = { pgliteWasmModule, initdbWasmModule, fsBundle: new Blob([data]) };
   const instance = new PGlite({
     dataDir: options.dataDir,
     // Set when a backup is being restored: the data directory starts from that tarball.
     loadDataDir: options.loadDataDir,
     relaxedDurability: true,
-    pgliteWasmModule,
-    initdbWasmModule,
-    fsBundle: new Blob([data]),
+    ...files,
   });
   db = instance;
   await instance.waitReady;
+  engine = files;
 
-  // Only the leader (this worker) answers flush requests; follower tabs hold no database.
+  // Only the leader (this worker) answers requests on the control channel; follower tabs hold no database.
   const control = new BroadcastChannel(meta.controlChannel);
-  control.onmessage = async (event: MessageEvent<Partial<FlushRequest> | undefined>) => {
+  control.onmessage = async (event: MessageEvent<Partial<FlushRequest | BackupRequest> | undefined>) => {
     const request = event.data;
-    if (request?.op !== 'flush' || typeof request.id !== 'string') return;
-    let answer: FlushAnswer;
-    try {
-      await flush();
-      answer = { op: 'flushed', id: request.id, ok: true };
-    } catch (error) {
-      answer = { op: 'flushed', id: request.id, ok: false, error: describeError(error) };
+    if (typeof request?.id !== 'string') return;
+    const id = request.id;
+    if (request.op === 'flush') {
+      let answer: FlushAnswer;
+      try {
+        await flush();
+        answer = { op: 'flushed', id, ok: true };
+      } catch (error) {
+        answer = { op: 'flushed', id, ok: false, error: describeError(error) };
+      }
+      control.postMessage(answer);
+    } else if (request.op === 'backup') {
+      control.postMessage({ op: 'backup-started', id } satisfies BackupStarted);
+      let answer: BackupAnswer;
+      try {
+        answer = { op: 'backed-up', id, ok: true, backup: await backup() };
+      } catch (error) {
+        answer = { op: 'backed-up', id, ok: false, ...backupFailure(error) };
+      }
+      control.postMessage(answer);
     }
-    control.postMessage(answer);
   };
   started = true;
   return instance;

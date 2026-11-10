@@ -159,10 +159,17 @@ function DownloadRow() {
     setProblem(null);
     setBusy(true);
     try {
+      // A complete sentence for the person when it fails: no backup is made of anything but a clean copy of the stored rows.
       const plain = await app.exportBackup();
-      if (plain.size === 0) throw new Error('The database returned an empty file.');
       const encrypted = check.passphrase !== null;
-      const backup = check.passphrase === null ? plain : await encryptBackup(plain, check.passphrase);
+      let backup = plain;
+      if (check.passphrase !== null) {
+        try {
+          backup = await encryptBackup(plain, check.passphrase);
+        } catch (e) {
+          throw new Error(`The backup could not be encrypted, so nothing was downloaded. (${e instanceof Error ? e.message : String(e)})`);
+        }
+      }
       const name = backupFileName(new Date(), encrypted);
       const url = URL.createObjectURL(backup);
       const link = document.createElement('a');
@@ -191,8 +198,8 @@ function DownloadRow() {
       title="Download backup"
       description={
         <p>
-          One file with everything the app stores: titles, dates and token figures, together with your subscription history, the prices you
-          entered and your settings. It holds no message text.
+          One file with everything the app stores now: titles, dates and token figures, together with your subscription history, the prices you
+          entered and your settings. It holds no message text, and nothing of what you have deleted.
         </p>
       }
     >
@@ -252,8 +259,8 @@ function DownloadRow() {
         ) : null}
       </div>
       {error ? (
-        <p role="alert" className="mt-2.5 max-w-[68ch] text-[13px] text-critical">
-          The backup could not be made: {error}
+        <p role="alert" className="mt-2.5 max-w-[68ch] text-[13px] text-critical [overflow-wrap:anywhere]">
+          {error}
         </p>
       ) : null}
     </SettingRow>
