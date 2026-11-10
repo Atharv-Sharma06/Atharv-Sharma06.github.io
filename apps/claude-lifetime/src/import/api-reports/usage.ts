@@ -184,8 +184,10 @@ export const apiUsageReportParser: ImportParser = {
       warnings.add(
         'tier_not_grouped',
         `This report is not broken down by ${tierGaps.join(', ')}, so ${tierEffects.join(', ')} cannot be told apart from standard usage. ` +
-          'All of it is valued at the standard price, which is too high for batch usage and too low for the others. ' +
+          'All of it is valued at the standard price, although these kinds of usage are billed at other rates. ' +
           `For an exact valuation, add ${tierGaps.map((g) => `group_by[]=${g}`).join('&')} to the request.`,
+        undefined,
+        reader.emittedCount,
       );
     }
 

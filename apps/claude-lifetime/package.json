@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "prepare:assets": "node scripts/prepare-pglite-assets.mjs && node scripts/build-migrations.mjs",
+    "prepare:assets": "node scripts/prepare-pglite-assets.mjs && node scripts/build-migrations.mjs && node scripts/build-collector.mjs",
     "predev": "npm run prepare:assets",
     "dev": "next dev",
     "prebuild": "npm run prepare:assets",
@@ -14,7 +14,8 @@
     "pretest": "node scripts/build-migrations.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:migration": "prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma --script"
+    "db:migration": "prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma --script",
+    "build:collector": "node scripts/build-collector.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16",

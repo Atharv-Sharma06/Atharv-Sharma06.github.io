@@ -57,7 +57,7 @@ export const GENERIC_FIELD_SPECS: Record<GenericField, FieldSpec> = {
     label: 'Timestamp',
     hint: 'When the usage happened: ISO 8601 date-time (UTC unless it has an offset), a date (YYYY-MM-DD, the whole UTC day), or Unix epoch seconds or milliseconds. Required.',
     aliases: [
-      'timestamp', 'datetime', 'date_time', 'time', 'date', 'day', 'created_at', 'created', 'occurred_at', 'started_at',
+      'timestamp', 'datetime', 'time', 'date', 'day', 'created_at', 'created', 'occurred_at', 'started_at',
       'start_time', 'starting_at', 'start', 'bucket_start', 'usage_date', 'usage_date_utc', 'request_time', 'ts',
     ],
   },

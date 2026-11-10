@@ -56,7 +56,15 @@ describe('lifetime totals', () => {
     expect(o.firstUsageAt).toBe('2025-01-10T15:00:00.000Z');
     expect(o.lastUsageAt).toBe('2025-03-09T03:31:00.000Z');
     expect(o.activeDays).toBe(5);
-    expect(o.mostActiveDay).toEqual({ day: '2025-02-01', tokens: 14_800_000, conversationsActive: 1, conversationsCreated: 1, messages: 5 });
+    expect(o.mostActiveDay).toEqual({
+      day: '2025-02-01',
+      tokens: 14_800_000,
+      exact: 14_800_000,
+      estimated: 0,
+      conversationsActive: 1,
+      conversationsCreated: 1,
+      messages: 5,
+    });
   });
 
   it('respects the date range', async () => {

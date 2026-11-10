@@ -292,3 +292,37 @@ async function listConversationsById(db: SqlExecutor, filter: AnalyticsFilter, i
     planLabel: (r.plan_label as string | null) ?? null,
   };
 }
+
+export interface ConversationModelOption {
+  /** model_catalog.model_key, or null for conversations whose source names no model. */
+  modelKey: string | null;
+  displayName: string;
+  conversations: number;
+}
+
+/**
+ * The models that conversations are filed under, for the explorer's model filter.
+ *
+ * A conversation carries one model: the one its source names (for a Claude Code session,
+ * the model that processed most of its tokens). `ConversationQuery.model` matches that
+ * model, so the filter's choices have to come from the same column. The model breakdown
+ * cannot supply them: it also counts models that only assisted inside a session, and a
+ * filter on one of those would match nothing.
+ */
+export async function listConversationModels(db: SqlExecutor, userId: number): Promise<ConversationModelOption[]> {
+  const { rows } = await db.query<{ model_key: string | null; display_name: string | null; n: number }>(
+    `SELECT mc.model_key, mc.display_name, count(*)::int AS n
+       FROM conversations c
+       JOIN data_sources s ON s.id = c.source_id
+       LEFT JOIN model_catalog mc ON mc.id = c.model_id
+      WHERE c.user_id = $1 AND s.include_in_totals AND c.kind IN ('chat', 'code_session')
+      GROUP BY 1, 2
+      ORDER BY 3 DESC, 2`,
+    [userId],
+  );
+  return rows.map((r) => ({
+    modelKey: r.model_key ?? null,
+    displayName: r.display_name ?? UNKNOWN_MODEL_LABEL,
+    conversations: r.n,
+  }));
+}

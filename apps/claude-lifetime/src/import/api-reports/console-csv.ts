@@ -5,6 +5,7 @@ import { genericCsvParser } from '../generic/csv';
 import { describeFiles, InputMeter, ModelRegistry, requireFiles, WarningList } from '../generic/shared';
 import { INT32_MAX, parseCount, parseTimestamp, sampleOf } from '../generic/values';
 import { readCsv, readCsvHead } from '../util/csv';
+import { usdAmount } from './cost';
 import { detectConsoleCsvFormat, type ConsoleCsvFormat } from './detect';
 import {
   API_REPORTS_PARSER_VERSION,
@@ -29,8 +30,10 @@ import { mixedGranularity } from './report';
  * searching GitHub code for the column names):
  *
  *  Usage export, named claude_api_tokens_YYYY_MM.csv (a month, one row per day) or
- *  claude_api_tokens_YYYY_MM_DD.csv (a day, one row per hour). Six files:
- *    su-san1129/claude-pricing-dashboard  public/sample-usage.csv            (2025-06)
+ *  claude_api_tokens_YYYY_MM_DD.csv (a day, one row per hour). Seven files in six
+ *  repositories:
+ *    su-san1129/claude-pricing-dashboard  public/sample-usage.csv            (2025-06; a sample
+ *                                         file of a dashboard project, possibly edited)
  *    RichJacobs69/job-analytics           docs/costs/claude_api_tokens_2025_12_04.csv
  *    Orhanguezel/GoldMoodAstro            doc/data/claude-usage/claude_api_tokens_2026_03.csv, …_2026_08.csv
  *    ammarsapru/Waypoint                  claude_api_tokens_2026_07.csv
@@ -42,7 +45,8 @@ import { mixedGranularity } from './report';
  *    usage_input_tokens_cache_write_1h,usage_input_tokens_cache_read,
  *    usage_output_tokens,web_search_count,inference_geo,speed
  *  The 2025-06 file has no context_window, inference_geo and speed; the 2025-12 file
- *  has context_window but not the other two. Values seen: usage_date_utc "2026-07-05"
+ *  has context_window but not the other two. Only the date, model and token columns
+ *  are required here, so either header is read. Values seen: usage_date_utc "2026-07-05"
  *  (daily) and "2026-07-04 11:00" (hourly); model_version is the API model id;
  *  api_key and workspace are names, not ids; usage_type "standard"; context_window
  *  "≤ 200k" and "200k - 1M"; inference_geo "global" and "not_available"; speed empty
@@ -90,8 +94,6 @@ const COST_TYPES: Record<string, string> = { token: 'tokens' };
 
 /** The cost export names models the way the catalog's display names do ("Claude Sonnet 4.5"). */
 const MODEL_BY_DISPLAY_NAME = new Map(MODELS.map((m) => [m.displayName.toLowerCase(), m.key]));
-
-const DECIMAL_TEXT = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
 
 /** Shared state of one import of Console files. */
 class ConsoleImport {
@@ -338,9 +340,9 @@ async function importCost(files: ImportFile[], sink: ImportSink, ctx: ParseConte
   await run.eachRow(async (cell, _has, line) => {
     const bucket = run.bucket(cell('usage_date_utc'), line);
     if (bucket === null) return;
-    const amount = cell('cost_usd');
-    if (!DECIMAL_TEXT.test(amount)) {
-      return run.skip('invalid_amount', 'Rows whose cost_usd is not a decimal number were skipped.', `${sampleOf(amount)} (line ${line})`);
+    const amountUsd = usdAmount(cell('cost_usd'), 'dollars');
+    if (amountUsd === null) {
+      return run.skip('invalid_amount', 'Rows whose cost_usd is not a decimal number were skipped.', `${sampleOf(cell('cost_usd'))} (line ${line})`);
     }
     const dedupKey = run.key(
       'cost-csv',
@@ -351,7 +353,6 @@ async function importCost(files: ImportFile[], sink: ImportSink, ctx: ParseConte
     if (dedupKey === null) return;
 
     const model = cell('model');
-    const amountUsd = Decimal.from(amount).toString();
     await sink.cost({
       modelKey: MODEL_BY_DISPLAY_NAME.get(model.toLowerCase()) ?? (await run.models.resolve(model)),
       occurredAt: bucket.startIso,

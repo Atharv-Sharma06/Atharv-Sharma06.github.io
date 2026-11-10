@@ -273,4 +273,20 @@ describe('Claude Code import into the database', () => {
     expect(again.preview.requests).toEqual({ new: 5, duplicate: 0 });
     expect(await sums()).toEqual(EXAMPLE_SUMS);
   });
+
+  it('after one of several imports is deleted, the next sync reads the files again and restores exactly what was removed', async () => {
+    const first = await runImport(example(), { skipKnownFiles: true });
+    await runImport(supersetFiles(), { skipKnownFiles: true });
+    const everything = await sums();
+    expect(await count('synced_files')).toBeGreaterThan(0);
+
+    await deleteBatch(t.db, t.userId, first.result.batchId!);
+    // Without this the unchanged files would be skipped and the deleted usage would never come back.
+    expect(await count('synced_files')).toBe(0);
+    expect(await sums()).not.toEqual(everything);
+
+    const again = await runImport(supersetFiles(), { skipKnownFiles: true });
+    expect(again.preview.requests!.duplicate).toBeGreaterThan(0);
+    expect(await sums()).toEqual(everything);
+  });
 });

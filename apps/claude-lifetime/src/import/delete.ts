@@ -21,8 +21,12 @@ export async function deleteBatch(db: SqlDriver, userId: number, batchId: number
       [batchId],
     );
     const ids = touched.rows.map((r) => r.id);
-    const del = await tx.query(`DELETE FROM import_batches WHERE id = $1 AND user_id = $2`, [batchId, userId]);
-    if ((del.affectedRows ?? 0) === 0) return { deleted: false, conversationsRemoved: 0 };
+    const del = await tx.query<{ source_id: number }>(`DELETE FROM import_batches WHERE id = $1 AND user_id = $2 RETURNING source_id`, [batchId, userId]);
+    if (del.rows.length === 0) return { deleted: false, conversationsRemoved: 0 };
+    // The source's files are no longer "already read": some of what they held was just
+    // deleted. The next sync reads them again; requests that other imports still hold
+    // are recognised by their keys and are not counted twice.
+    await tx.query(`DELETE FROM synced_files WHERE source_id = $1`, [del.rows[0].source_id]);
 
     const orphans = await tx.query(
       `DELETE FROM conversations c

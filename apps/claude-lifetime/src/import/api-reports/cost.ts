@@ -47,21 +47,29 @@ const COST_REPORT: ReportKind = {
 /** A plain decimal number: optional sign, digits, optional fraction, optional exponent. */
 const DECIMAL_TEXT = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
 
-function decimalText(value: unknown): string | null {
-  // The APIs send strings. A number is accepted in its shortest exact spelling
-  // ("123.45"), never through binary arithmetic.
-  const text = typeof value === 'string' ? value.trim() : typeof value === 'number' && Number.isFinite(value) ? String(value) : '';
-  return DECIMAL_TEXT.test(text) ? text : null;
-}
+/** Amounts are stored as NUMERIC(18,6): twelve digits before the decimal point. */
+const MAX_USD = Decimal.from('1000000000000');
 
 /**
- * Converts an amount in cents to US dollars, exactly: "123.45" -> "1.2345".
- * Null when the value is not a decimal number. Fixed-point arithmetic with twelve
- * fractional digits; the APIs send at most six.
+ * Reads a money amount and returns it in US dollars as an exact decimal string, or
+ * null when the value is not a decimal number (or is too large to be an amount).
+ * `unit` says what the value counts: cents ("123.45" -> "1.2345") or dollars.
+ *
+ * Fixed-point arithmetic with twelve fractional digits — the APIs send at most six
+ * of a cent — and never binary floating point: a number is taken by its shortest
+ * exact spelling ("123.45"), as JSON wrote it.
  */
+export function usdAmount(value: unknown, unit: 'cents' | 'dollars'): string | null {
+  const text = typeof value === 'string' ? value.trim() : typeof value === 'number' && Number.isFinite(value) ? String(value) : '';
+  if (!DECIMAL_TEXT.test(text)) return null;
+  const amount = unit === 'cents' ? Decimal.from(text).div(100) : Decimal.from(text);
+  if (amount.cmp(MAX_USD) >= 0 || amount.cmp(Decimal.zero.sub(MAX_USD)) <= 0) return null;
+  return amount.toString();
+}
+
+/** Converts an amount in cents to US dollars: "123.45" -> "1.2345". */
 export function centsToUsd(cents: unknown): string | null {
-  const text = decimalText(cents);
-  return text === null ? null : Decimal.from(text).div(100).toString();
+  return usdAmount(cents, 'cents');
 }
 
 const textOrNull = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);

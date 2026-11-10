@@ -28,7 +28,7 @@ export const NAV: NavItem[] = [
   { href: '/settings/', label: 'Settings', icon: Settings },
 ];
 
-export const NAV_SECONDARY: NavItem[] = [{ href: '/methodology/', label: 'How the numbers are made', icon: BookOpen }];
+export const NAV_SECONDARY: NavItem[] = [{ href: '/methodology/', label: 'How it is counted', icon: BookOpen }];
 
 export function isActive(pathname: string, href: string): boolean {
   const path = pathname.endsWith('/') ? pathname : `${pathname}/`;

@@ -4,7 +4,7 @@ import { keepPreviousData, QueryClient, QueryClientProvider, useQuery, type UseQ
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AnalyticsFilter } from '@/analytics/base';
 import { getSettings, updateSettings, type AppSettings } from '@/analytics/settings';
-import { openDatabase, type BootPhase } from '@/db/client';
+import { DATA_CHANNEL, openDatabase, type BootPhase } from '@/db/client';
 import type { SqlDriver } from '@/db/driver';
 import { addDays, addMonths, todayInZone } from '@/lib/format';
 
@@ -79,7 +79,6 @@ type AppState =
 const AppContext = createContext<AppState>({ status: 'booting', phase: 'starting' });
 
 const RANGE_KEY = 'claude-lifetime:range';
-const DATA_CHANNEL = 'claude-lifetime:data';
 
 function loadRange(): DateRange {
   try {
@@ -136,7 +135,12 @@ function AppStateProvider({ children }: { children: ReactNode }) {
     if (typeof BroadcastChannel === 'undefined') return;
     const bc = new BroadcastChannel(DATA_CHANNEL);
     channel.current = bc;
-    bc.onmessage = () => {
+    bc.onmessage = (event: MessageEvent<{ op?: string }>) => {
+      // Another tab replaced or erased the whole database: this tab's connection is gone.
+      if (event.data?.op === 'reload') {
+        window.location.reload();
+        return;
+      }
       setDataVersion((v) => v + 1);
       setLastRefreshedAt(Date.now());
     };

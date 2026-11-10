@@ -77,17 +77,24 @@ describe('centsToUsd', () => {
       [undefined, null],
       [Number.NaN, null],
       [{}, null],
+      // more than the amount column can hold: not an amount
+      ['1e30', null],
+      ['-100000000000000', null],
+      ['99999999999999', '999999999999.99'],
     ];
     for (const [cents, usd] of table) expect(centsToUsd(cents), JSON.stringify(cents)).toBe(usd);
   });
 
-  it('does not use binary floating point', () => {
-    // 0.1 + 0.2 cents, three times over: floats would give 0.009000000000000001 dollars
-    const { length } = centsToUsd('0.30000000000000004') ?? '';
-    expect(length).toBeLessThanOrEqual(14);
-    expect(centsToUsd('0.3')).toBe('0.003');
+  it('does decimal arithmetic, not binary floating point', () => {
+    // as doubles: 1.005 / 100 = 0.010049999999999998, 8.2 / 100 = 0.08199999999999999, 0.07 / 100 = 0.0007000000000000001
+    expect(1.005 / 100).not.toBe(0.01005);
     expect(centsToUsd('1.005')).toBe('0.01005');
-    expect(centsToUsd('4.35')).toBe('0.0435');
+    expect(centsToUsd('8.2')).toBe('0.082');
+    expect(centsToUsd('0.07')).toBe('0.0007');
+    expect(centsToUsd(8.2)).toBe('0.082');
+    // twelve fractional digits of a dollar are kept; the APIs send six of a cent
+    expect(centsToUsd('0.1234567891')).toBe('0.001234567891');
+    expect(centsToUsd('0.30000000000000004')).toBe('0.003');
   });
 });
 
@@ -199,7 +206,7 @@ describe('API cost report: rows', () => {
             tokens('12.5'),
             tokens('n/a', { token_type: 'a' }),
             tokens(null, { token_type: 'b' }),
-            tokens('-1250', { cost_type: 'credit', token_type: null, description: 'Adjustment' }),
+            tokens('-1250', { token_type: 'cache_read_input_tokens' }),
             tokens(1999, { token_type: 'c' }),
           ]),
         ]),

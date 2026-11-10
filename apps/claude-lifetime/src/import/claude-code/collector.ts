@@ -463,22 +463,25 @@ function megabytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** "1 response", "2 responses". */
+const things = (n: number, one: string) => `${num(n)} ${one}${n === 1 ? '' : 's'}`;
+
 export function formatSummary(r: CollectResult): string {
   const lines = [
-    `Read       ${num(r.transcriptFiles)} transcript file${r.transcriptFiles === 1 ? '' : 's'} (${megabytes(r.bytesRead)}) under ${r.roots.join(', ')}`,
-    `Found      ${num(r.responsesFound)} responses and ${num(r.promptsFound)} prompts in them`,
-    `New        ${num(r.responsesAdded)} responses and ${num(r.promptsAdded)} prompts since the last run` +
-      (r.responsesImproved > 0 ? ` (${num(r.responsesImproved)} earlier records completed)` : ''),
-    `Ledger     ${num(r.responses)} responses, ${num(r.prompts)} prompts, ${num(r.sessions)} sessions`,
+    `Read       ${things(r.transcriptFiles, 'transcript file')} (${megabytes(r.bytesRead)}) under ${r.roots.join(', ')}`,
+    `Found      ${things(r.responsesFound, 'response')} and ${things(r.promptsFound, 'prompt')} in them`,
+    `New        ${things(r.responsesAdded, 'response')} and ${things(r.promptsAdded, 'prompt')} since the last run` +
+      (r.responsesImproved > 0 ? ` (${things(r.responsesImproved, 'earlier record')} completed)` : ''),
+    `Ledger     ${things(r.responses, 'response')}, ${things(r.prompts, 'prompt')}, ${things(r.sessions, 'session')}`,
     `Range      ${r.firstTimestamp === null || r.lastTimestamp === null ? 'no usage yet' : `${r.firstTimestamp.slice(0, 10)} to ${r.lastTimestamp.slice(0, 10)} (UTC)`}`,
     `Saved to   ${r.ledgerPath} (${megabytes(r.ledgerBytes)})${r.written ? '' : ', already up to date'}`,
   ];
   if (r.outPath !== null) lines.push(`Copy       ${r.outPath}`);
   const notes: string[] = [];
-  if (r.deferredInProgress > 0) notes.push(`${num(r.deferredInProgress)} response(s) still being written were left for the next run`);
-  if (r.partialAdded > 0) notes.push(`${num(r.partialAdded)} response(s) were only recorded as streaming snapshots, so their output tokens may be undercounted`);
-  if (r.malformedLines > 0) notes.push(`${num(r.malformedLines)} unreadable line(s) skipped (a cut-off last line is normal while a session runs)`);
-  if (r.filesUnreadable > 0) notes.push(`${num(r.filesUnreadable)} file(s) could not be read to the end and will be read again next time`);
+  if (r.deferredInProgress > 0) notes.push(`${things(r.deferredInProgress, 'response')} still being written: left for the next run`);
+  if (r.partialAdded > 0) notes.push(`${things(r.partialAdded, 'response')} only recorded as a streaming snapshot: output tokens may be undercounted`);
+  if (r.malformedLines > 0) notes.push(`${things(r.malformedLines, 'unreadable line')} skipped (a cut-off last line is normal while a session runs)`);
+  if (r.filesUnreadable > 0) notes.push(`${things(r.filesUnreadable, 'file')} could not be read to the end and will be read again next time`);
   for (const note of notes) lines.push(`Note       ${note}`);
   return `${lines.join('\n')}\n`;
 }

@@ -37,24 +37,31 @@ function SplitBar({ exact, estimated }: { exact: number; estimated: number }) {
         {estimated > 0 ? <div className="hatch-estimated h-full rounded-full bg-accent/45" style={{ flexGrow: estimated, flexBasis: 0, minWidth: 6 }} /> : null}
       </div>
       <dl className="mt-2.5 flex flex-wrap gap-x-8 gap-y-1 text-[13px]">
-        <div className="flex items-baseline gap-2">
-          <dt className="inline-flex items-center gap-1.5 text-ink-2">
-            <span className="size-2.5 rounded-[3px] bg-accent" aria-hidden="true" />
-            Exact
-          </dt>
-          <dd className="tabular text-ink" title={`${formatInt(exact)} tokens`}>
-            {formatTokens(exact)}
-          </dd>
-        </div>
-        <div className="flex items-baseline gap-2">
-          <dt className="inline-flex items-center gap-1.5 text-ink-2">
-            <span className="hatch-estimated size-2.5 rounded-[3px] bg-accent/45" aria-hidden="true" />
-            Estimated
-          </dt>
-          <dd className="tabular text-ink" title={`${formatInt(estimated)} tokens`}>
-            {formatTokens(estimated)}
-          </dd>
-        </div>
+        {exact > 0 ? (
+          <div className="flex items-baseline gap-2">
+            <dt className="inline-flex items-center gap-1.5 text-ink-2">
+              <span className="size-2.5 rounded-[3px] bg-accent" aria-hidden="true" />
+              Exact
+            </dt>
+            <dd className="tabular text-ink" title={`${formatInt(exact)} tokens`}>
+              {formatTokens(exact)}
+            </dd>
+          </div>
+        ) : null}
+        {estimated > 0 ? (
+          <div className="flex items-baseline gap-2">
+            <dt className="inline-flex items-center gap-1.5 text-ink-2">
+              <span className="hatch-estimated size-2.5 rounded-[3px] bg-accent/45" aria-hidden="true" />
+              Estimated
+            </dt>
+            <dd className="tabular text-ink" title={`${formatInt(estimated)} tokens`}>
+              {formatTokens(estimated)}
+            </dd>
+          </div>
+        ) : null}
+        {exact === 0 || estimated === 0 ? (
+          <div className="text-ink-3">{exact === 0 ? 'No source in this range meters tokens.' : 'Nothing in this range is estimated.'}</div>
+        ) : null}
       </dl>
     </div>
   );
@@ -91,12 +98,24 @@ function Composition({ tokens, basis }: { tokens: TokenTotals; basis: 'processed
   );
 }
 
-function Hero({ overview, basis, scoped, rangeLabel }: { overview: Overview; basis: 'processed' | 'new'; scoped: boolean; rangeLabel: string }) {
+function Hero({
+  overview,
+  basis,
+  scoped,
+  rangeLabel,
+  className,
+}: {
+  overview: Overview;
+  basis: 'processed' | 'new';
+  scoped: boolean;
+  rangeLabel: string;
+  className?: string;
+}) {
   const t = overview.tokens;
   const shown = useCountUp(t.total);
   const level = confidenceOf(t.exact, t.estimated);
   return (
-    <Card className="grid gap-x-10 gap-y-7 px-6 py-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+    <Card className={cn('grid gap-x-8 gap-y-7 px-6 py-5 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]', className)}>
       <div className="min-w-0">
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-[13px] text-ink-2">{scoped ? `Tokens, ${rangeLabel}` : 'Lifetime tokens'}</h2>
@@ -127,7 +146,7 @@ function Hero({ overview, basis, scoped, rangeLabel }: { overview: Overview; bas
           </p>
         ) : null}
       </div>
-      <div className="min-w-0 border-line lg:border-l lg:pl-10">
+      <div className="min-w-0 border-line md:border-l md:pl-8">
         <Composition tokens={t} basis={basis} />
         {overview.firstUsageAt ? (
           <p className="mt-5 text-[13px] text-ink-2">
@@ -262,7 +281,7 @@ export function OverviewPage() {
 
       {!coverage.data || !overview.data ? (
         <div aria-busy="true" className="grid gap-4 md:grid-cols-4">
-          <Skeleton className="h-56 md:col-span-4" />
+          <Skeleton className="h-64 md:col-span-4" />
           <Skeleton className="h-36" />
           <Skeleton className="h-36" />
           <Skeleton className="h-36" />
@@ -272,26 +291,56 @@ export function OverviewPage() {
         <NoDataYet what="Your history starts with an import" />
       ) : (
         <div className={cn('space-y-4 transition-opacity', overview.isPlaceholderData && 'opacity-70')}>
-          <Hero overview={overview.data} basis={settings.basis} scoped={scoped} rangeLabel={rangeLabel} />
-
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-4 lg:grid-cols-3">
+            <Hero overview={overview.data} basis={settings.basis} scoped={scoped} rangeLabel={rangeLabel} className="lg:col-span-2" />
             <MetricCard
               label="Total conversations"
               value={formatInt(overview.data.conversations.total)}
               confidence={overview.data.conversations.total > 0 ? 'exact' : 'unavailable'}
               confidenceHint="Counted from the records you imported. Conversations deleted before an export are not part of it."
+              action={
+                <Link href="/conversations/" className="text-[13px] text-accent-soft underline-offset-4 hover:underline">
+                  Explore conversations
+                </Link>
+              }
             >
               <p>
-                {plural(overview.data.conversations.chats, 'chat')} and {plural(overview.data.conversations.codeSessions, 'Claude Code session')}.
+                {new Intl.ListFormat('en', { type: 'conjunction' }).format(
+                  [
+                    overview.data.conversations.chats > 0 ? plural(overview.data.conversations.chats, 'chat') : null,
+                    overview.data.conversations.codeSessions > 0 ? plural(overview.data.conversations.codeSessions, 'Claude Code session') : null,
+                  ].filter((v): v is string => v !== null),
+                ) || 'No conversations in this range'}
+                .
               </p>
               {overview.data.messages.total > 0 ? (
-                <p>
-                  {formatInt(overview.data.messages.total)} messages
-                  {overview.data.averageConversationLength !== null ? `, ${formatDecimal(overview.data.averageConversationLength, 1)} per conversation` : ''}.
-                </p>
+                <dl className="mt-3 space-y-1.5 border-t border-line pt-3">
+                  <div className="flex justify-between gap-3">
+                    <dt>Messages you sent</dt>
+                    <dd className="tabular text-ink">{formatInt(overview.data.messages.user)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt>Replies from Claude</dt>
+                    <dd className="tabular text-ink">{formatInt(overview.data.messages.assistant)}</dd>
+                  </div>
+                  {overview.data.averageConversationLength !== null ? (
+                    <div className="flex justify-between gap-3">
+                      <dt>Messages per conversation</dt>
+                      <dd className="tabular text-ink">{formatDecimal(overview.data.averageConversationLength, 1)}</dd>
+                    </div>
+                  ) : null}
+                  {overview.data.firstUsageAt ? (
+                    <div className="flex justify-between gap-3">
+                      <dt>Earliest record</dt>
+                      <dd className="tabular text-ink">{formatDay(dayInZone(overview.data.firstUsageAt, settings.timezone))}</dd>
+                    </div>
+                  ) : null}
+                </dl>
               ) : null}
             </MetricCard>
+          </div>
 
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {beforeAfter.data ? (
               <>
                 <SubscriptionSide label="Before subscription" side="before" data={beforeAfter.data} scoped={scoped} />
@@ -319,7 +368,8 @@ export function OverviewPage() {
                   tokens that day.
                 </p>
                 <p>
-                  {plural(overview.data.mostActiveDay.conversationsActive, 'conversation')} active, {formatInt(overview.data.mostActiveDay.messages)} messages.
+                  {plural(overview.data.mostActiveDay.conversationsActive, 'conversation')} active ({formatInt(overview.data.mostActiveDay.conversationsCreated)}{' '}
+                  started), {formatInt(overview.data.mostActiveDay.messages)} messages.
                 </p>
               </MetricCard>
             ) : (

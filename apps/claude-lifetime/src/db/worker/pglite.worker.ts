@@ -70,6 +70,8 @@ worker({
     const [pgliteWasmModule, initdbWasmModule] = await Promise.all([WebAssembly.compile(wasm), WebAssembly.compile(initdb)]);
     db = new PGlite({
       dataDir: options.dataDir,
+      // Set when a backup is being restored: the data directory starts from that tarball.
+      loadDataDir: options.loadDataDir,
       relaxedDurability: true,
       pgliteWasmModule,
       initdbWasmModule,

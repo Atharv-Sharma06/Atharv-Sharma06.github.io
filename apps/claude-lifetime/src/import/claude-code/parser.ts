@@ -10,8 +10,8 @@ import {
   type SyncedFileInfo,
 } from '@/core/types';
 import { aggregateUsage } from './aggregate';
-import { deferInProgress, extractTranscripts, IN_PROGRESS_WINDOW_MS } from './extract';
-import { emptyLedger, LedgerError, ledgerRecords, looksLikeLedger, mergeIntoLedger, parseLedger } from './ledger';
+import { deferInProgress, extractTranscripts, IN_PROGRESS_WINDOW_MS, isTranscriptRow } from './extract';
+import { emptyLedger, LEDGER_FORMAT, LedgerError, ledgerRecords, looksLikeLedger, mergeIntoLedger, parseLedger } from './ledger';
 
 /**
  * The two Claude Code importers.
@@ -39,6 +39,18 @@ export interface ClaudeCodeImportOptions {
   now?: number;
   sourceLabel?: string;
   sourceRef?: string;
+}
+
+export type ClaudeCodeFormat = typeof CLAUDE_CODE_TRANSCRIPT_FORMAT | typeof CLAUDE_CODE_LEDGER_FORMAT;
+
+/**
+ * Which Claude Code input a parsed JSON value is, or null for neither: the ledger (a
+ * JSON document) or a transcript (JSON Lines: pass the value of the first line).
+ * A pure function for the app's format detection, like the ones of the other importers.
+ */
+export function detectClaudeCodeFormat(value: unknown): ClaudeCodeFormat | null {
+  if (typeof value === 'object' && value !== null && (value as { format?: unknown }).format === LEDGER_FORMAT) return CLAUDE_CODE_LEDGER_FORMAT;
+  return isTranscriptRow(value) ? CLAUDE_CODE_TRANSCRIPT_FORMAT : null;
 }
 
 const READING = 'Reading transcripts';

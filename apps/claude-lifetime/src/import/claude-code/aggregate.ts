@@ -202,10 +202,12 @@ export async function aggregateUsage(
     if (entry === undefined) s.tokens.set(key, { modelKey, tier, tokens });
     else entry.tokens += tokens;
   };
-  const touch = (s: SessionTotals, first: number, last: number) => {
+  // A response is placed at its first line (`ts`), here as in the buckets: the ledger
+  // keeps only that timestamp, and both routes must describe a session identically.
+  const touch = (s: SessionTotals, ts: number) => {
     s.counted = true;
-    if (first < s.first) s.first = first;
-    if (last > s.last) s.last = last;
+    if (ts < s.first) s.first = ts;
+    if (ts > s.last) s.last = ts;
   };
   const bucketFor = (sessionId: string, modelKey: string | null, tier: string, ts: number): Bucket => {
     const start = Math.floor(ts / BUCKET_MS) * BUCKET_MS;
@@ -257,7 +259,7 @@ export async function aggregateUsage(
       b.webSearch += r.webSearch;
       // A turn ends with a main-thread response that does not hand over to a tool.
       if (!sidechain && (r.flags & ResponseFlag.TOOL_USE) === 0) b.assistantMessages++;
-      touch(session, r.ts, r.lastTs);
+      touch(session, r.ts);
       stats.newResponses++;
       stats.thinkingTokens += r.thinking;
       stats.webSearchRequests += r.webSearch;
@@ -284,7 +286,7 @@ export async function aggregateUsage(
         stats.advisorRecords++;
         if (claim(`${r.key}:advisor:${it.index}`)) {
           addTokens(bucketFor(r.sessionId, advisorModel, advisorTier, r.ts), it);
-          touch(session, r.ts, r.lastTs);
+          touch(session, r.ts);
           stats.newAdvisorRecords++;
           if (it.cacheTtlUnknown) tally.add('cache_ttl_unknown', r.key);
         } else stats.duplicateAdvisorRecords++;
@@ -360,7 +362,7 @@ export async function aggregateUsage(
       const target =
         lo < line.length ? { modelKey: modelOf[line[lo]], tier: tierOf[line[lo]] } : (dominant(session) ?? { modelKey: null, tier: 'standard' });
       bucketFor(p.sessionId, target.modelKey, target.tier, p.ts).userMessages++;
-      touch(session, p.ts, p.ts);
+      touch(session, p.ts);
       stats.newHumanPrompts++;
       if (p.kind === PromptKind.COMMAND) stats.newSlashCommands++;
       else if (p.kind === PromptKind.SHELL) stats.newShellCommands++;

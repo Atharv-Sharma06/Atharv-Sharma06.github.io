@@ -1,6 +1,6 @@
 'use client';
 
-import { X } from 'lucide-react';
+import { Info, X } from 'lucide-react';
 import { Dialog as RDialog, Popover as RPopover, Tooltip as RTooltip } from 'radix-ui';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/cn';
@@ -110,5 +110,21 @@ export function Tooltip({ content, children, side = 'top' }: { content: ReactNod
         </RTooltip.Content>
       </RTooltip.Portal>
     </RTooltip.Root>
+  );
+}
+
+/** A small "i" that explains the figure or control next to it. Opens on click, so it works with touch and keyboard. */
+export function InfoTip({ label = 'More information', children, align = 'center' }: { label?: string; children: ReactNode; align?: 'start' | 'center' | 'end' }) {
+  return (
+    <Popover
+      align={align}
+      trigger={
+        <button type="button" aria-label={label} className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-ink-3 hover:bg-raised hover:text-ink">
+          <Info className="size-3.5" aria-hidden="true" />
+        </button>
+      }
+    >
+      <div className="space-y-2">{children}</div>
+    </Popover>
   );
 }

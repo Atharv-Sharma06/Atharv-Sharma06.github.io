@@ -28,7 +28,6 @@ import {
  * measurements into staged records.
  */
 export interface ReportRow {
-  shape: 'legacy' | 'analytics';
   /** Bucket start, ISO-8601 UTC. */
   startIso: string;
   bucketSeconds: number;
@@ -300,10 +299,9 @@ export class ReportReader {
 
   private row(startMs: number, endMs: number | null, dims: Json, metrics: Json): ReportRow | null {
     this.seen++;
-    const shape = this.shape as 'legacy' | 'analytics';
     const startIso = new Date(startMs).toISOString();
     const bucketSeconds = bucketSecondsBetween(startMs, endMs);
-    const dimensions = shape === 'legacy' ? dimensionsOf(dims, 'result', this.kind.measurementFields) : dimensionsOf(dims, 'group');
+    const dimensions = this.shape === 'legacy' ? dimensionsOf(dims, 'result', this.kind.measurementFields) : dimensionsOf(dims, 'group');
     const dedupKey = bucketKey(this.kind.keyPrefix, startIso, bucketSeconds, dimensions);
     if (this.keys.has(dedupKey)) {
       this.skip(
@@ -321,7 +319,7 @@ export class ReportReader {
       this.wholeRangeRows++;
       this.wholeRangeSample ??= `${startIso.slice(0, 10)} to ${new Date(endMs as number).toISOString().slice(0, 10)}`;
     }
-    return { shape, startIso, bucketSeconds, dims, metrics, dimensionNames: dimensions.pairs.map(([name]) => name), dedupKey };
+    return { startIso, bucketSeconds, dims, metrics, dimensionNames: dimensions.pairs.map(([name]) => name), dedupKey };
   }
 
   private setShape(shape: 'legacy' | 'analytics'): void {

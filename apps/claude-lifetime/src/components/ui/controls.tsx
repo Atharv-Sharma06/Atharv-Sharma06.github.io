@@ -2,7 +2,7 @@
 
 import { Check, ChevronDown } from 'lucide-react';
 import { Select as RSelect, Switch as RSwitch, ToggleGroup } from 'radix-ui';
-import { forwardRef, type InputHTMLAttributes, type ReactNode } from 'react';
+import { forwardRef, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
 import { cn } from '@/lib/cn';
 
 /** A small set of mutually exclusive choices, shown side by side. */
@@ -112,6 +112,20 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
       ref={ref}
       className={cn(
         'h-9 w-full min-w-0 rounded-[var(--radius-control)] border border-line bg-surface px-3 text-sm text-ink placeholder:text-ink-3',
+        'hover:border-line-strong focus:border-accent focus:outline-none disabled:opacity-50',
+        className,
+      )}
+      {...props}
+    />
+  );
+});
+
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea({ className, ...props }, ref) {
+  return (
+    <textarea
+      ref={ref}
+      className={cn(
+        'min-h-20 w-full min-w-0 rounded-[var(--radius-control)] border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-3',
         'hover:border-line-strong focus:border-accent focus:outline-none disabled:opacity-50',
         className,
       )}

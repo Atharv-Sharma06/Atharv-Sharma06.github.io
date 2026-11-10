@@ -361,6 +361,19 @@ export function transcriptPathInfo(rawPath: string): TranscriptPathInfo {
   return { path, base, isTranscript, isSubagent, sessionId, stem };
 }
 
+/**
+ * True when a parsed JSON Lines value looks like a row of a Claude Code transcript:
+ * every row has a string `type` and names its session. Two row types do not:
+ * `summary` names the last row it summarises, `file-history-snapshot` the message it
+ * belongs to. Used to tell a transcript from other JSON Lines files by its first line.
+ */
+export function isTranscriptRow(value: unknown): boolean {
+  if (!isObject(value) || typeof value.type !== 'string') return false;
+  if (typeof value.sessionId === 'string') return true;
+  if (value.type === 'summary') return typeof value.leafUuid === 'string';
+  return value.type === 'file-history-snapshot' && typeof value.messageId === 'string';
+}
+
 // ── Human prompts ─────────────────────────────────────────────────────────────
 
 /**

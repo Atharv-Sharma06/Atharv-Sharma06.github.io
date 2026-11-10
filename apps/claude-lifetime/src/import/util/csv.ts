@@ -34,7 +34,7 @@ export interface CsvOptions {
 }
 
 /** A row of usage data is well under a kilobyte; this leaves room for free-text columns. */
-export const DEFAULT_MAX_RECORD_CHARS = 4 * 1024 * 1024;
+const DEFAULT_MAX_RECORD_CHARS = 4 * 1024 * 1024;
 
 /** The first line is looked at before parsing starts; a longer one is judged by this much of it. */
 const DETECT_CHARS = 64 * 1024;

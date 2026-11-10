@@ -151,7 +151,11 @@ export const fixtureText = (path: string): string => readFileSync(join(FIXTURE_D
 
 /** Every file below tests/fixtures/claude-code/<dir>, with paths relative to it. */
 export function loadFixtureDir(dir: string, lastModified?: number): ImportFile[] {
-  const root = join(FIXTURE_DIR, dir);
+  return loadDir(join(FIXTURE_DIR, dir), lastModified);
+}
+
+/** Every file below a directory, as a folder picker would hand it over (paths relative to the folder). */
+export function loadDir(root: string, lastModified?: number): ImportFile[] {
   const out: ImportFile[] = [];
   const walk = (abs: string, rel: string) => {
     for (const name of readdirSync(abs).sort()) {

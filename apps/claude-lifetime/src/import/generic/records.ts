@@ -65,8 +65,19 @@ export function readGenericOptions(ctx: ParseContext): GenericOptions {
   };
 }
 
-/** What a model identifier looks like: starts with a letter or digit, no control characters, not a sentence. */
-const MODEL_ID = /^[\p{L}\p{N}][\p{L}\p{N} ._:@/[\]()+-]{0,99}$/u;
+const MODEL_CHARACTERS = /^[\p{L}\p{N}][\p{L}\p{N} ._:@/[\]()+-]*$/u;
+
+/**
+ * What a model identifier looks like, as opposed to a cell of free text that was
+ * mapped as "model" by mistake: an id without spaces ("claude-sonnet-4-5-20250929",
+ * a cloud provider's long id), or a short display name of a few words ("Claude
+ * Sonnet 4.5"). A sentence is neither.
+ */
+function looksLikeModelId(text: string): boolean {
+  if (!MODEL_CHARACTERS.test(text)) return false;
+  const words = text.split(' ').length;
+  return words === 1 ? text.length <= 120 : words <= 5 && text.length <= 64;
+}
 
 /** More different unknown "models" than this means the column holds something else. */
 const MAX_UNKNOWN_MODELS = 200;
@@ -238,7 +249,7 @@ export class GenericUsageBuilder {
     // ── model ──
     let modelKey: string | null = null;
     const model = typeof raw.model === 'string' ? raw.model.trim() : raw.model;
-    if (typeof model === 'string' && MODEL_ID.test(model)) {
+    if (typeof model === 'string' && looksLikeModelId(model)) {
       modelKey = await this.models.resolve(model);
       if (this.models.unknownCount > MAX_UNKNOWN_MODELS) {
         throw new ImportError(
@@ -269,8 +280,10 @@ export class GenericUsageBuilder {
     } else {
       // Without an id, a record is identified by everything it says. Confidence and the
       // conversation title are left out: changing them must not turn a row into a new one.
+      // The model goes in as the file spells it, so that a later catalog which knows
+      // the identifier under another key still recognises the row.
       const hash = sha256Hex(
-        JSON.stringify([this.sourceRef, occurredAt, bucketSeconds, modelKey, priceTier, input, output, cacheRead, cacheWrite5m, cacheWrite1h, requests, conversationId]),
+        JSON.stringify([this.sourceRef, occurredAt, bucketSeconds, typeof model === 'string' && model !== '' ? model : null, priceTier, input, output, cacheRead, cacheWrite5m, cacheWrite1h, requests, conversationId]),
       );
       dedupKey = `generic:${hash}`;
       // 52 bits of the hash are plenty to spot a repeat and cost a fraction of the memory of the string.

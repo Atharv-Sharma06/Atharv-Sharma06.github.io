@@ -8,7 +8,7 @@ import { SOURCE_KIND_LABEL } from '@/components/shell/coverage-indicator';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { LIMITATION_TEXT } from '@/core/limitations';
 import { cn } from '@/lib/cn';
-import { formatDay, formatInstant, formatInt, formatTokens, plural } from '@/lib/format';
+import { formatDay, formatInstant, formatInt, formatTokens, formatUsd, plural } from '@/lib/format';
 import { useApp } from '@/state/app';
 
 function Group({ icon, tone, title, children }: { icon: typeof CircleCheck; tone: string; title: string; children: ReactNode }) {
@@ -39,6 +39,13 @@ export function CoveragePanel({ coverage }: { coverage: Coverage }) {
   const hasEstimated = coverage.estimatedTokens > 0;
   const conversations = counted.reduce((sum, s) => sum + s.conversations, 0);
   const topLimits = coverage.limitations.filter((l) => l.name !== 'MODEL_UNKNOWN').slice(0, 4);
+  const meteredBy = new Intl.ListFormat('en', { type: 'conjunction' }).format(
+    [
+      kinds.has('claude_code') && 'Claude Code',
+      (kinds.has('api_usage_report') || kinds.has('generic_csv') || kinds.has('generic_json')) && 'usage reports',
+      kinds.has('manual') && 'entries you typed in',
+    ].filter((v): v is string => typeof v === 'string'),
+  );
 
   return (
     <Card id="coverage" className="scroll-mt-20">
@@ -76,6 +83,7 @@ export function CoveragePanel({ coverage }: { coverage: Coverage }) {
                         {s.isSynthetic ? ', synthetic' : ''}
                         {!s.includeInTotals ? ', left out of totals' : ''}
                       </span>
+                      {s.reportedCostUsd !== null ? <span className="block text-xs text-ink-3">{formatUsd(s.reportedCostUsd)} of billed cost reported</span> : null}
                     </th>
                     <td className="whitespace-nowrap px-3 py-2 text-ink-2">
                       {s.firstRecordAt ? `${formatInstant(s.firstRecordAt, tz)} – ${formatInstant(s.lastRecordAt, tz)}` : 'No dated records'}
@@ -120,11 +128,8 @@ export function CoveragePanel({ coverage }: { coverage: Coverage }) {
           <Group icon={CircleCheck} tone="text-good" title="Known exactly">
             {hasExact ? (
               <li>
-                {formatTokens(coverage.exactTokens)} tokens metered by{' '}
-                {[kinds.has('claude_code') && 'Claude Code', (kinds.has('api_usage_report') || kinds.has('generic_csv') || kinds.has('generic_json')) && 'usage reports', kinds.has('manual') && 'entries you typed in']
-                  .filter(Boolean)
-                  .join(', ') || 'your sources'}
-                , with their model and date.
+                {formatTokens(coverage.exactTokens)} tokens metered by {meteredBy || 'your sources'}, with their date and, where the source names it, their
+                model.
               </li>
             ) : (
               <li>No imported source meters tokens yet. Claude Code logs and API usage reports do.</li>

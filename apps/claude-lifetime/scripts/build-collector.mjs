@@ -14,7 +14,6 @@ const outArg = process.argv.indexOf('--outfile');
 const outfile = outArg === -1 ? join(root, 'public', 'tools', 'claude-lifetime-collect.mjs') : resolve(process.argv[outArg + 1]);
 
 const banner = `#!/usr/bin/env node
-/* eslint-disable */
 // Claude Lifetime collector.
 //
 // Reads Claude Code's session transcripts on this computer and keeps a small ledger of
@@ -29,6 +28,9 @@ const banner = `#!/usr/bin/env node
 
 mkdirSync(dirname(outfile), { recursive: true });
 await build({
+  // The bundle names its source files in comments, relative to this directory: fixing
+  // it makes the output the same wherever the script is started from.
+  absWorkingDir: root,
   entryPoints: [join(root, 'src', 'import', 'claude-code', 'collector-cli.ts')],
   outfile,
   bundle: true,

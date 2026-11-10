@@ -72,7 +72,7 @@ describe('Claude Console usage export', () => {
     const { parsed, out } = await parse(text);
     expect(out.usage.map((u) => [u.occurredAt, u.bucketSeconds, u.priceTier, u.cacheReadTokens])).toEqual([
       ['2026-07-04T11:00:00.000Z', 3600, 'standard', 31000000],
-      ['2026-07-04T12:00:00.000Z', 3600, 'standard', 5 - 5],
+      ['2026-07-04T12:00:00.000Z', 3600, 'standard', 0],
     ]);
     expect(parsed.replaceRange).toEqual({ start: '2026-07-04T11:00:00.000Z', end: '2026-07-04T13:00:00.000Z' });
     expect(parsed.recordsSeen).toBe(2);

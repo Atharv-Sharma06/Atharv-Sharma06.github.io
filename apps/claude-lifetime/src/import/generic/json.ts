@@ -72,7 +72,9 @@ export const genericJsonParser: ImportParser = {
     const record = async (value: unknown): Promise<void> => {
       const where = `record ${builder.seen + 1}`;
       if (!isObject(value)) {
-        builder.reject('not_a_record', 'Entries that are not objects were skipped.', `${clip(value, 30)} (${where})`);
+        // Only what kind of value it is: a stray text in the list is not quoted in a warning.
+        const kind = value === null ? 'null' : Array.isArray(value) ? 'a list' : `a ${typeof value}`;
+        builder.reject('not_a_record', 'Entries that are not objects with fields were skipped.', `${kind} (${where})`);
         return;
       }
       const raw: RawRecord = {};

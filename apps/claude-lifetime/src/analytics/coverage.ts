@@ -24,6 +24,8 @@ export interface SourceCoverage {
   /** Processed tokens, split by confidence. */
   exactTokens: number;
   estimatedTokens: number;
+  /** Actual spend from imported cost reports (exact decimal string, USD), or null when the source has none. */
+  reportedCostUsd: string | null;
 }
 
 export interface Coverage {
@@ -57,13 +59,17 @@ export async function getCoverage(db: SqlExecutor, userId: number, timezone: str
               (SELECT count(*) FROM import_batches b WHERE b.source_id = s.id)::int AS imports,
               (SELECT max(b.created_at) FROM import_batches b WHERE b.source_id = s.id) AS last_import_at,
               (SELECT count(*) FROM conversations c WHERE c.source_id = s.id AND c.kind IN ('chat', 'code_session'))::int AS conversations,
-              x.first_at, x.last_at, COALESCE(x.exact, 0) AS exact, COALESCE(x.estimated, 0) AS estimated
+              LEAST(x.first_at, rc.first_at) AS first_at, GREATEST(x.last_at, rc.last_at) AS last_at,
+              COALESCE(x.exact, 0) AS exact, COALESCE(x.estimated, 0) AS estimated, rc.total::text AS reported_cost
          FROM data_sources s
          LEFT JOIN LATERAL (
            SELECT min(f.occurred_at) AS first_at, max(f.occurred_at) AS last_at,
                   sum(${PROCESSED}) FILTER (WHERE f.confidence = 'exact')::bigint AS exact,
                   sum(${PROCESSED}) FILTER (WHERE f.confidence = 'estimated')::bigint AS estimated
              FROM usage_facts f WHERE f.source_id = s.id) x ON true
+         LEFT JOIN LATERAL (
+           SELECT min(c.occurred_at) AS first_at, max(c.occurred_at) AS last_at, sum(c.amount_usd) AS total
+             FROM reported_costs c WHERE c.source_id = s.id) rc ON true
         WHERE s.user_id = $1
         ORDER BY s.created_at, s.id`,
       [userId],
@@ -125,6 +131,7 @@ export async function getCoverage(db: SqlExecutor, userId: number, timezone: str
     conversations: toNumber(r.conversations),
     exactTokens: toNumber(r.exact),
     estimatedTokens: toNumber(r.estimated),
+    reportedCostUsd: (r.reported_cost as string | null) ?? null,
   }));
 
   return {
