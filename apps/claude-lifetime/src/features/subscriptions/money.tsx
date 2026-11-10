@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import type { SubscriptionPeriod } from '@/analytics/subscriptions';
 import type { ActualSpend, ApiValue, UnpricedGroup } from '@/analytics/value';
 import { ConfidenceBadge } from '@/components/data/confidence';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/feedback';
 import { formatDay, formatMoney, formatTokens, formatUsd, plural } from '@/lib/format';
-import { leadingUsd, otherUsd, valueLevel, type CostScenario } from './logic';
+import { leadingUsd, noPaymentReason, otherUsd, paymentSpan, valueLevel, type CostScenario } from './logic';
 import { Unavailable } from './parts';
 
 export interface MoneyCardProps {
@@ -17,7 +18,12 @@ export interface MoneyCardProps {
   scenario: CostScenario;
   /** False while nothing is imported: there is no usage to price yet. */
   hasUsage: boolean;
-  periodCount: number;
+  /** The stored periods, to say which days the payments are for and why none are counted. */
+  periods: SubscriptionPeriod[];
+  /** Today in the user's timezone. */
+  today: string;
+  /** First and last day with an imported record: the days the equivalent API value is worked out from. */
+  recorded: { first: string; last: string } | null;
 }
 
 const FIGURE = 'text-[22px] font-medium leading-tight tracking-[-0.01em] text-ink';
@@ -36,31 +42,44 @@ function unpricedReason(group: UnpricedGroup, alone: boolean): string {
   return group.priceTier === 'standard' ? `${model} has no price on file` : `${model} has no price on file for the ${group.priceTier.replace(/_/g, ' ')} tier`;
 }
 
+/** Why no subscription payment is counted, in a sentence or two. */
+function noPaymentText(periods: SubscriptionPeriod[], today: string): string {
+  const reason = noPaymentReason(periods, today);
+  if (reason.kind === 'no_periods') return 'Add your periods with the monthly price you paid, and the payments are added up here.';
+  if (reason.kind === 'not_started') {
+    return `Your first period with a monthly price starts on ${formatDay(reason.startDate)}. Its payments are added up here from that day on.`;
+  }
+  return 'None of your periods has a monthly price. Enter what you paid per month on the periods you paid for, and the payments are added up here.';
+}
+
 /**
- * Money that was paid, and what the same usage would cost at API list prices. The two
+ * Money that was paid, and what the recorded usage would cost at API list prices. The two
  * are different kinds of figure and are kept in separate groups; they are never added,
- * subtracted or presented as a saving.
+ * subtracted or presented as a saving. Each states the days it covers, because the
+ * payments run over every month of the entered periods while the calculation only knows
+ * the days with imported records, and the two rarely match.
  */
-export function MoneyCard({ spend, value, scenario, hasUsage, periodCount }: MoneyCardProps) {
+export function MoneyCard({ spend, value, scenario, hasUsage, periods, today, recorded }: MoneyCardProps) {
   const level = value ? valueLevel(value) : 'unavailable';
   const scenariosDiffer = value ? leadingUsd(value, scenario) !== otherUsd(value, scenario) : false;
+  const paidFor = paymentSpan(periods, today);
 
   return (
     <Card>
       <CardHeader
         title="What you paid and what it would have cost"
-        description="Money you actually paid, and a list-price calculation for the same usage. They are shown side by side, not set off against each other."
+        description="What your subscriptions and API billing came to, and a list-price calculation of your recorded usage. The two cover different days and are shown side by side, not set off against each other."
       />
       <CardBody className="grid gap-x-10 gap-y-7 md:grid-cols-2">
         <section className="min-w-0">
-          <h3 className="flex flex-wrap items-center gap-2 text-sm font-medium text-ink">
-            Paid
-            <Kind>Actual money</Kind>
-          </h3>
+          <h3 className="text-sm font-medium text-ink">Paid</h3>
           {spend ? (
             <dl className="mt-4 space-y-5">
               <div>
-                <dt className="text-[13px] text-ink-2">Subscription payments</dt>
+                <dt className="flex flex-wrap items-center gap-2 text-[13px] text-ink-2">
+                  Subscription payments
+                  <Kind>From the prices you entered</Kind>
+                </dt>
                 {spend.subscriptions ? (
                   <dd className="mt-1">
                     <ul className="space-y-1">
@@ -72,6 +91,7 @@ export function MoneyCard({ spend, value, scenario, hasUsage, periodCount }: Mon
                       ))}
                     </ul>
                     <p className="mt-2 max-w-[58ch] text-[13px] text-ink-2">
+                      {paidFor ? `For your priced periods from ${formatDay(paidFor.from)} to ${formatDay(paidFor.to)}. ` : ''}
                       Worked out from the monthly prices and dates you entered: one payment for every monthly cycle that has started. It is not read from invoices, so taxes,
                       discounts and yearly billing are not reflected.
                     </p>
@@ -79,16 +99,15 @@ export function MoneyCard({ spend, value, scenario, hasUsage, periodCount }: Mon
                 ) : (
                   <dd className="mt-1">
                     <Unavailable className={FIGURE} />
-                    <p className="mt-2 max-w-[58ch] text-[13px] text-ink-2">
-                      {periodCount === 0
-                        ? 'Add your periods with the monthly price you paid, and the payments are added up here.'
-                        : 'None of your periods has a monthly price. Enter what you paid per month on the periods you paid for, and the payments are added up here.'}
-                    </p>
+                    <p className="mt-2 max-w-[58ch] text-[13px] text-ink-2">{noPaymentText(periods, today)}</p>
                   </dd>
                 )}
               </div>
               <div>
-                <dt className="text-[13px] text-ink-2">API usage billed</dt>
+                <dt className="flex flex-wrap items-center gap-2 text-[13px] text-ink-2">
+                  API usage billed
+                  {spend.reportedApiUsd !== null ? <Kind>From your cost reports</Kind> : null}
+                </dt>
                 {spend.reportedApiUsd !== null ? (
                   <dd className="mt-1">
                     <span className={FIGURE}>{formatUsd(spend.reportedApiUsd, { cents: true })}</span>
@@ -128,7 +147,7 @@ export function MoneyCard({ spend, value, scenario, hasUsage, periodCount }: Mon
           ) : value ? (
             <>
               <p className="mt-4 text-[13px] text-ink-2">
-                Your whole recorded history at API list prices
+                {recorded ? `Your records from ${formatDay(recorded.first)} to ${formatDay(recorded.last)} at API list prices` : 'Your whole recorded history at API list prices'}
                 {scenariosDiffer ? (scenario === 'cached' ? ', with a 5-minute prompt cache assumed for chat usage' : ', without prompt caching for chat usage') : ''}
               </p>
               <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">

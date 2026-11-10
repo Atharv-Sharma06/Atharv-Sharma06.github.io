@@ -82,9 +82,9 @@ FROM "token_estimates" e
 JOIN "estimation_methods" m ON m."id" = e."method_id";
 
 COMMENT ON VIEW "usage_facts" IS
-  'Exact usage_records and estimated token_estimates in one shape, with a confidence column.';
+  'usage_records and token_estimates in one shape, with the confidence of every row.';
 COMMENT ON TABLE "usage_records" IS
-  'Exact token counts reported by a trusted source, aggregated into time buckets.';
+  'Token counts a source states, aggregated into time buckets. The confidence column says whether they were metered (exact) or are stated without being declared exact (estimated).';
 COMMENT ON TABLE "token_estimates" IS
   'Token counts estimated from message text. Never an official Anthropic accounting figure.';
 COMMENT ON TABLE "reported_costs" IS

@@ -15,19 +15,42 @@ DROP INDEX "subscription_periods_user_id_started_at_idx";
 ALTER TABLE "subscription_periods" ADD COLUMN "start_date" DATE;
 ALTER TABLE "subscription_periods" ADD COLUMN "last_date" DATE;
 
--- Existing periods keep the days they show today, in the timezone that is set today.
--- Should that timezone differ from the one a period was entered in, two neighbours can
--- both land on the same day; the earlier one then ends the day before the later one
--- starts, so no day belongs to two plans.
-WITH days AS (
-  SELECT sp."id", sp."user_id", sp."started_at",
-         (sp."started_at" AT TIME ZONE u."timezone")::date AS s,
-         ((sp."ended_at" - interval '1 microsecond') AT TIME ZONE u."timezone")::date AS l
+-- Existing periods keep the days they show today, in the timezone that is set today
+-- (UTC when that setting is not a timezone PostgreSQL knows, so that no stored value can
+-- stop the migration).
+--
+-- The last day is the day before the end instant. Where local midnight happens twice
+-- (clocks going back at 01:00), the stored end can be the second midnight, one instant
+-- after which still lies on the new day; stepping back on the local clock instead finds
+-- the right day there. Where midnight is skipped (clocks going forward at 00:00), the
+-- local clock reads 01:00 and stepping back on it does not leave the new day, while
+-- stepping back on the instant does. Taking the earlier of the two is right in both
+-- cases and agrees with either everywhere else.
+--
+-- Should the timezone differ from the one the periods were entered in, two of them can
+-- land on the same first day. Every period then starts at least one day after the one
+-- before it (a running maximum of start day minus position, plus position), and each one
+-- ends the day before the next starts, so no day belongs to two plans and the
+-- constraints below can always be added.
+WITH zoned AS (
+  SELECT sp."id", sp."user_id", sp."started_at", sp."ended_at",
+         COALESCE((SELECT tz."name" FROM pg_timezone_names tz WHERE lower(tz."name") = lower(u."timezone") LIMIT 1), 'UTC') AS zone
     FROM "subscription_periods" sp JOIN "users" u ON u."id" = sp."user_id"
+), days AS (
+  SELECT "id", "user_id",
+         ("started_at" AT TIME ZONE zone)::date AS s,
+         LEAST((("ended_at" - interval '1 microsecond') AT TIME ZONE zone)::date,
+               (("ended_at" AT TIME ZONE zone) - interval '1 microsecond')::date) AS l,
+         row_number() OVER (PARTITION BY "user_id" ORDER BY "started_at", "id")::int AS n
+    FROM zoned
+), starts AS (
+  SELECT "id", "user_id", n, l,
+         max(s - n) OVER (PARTITION BY "user_id" ORDER BY n ROWS UNBOUNDED PRECEDING) + n AS s
+    FROM days
 ), settled AS (
   SELECT "id", s,
-         LEAST(l, (lead(s) OVER (PARTITION BY "user_id" ORDER BY "started_at") - 1)) AS l
-    FROM days
+         LEAST(l, (lead(s) OVER (PARTITION BY "user_id" ORDER BY n) - 1)) AS l
+    FROM starts
 )
 UPDATE "subscription_periods" sp
    SET "start_date" = settled.s,

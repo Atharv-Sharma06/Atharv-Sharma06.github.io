@@ -1,7 +1,9 @@
-import type { ConversationUsage, PeriodInput, SegmentStats, SideStats, SubscriptionPeriod } from '@/analytics/subscriptions';
+import {
+  periodDateProblem, type ConversationUsage, type PeriodInput, type SegmentRange, type SegmentStats, type SideStats, type SubscriptionPeriod,
+} from '@/analytics/subscriptions';
 import type { ValueFigures } from '@/analytics/value';
 import type { ConfidenceLevel } from '@/components/data/confidence';
-import { addDays, dayInZone, formatDay, formatDayRange, formatDecimal, formatMonth } from '@/lib/format';
+import { addDays, dayInZone, daysBetween, formatDay, formatDayRange, formatDecimal, formatMonth } from '@/lib/format';
 
 /**
  * Calculations behind the Subscription History page, kept free of React so they can be
@@ -52,20 +54,28 @@ export function dayStartInZone(day: string, timezone: string): number {
 }
 
 /**
- * First and last calendar day of a segment in the user's timezone. A segment's end is
- * exclusive, so its last day is the day before; a running segment has no last day.
+ * First and last calendar day of a segment, as stored. A segment's end is exclusive, so
+ * its last day is the day before; a running segment has no last day.
+ *
+ * Every date the page shows or pre-fills comes from here. The instants that go with a
+ * segment are derived by the database with its own timezone data, which can disagree
+ * with the browser's (and does, for some zones, whenever either is out of date), so
+ * converting them back to days would show a day the user never entered. They only place
+ * the blocks on the time axis.
  */
-export function segmentDates(segment: { start: string; end: string | null }, timezone: string): { startDate: string; lastDate: string | null } {
-  return {
-    startDate: dayInZone(segment.start, timezone),
-    lastDate: segment.end ? dayInZone(new Date(Date.parse(segment.end) - 1), timezone) : null,
-  };
+export function segmentDays(segment: Pick<SegmentRange, 'startDate' | 'endDate'>): { startDate: string; lastDate: string | null } {
+  return { startDate: segment.startDate, lastDate: segment.endDate === null ? null : addDays(segment.endDate, -1) };
 }
 
 /** "Jan 10 – Dec 10, 2025" for a finished stretch, "Since Dec 11, 2025" for a running one. */
 export function describeDates(dates: { startDate: string; lastDate: string | null }, today: string): string {
   if (dates.lastDate) return formatDayRange(dates.startDate, dates.lastDate);
   return `${dates.startDate > today ? 'From' : 'Since'} ${formatDay(dates.startDate)}`;
+}
+
+/** The accessible name of the button that fills a stretch with no recorded plan. */
+export function addPeriodLabel(dates: { startDate: string; lastDate: string | null }): string {
+  return dates.lastDate ? `Add period for ${formatDayRange(dates.startDate, dates.lastDate)}` : `Add period from ${formatDay(dates.startDate)}`;
 }
 
 // ── Timeline geometry ───────────────────────────────────────────────────────────
@@ -251,19 +261,13 @@ export function hasRecords(segment: Pick<SegmentStats, 'activeDays'>): boolean {
 }
 
 /**
- * Days of a segment that have already passed. Equal to its length, except for a period
- * entered with dates in the future: usage can only have accrued up to today.
+ * Length of a segment in days, or null for a running period that has not started: it has
+ * no length yet. Whether it has started is decided on calendar days, against today in
+ * the user's timezone. The days that have already passed are `SegmentStats.elapsedDays`,
+ * counted the same way by the analytics.
  */
-export function elapsedDays(segment: Pick<SegmentStats, 'start' | 'end' | 'days'>, nowMs: number): number {
-  const startMs = Date.parse(segment.start);
-  if (startMs >= nowMs) return 0;
-  if (!segment.end || Date.parse(segment.end) <= nowMs) return segment.days;
-  return Math.max(1, Math.round((nowMs - startMs) / DAY_MS));
-}
-
-/** Length of a segment in days, or null for a running period that has not started: it has no length yet. */
-export function lengthDays(segment: Pick<SegmentStats, 'start' | 'end' | 'days'>, nowMs: number): number | null {
-  return !segment.end && Date.parse(segment.start) >= nowMs ? null : segment.days;
+export function lengthDays(segment: Pick<SegmentStats, 'startDate' | 'endDate' | 'days'>, today: string): number | null {
+  return segment.endDate === null && segment.startDate > today ? null : segment.days;
 }
 
 /**
@@ -300,7 +304,31 @@ export function otherUsd(value: ValueFigures, scenario: CostScenario): string {
 /** Unavailable when nothing could be priced; estimated when estimated tokens or an assumed model are part of it. */
 export function valueLevel(value: ValueFigures): ConfidenceLevel {
   if (value.pricedTokens === 0) return 'unavailable';
-  return Number(value.estimatedStandardUsd) > 0 || Number(value.estimatedCachedUsd) > 0 || value.assumedTokens > 0 ? 'estimated' : 'exact';
+  return pricesEstimates(value) || value.assumedTokens > 0 ? 'estimated' : 'exact';
+}
+
+/** Whether estimated chat usage is part of a value: its price then depends on the caching scenario. */
+export function pricesEstimates(value: Pick<ValueFigures, 'estimatedStandardUsd' | 'estimatedCachedUsd'>): boolean {
+  return Number(value.estimatedStandardUsd) > 0 || Number(value.estimatedCachedUsd) > 0;
+}
+
+/** How estimated chat usage is priced under a scenario, as the end of a sentence. */
+export function scenarioPhrase(scenario: CostScenario): string {
+  return scenario === 'cached' ? 'with a 5-minute prompt cache assumed' : 'without prompt caching';
+}
+
+/**
+ * What a value's confidence rests on, in a sentence or two: the same explanation the
+ * other cards give, plus the caching scenario wherever estimated usage is priced.
+ */
+export function valueHint(value: ValueFigures, scenario: CostScenario): string {
+  if (valueLevel(value) === 'unavailable') return 'None of this usage names a model with a published price, so nothing can be priced.';
+  if (valueLevel(value) === 'exact') return 'Metered token counts multiplied by Anthropic’s published API prices. Not money you paid.';
+  const parts: string[] = [];
+  if (pricesEstimates(value)) parts.push(`Includes token counts estimated from conversation text, priced ${scenarioPhrase(scenario)}.`);
+  if (value.assumedTokens > 0) parts.push('Usage with no recorded model is priced as the model you chose in Settings.');
+  parts.push('Not money you paid.');
+  return parts.join(' ');
 }
 
 /** Share of the processed tokens that a price could be applied to, or null when there are none. */
@@ -367,14 +395,23 @@ const LENGTH_FACTOR = 2;
 const MIN_RATE_DAYS = 14;
 /** "Mostly metered": more than this share of a side's tokens come from sources that count them. */
 const MOSTLY_METERED = 0.5;
+/** "Mostly estimated": at least this share of a side's tokens are reconstructed from text. */
+const MOSTLY_ESTIMATED = 0.9;
+/** Metered shares further apart than this describe two different methods, whatever each side is on its own. */
+const SHARE_GAP = 0.5;
 
 export type Side = 'before' | 'after';
 
 export interface Comparability {
   /** The two sides cover very different lengths of time. */
   lengths: { beforeDays: number; afterDays: number } | null;
-  /** One side is entirely estimated from text while the other is mostly metered. */
-  measurement: { estimatedSide: Side; meteredShare: number } | null;
+  /**
+   * The two sides were measured differently: one is almost entirely estimated from text
+   * while the other is mostly metered, or their metered shares lie far apart.
+   * `estimatedShare` is the estimated part of the more estimated side, `meteredShare` the
+   * metered part of the other.
+   */
+  measurement: { estimatedSide: Side; estimatedShare: number; meteredShare: number } | null;
   /**
    * The earlier side begins with the first imported record. `unrecordedDays` counts the
    * days between the start of the entered history and that record (0 when there are none).
@@ -384,11 +421,11 @@ export interface Comparability {
   short: Array<{ side: Side; days: number }>;
 }
 
-export function assessComparability(
-  before: SideStats | null,
-  after: SideStats | null,
-  context: { timezone: string; historyStart: string | null },
-): Comparability {
+/**
+ * What limits the comparison of the two sides. `historyStart` is the first day of the
+ * earliest entered period.
+ */
+export function assessComparability(before: SideStats | null, after: SideStats | null, context: { historyStart: string | null }): Comparability {
   const b = before && before.spanDays > 0 ? before : null;
   const a = after && after.spanDays > 0 ? after : null;
 
@@ -397,17 +434,28 @@ export function assessComparability(
     lengths = { beforeDays: b.spanDays, afterDays: a.spanDays };
   }
 
+  // A ratio between the two sides would mostly measure the method whenever their metered
+  // shares differ a lot. A single metered record on an otherwise estimated side must not
+  // switch the caution off, so shares are compared rather than tested for zero.
   let measurement: Comparability['measurement'] = null;
   if (a && b && a.tokens > 0 && b.tokens > 0) {
-    const meteredShare = (side: SideStats) => side.exact / side.tokens;
-    if (b.exact === 0 && meteredShare(a) > MOSTLY_METERED) measurement = { estimatedSide: 'before', meteredShare: meteredShare(a) };
-    else if (a.exact === 0 && meteredShare(b) > MOSTLY_METERED) measurement = { estimatedSide: 'after', meteredShare: meteredShare(b) };
+    const meteredB = b.exact / b.tokens;
+    const meteredA = a.exact / a.tokens;
+    const [estimated, metered]: [{ side: Side; stats: SideStats; metered: number }, { metered: number }] =
+      meteredB <= meteredA ? [{ side: 'before', stats: b, metered: meteredB }, { metered: meteredA }] : [{ side: 'after', stats: a, metered: meteredA }, { metered: meteredB }];
+    const estimatedShare = estimated.stats.estimated / estimated.stats.tokens;
+    if ((estimatedShare >= MOSTLY_ESTIMATED && metered.metered > MOSTLY_METERED) || metered.metered - estimated.metered > SHARE_GAP) {
+      measurement = { estimatedSide: estimated.side, estimatedShare, meteredShare: metered.metered };
+    }
   }
 
+  // The day the earliest record is filed under, as the analytics give it. Converting its
+  // instant into the user's timezone instead would name the evening before for a record
+  // that only knows its date (a daily report row, a manual entry) west of UTC.
   let firstRecord: Comparability['firstRecord'] = null;
-  if (b?.firstAt) {
-    const lead = context.historyStart ? Date.parse(b.firstAt) - Date.parse(context.historyStart) : 0;
-    firstRecord = { day: dayInZone(b.firstAt, context.timezone), unrecordedDays: lead > 0 ? Math.floor(lead / DAY_MS) : 0 };
+  if (b?.firstDay) {
+    const start = context.historyStart;
+    firstRecord = { day: b.firstDay, unrecordedDays: start && start < b.firstDay ? daysBetween(start, b.firstDay) - 1 : 0 };
   }
 
   const short: Comparability['short'] = [];
@@ -507,14 +555,22 @@ function isCalendarDay(value: string): boolean {
  * rules and wording are those of `savePeriod`, which remains the authority and is the
  * only place that can detect an overlap with another period.
  */
-export function validatePeriodForm(values: PeriodFormValues): Partial<Record<PeriodFormField, string>> {
+export function validatePeriodForm(values: PeriodFormValues, today: string): Partial<Record<PeriodFormField, string>> {
   const errors: Partial<Record<PeriodFormField, string>> = {};
   if (values.planKey.trim() === '') errors.planKey = 'Choose a plan.';
   if (!isCalendarDay(values.startDate)) errors.startDate = 'Enter a valid start date.';
+  else {
+    const problem = periodDateProblem('start', values.startDate, today);
+    if (problem) errors.startDate = problem;
+  }
   const lastDate = values.lastDate.trim();
   if (lastDate !== '') {
     if (!isCalendarDay(lastDate)) errors.lastDate = 'Enter a valid end date, or leave it empty if the plan is still active.';
     else if (!errors.startDate && lastDate < values.startDate) errors.lastDate = 'The end date is before the start date.';
+    else {
+      const problem = periodDateProblem('end', lastDate, today);
+      if (problem) errors.lastDate = problem;
+    }
   }
   const price = values.monthlyPrice.trim();
   if (price !== '' && !/^\d{1,7}(\.\d{1,2})?$/.test(price)) errors.monthlyPrice = 'Enter the monthly price as a number, for example 20 or 19.99.';
@@ -558,4 +614,55 @@ export function periodToInput(period: SubscriptionPeriod): PeriodInput {
 export function endDateResolvingOverlap(conflict: Pick<SubscriptionPeriod, 'startDate' | 'lastDate'>, newStartDate: string): string | null {
   if (conflict.lastDate !== null || !isCalendarDay(newStartDate) || conflict.startDate >= newStartDate) return null;
   return addDays(newStartDate, -1);
+}
+
+// ── Money ───────────────────────────────────────────────────────────────────────
+
+/** A priced period: one with a monthly price above zero, the periods monthly payments are counted for. */
+const isPriced = (period: Pick<SubscriptionPeriod, 'monthlyPrice'>) => period.monthlyPrice !== null && Number(period.monthlyPrice) > 0;
+
+/**
+ * The days the counted monthly payments are for: from the first day of the earliest priced
+ * period that has started, to the last day of the latest one, or today while it runs.
+ * Null when no priced period has started.
+ */
+export function paymentSpan(periods: SubscriptionPeriod[], today: string): { from: string; to: string } | null {
+  const started = periods.filter((period) => isPriced(period) && period.startDate <= today);
+  if (started.length === 0) return null;
+  const from = started.reduce((first, period) => (period.startDate < first ? period.startDate : first), started[0].startDate);
+  const to = started.reduce((last, period) => {
+    const end = period.lastDate === null || period.lastDate > today ? today : period.lastDate;
+    return end > last ? end : last;
+  }, from);
+  return { from, to };
+}
+
+/** Why no payment is counted, for the money card. */
+export type NoPaymentReason = { kind: 'no_periods' } | { kind: 'no_price' } | { kind: 'not_started'; startDate: string };
+
+/**
+ * Tells "no period has a price" apart from "the priced periods all start after today",
+ * which also produces no payment yet. For the latter, the first day a payment falls due.
+ */
+export function noPaymentReason(periods: SubscriptionPeriod[], today: string): NoPaymentReason {
+  if (periods.length === 0) return { kind: 'no_periods' };
+  const upcoming = periods.filter((period) => isPriced(period) && period.startDate > today).map((period) => period.startDate).sort();
+  return upcoming.length > 0 ? { kind: 'not_started', startDate: upcoming[0] } : { kind: 'no_price' };
+}
+
+// ── Focus after a change ────────────────────────────────────────────────────────
+
+/**
+ * Where the keyboard focus goes once a period was saved or deleted and the page has read
+ * its data again. The element that opened the dialog keeps it if it is still on the page;
+ * a row or block that the change replaced is gone, so the saved period's Edit button in
+ * the table takes it, and failing that (after a delete) the main content.
+ */
+export function focusTargetAfterChange<T extends { isConnected: boolean }>(
+  pending: { opener: T | null; periodId: number | null },
+  find: { periodEditButton: (periodId: number) => T | null; main: () => T | null },
+): T | null {
+  if (pending.opener?.isConnected) return pending.opener;
+  const row = pending.periodId === null ? null : find.periodEditButton(pending.periodId);
+  return row ?? find.main();
 }

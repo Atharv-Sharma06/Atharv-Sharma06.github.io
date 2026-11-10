@@ -6,11 +6,11 @@ import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, typ
 import { isPaidPlan, type SegmentStats } from '@/analytics/subscriptions';
 import { confidenceOf } from '@/components/data/confidence';
 import { cn } from '@/lib/cn';
-import { dayInZone, formatDay, formatMonth, formatSpan, formatTokens, formatUsd, plural } from '@/lib/format';
+import { formatDay, formatMonth, formatSpan, formatTokens, formatUsd, plural } from '@/lib/format';
 import { planColor } from '@/lib/palette';
 import {
-  averagedOverPartOnly, averagePerDay, blockLabelFit, boundaryX, describeDates, hasRecords, layoutTimeline, leadingUsd, lengthDays, placeAxisLabels, segmentDates, segmentSpans,
-  timelineTicks, timelineX, valueLevel, type CostScenario,
+  averagedOverPartOnly, averagePerDay, blockLabelFit, boundaryX, describeDates, hasRecords, layoutTimeline, leadingUsd, lengthDays, placeAxisLabels, pricesEstimates,
+  scenarioPhrase, segmentDays, segmentSpans, timelineTicks, timelineX, valueLevel, type CostScenario,
 } from './logic';
 import { ConfidenceMark, PlanSwatch } from './parts';
 
@@ -34,6 +34,8 @@ export interface TimelineProps {
   segments: SegmentStats[];
   /** The instant the segments were read at: where the band ends. */
   now: string;
+  /** Today in the user's timezone at that instant, for deciding on days whether a period has started. */
+  today: string;
   timezone: string;
   scenario: CostScenario;
   /** False while nothing is imported. Usage figures are then left out instead of being shown as empty. */
@@ -133,21 +135,22 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 }
 
 /** What hovering or focusing a block shows. The periods table below repeats every figure. */
-function SegmentDetails({
+export function SegmentDetails({
   segment,
   datesText,
-  nowMs,
+  today,
   scenario,
   hasUsage,
 }: {
   segment: SegmentStats;
   datesText: string;
-  nowMs: number;
+  today: string;
   scenario: CostScenario;
   hasUsage: boolean;
 }) {
   const average = averagePerDay(segment);
-  const length = lengthDays(segment, nowMs);
+  const length = lengthDays(segment, today);
+  const valueConfidence = valueLevel(segment.value);
   return (
     <div className="min-w-[14rem] py-0.5">
       <p className="flex items-center gap-1.5 text-[13px] font-medium text-ink">
@@ -168,11 +171,23 @@ function SegmentDetails({
             </DetailRow>
             <DetailRow label="Average per day">
               {average === null ? '–' : formatTokens(average)}
-              {average !== null && averagedOverPartOnly(segment) ? <span className="text-ink-2">over {plural(segment.recordedDays, 'day')} with records</span> : null}
             </DetailRow>
+            {average !== null && averagedOverPartOnly(segment) ? (
+              <p className="text-right text-ink-2">over the {plural(segment.recordedDays, 'day')} between your first and last record</p>
+            ) : null}
             <DetailRow label="Equivalent API value">
-              {valueLevel(segment.value) === 'unavailable' ? <span className="text-ink-2">Not priced</span> : formatUsd(leadingUsd(segment.value, scenario), { cents: true })}
+              {valueConfidence === 'unavailable' ? (
+                <span className="text-ink-2">Not priced</span>
+              ) : (
+                <>
+                  {formatUsd(leadingUsd(segment.value, scenario), { cents: true })}
+                  <ConfidenceMark level={valueConfidence} />
+                </>
+              )}
             </DetailRow>
+            {valueConfidence !== 'unavailable' && pricesEstimates(segment.value) ? (
+              <p className="text-right text-ink-2">Estimated chat usage priced {scenarioPhrase(scenario)}</p>
+            ) : null}
           </>
         ) : null}
       </dl>
@@ -186,22 +201,21 @@ function SegmentDetails({
  * The plans a person was on, as a band scaled by time: one block per entered period,
  * in the colour of its plan, and an empty dashed block wherever nothing was recorded.
  */
-export function Timeline({ segments, now, timezone, scenario, hasUsage, onEditPeriod, onAddPeriod }: TimelineProps) {
+export function Timeline({ segments, now, today, timezone, scenario, hasUsage, onEditPeriod, onAddPeriod }: TimelineProps) {
   const [frameRef, frameWidth] = useElementWidth<HTMLDivElement>();
   const [textWidths, setTextWidths] = useState<Record<string, number>>({});
   const onMeasure = useCallback((next: Record<string, number>) => setTextWidths((previous) => (sameWidths(previous, next) ? previous : next)), []);
 
   const nowMs = Date.parse(now);
-  const today = dayInZone(now, timezone);
   const items = segments.map((segment, index) => {
-    const dates = segmentDates(segment, timezone);
+    const dates = segmentDays(segment);
     const datesText = describeDates(dates, today);
     const activate = () => (segment.kind === 'period' && segment.periodId !== null ? onEditPeriod(segment.periodId) : onAddPeriod(dates));
     const action = segment.kind === 'period' ? 'Edit this period' : ADD_HERE;
-    const length = lengthDays(segment, nowMs);
+    const length = lengthDays(segment, today);
     const lengthText = length === null ? 'Not started' : plural(length, 'day');
     return {
-      key: `${segment.kind}:${segment.periodId ?? index}:${segment.start}`,
+      key: `${segment.kind}:${segment.periodId ?? index}:${segment.startDate}`,
       segment,
       dates,
       datesText,
@@ -287,7 +301,7 @@ export function Timeline({ segments, now, timezone, scenario, hasUsage, onEditPe
               const offersAdd = isGap && addLabelWidth + 2 * LABEL_PADDING <= block.width;
               return (
                 <li key={item.key} className="absolute inset-y-0" style={{ left: block.x, width: block.width }}>
-                  <BlockTooltip content={<SegmentDetails segment={segment} datesText={item.datesText} nowMs={nowMs} scenario={scenario} hasUsage={hasUsage} />}>
+                  <BlockTooltip content={<SegmentDetails segment={segment} datesText={item.datesText} today={today} scenario={scenario} hasUsage={hasUsage} />}>
                     <button
                       type="button"
                       onClick={item.activate}

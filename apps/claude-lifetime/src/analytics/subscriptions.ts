@@ -117,15 +117,65 @@ function validDate(value: string): boolean {
 
 const fmt = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 
+/**
+ * The first day a period can have. No Claude usage can be from before 2021, which is the
+ * limit the importers apply as well; an earlier date is a typing mistake, such as a
+ * two-digit year that a date field read as the year 26.
+ */
+export const EARLIEST_PERIOD_DATE = '2021-01-01';
+/** How far ahead a period may be entered. A later date (31 Dec 9999 for "no end") is a typing mistake too. */
+export const MAX_YEARS_AHEAD = 10;
+
+/** The last day a period may have, `MAX_YEARS_AHEAD` years after today. */
+export function latestPeriodDate(today: string): string {
+  const year = Number(today.slice(0, 4)) + MAX_YEARS_AHEAD;
+  // 29 February has no counterpart in most years; the day before 1 March stands in for it.
+  const candidate = `${year}${today.slice(4)}`;
+  return validDate(candidate) ? candidate : `${year}-02-28`;
+}
+
+/**
+ * Why a valid calendar day cannot be the start or end of a period, or null when it can.
+ * The editor shows the same words next to the field; `savePeriod` is the authority.
+ */
+export function periodDateProblem(field: 'start' | 'end', day: string, today: string): string | null {
+  if (day < EARLIEST_PERIOD_DATE) {
+    return `Enter ${field === 'end' ? 'an end' : 'a start'} date in 2021 or later. There was no Claude usage before then, so check the year.`;
+  }
+  if (day > latestPeriodDate(today)) {
+    return field === 'start'
+      ? `The start date is more than ${MAX_YEARS_AHEAD} years from today. Check the year.`
+      : `The end date is more than ${MAX_YEARS_AHEAD} years from today. Check the year, or leave the end date empty while the plan is active.`;
+  }
+  return null;
+}
+
+export interface SaveOptions {
+  /** The moment "today" is taken from, in the user's timezone. Defaults to now. */
+  now?: Date;
+  /**
+   * Leaves the period's demo flag as it is. Only for a change the user did not make to the
+   * period itself (ending it the day before a new one starts): a demo period ended that
+   * way stays demo data and is removed with it. Any other update makes the period the
+   * user's own.
+   */
+  keepSynthetic?: boolean;
+}
+
 /** Creates or updates a period. Rejects invalid input and overlaps with a message the user can act on. */
-export async function savePeriod(db: SqlDriver, userId: number, timezone: string, input: PeriodInput): Promise<SubscriptionPeriod> {
+export async function savePeriod(db: SqlDriver, userId: number, timezone: string, input: PeriodInput, options: SaveOptions = {}): Promise<SubscriptionPeriod> {
+  const today = dayInZone(options.now ?? new Date(), timezone);
   const planKey = input.planKey?.trim();
   if (!planKey) throw new SubscriptionError('Choose a plan.', 'invalid');
   if (!validDate(input.startDate)) throw new SubscriptionError('Enter a valid start date.', 'invalid');
+  const startProblem = periodDateProblem('start', input.startDate, today);
+  if (startProblem) throw new SubscriptionError(startProblem, 'invalid');
   const lastDate = input.lastDate && input.lastDate.trim() !== '' ? input.lastDate.trim() : null;
   if (lastDate !== null) {
     if (!validDate(lastDate)) throw new SubscriptionError('Enter a valid end date, or leave it empty if the plan is still active.', 'invalid');
     if (lastDate < input.startDate) throw new SubscriptionError('The end date is before the start date.', 'invalid');
+    const endProblem = periodDateProblem('end', lastDate, today);
+    if (endProblem) throw new SubscriptionError(endProblem, 'invalid');
   }
   let price: string | null = null;
   if (input.monthlyPrice !== undefined && input.monthlyPrice !== null && String(input.monthlyPrice).trim() !== '') {
@@ -148,8 +198,10 @@ export async function savePeriod(db: SqlDriver, userId: number, timezone: string
     ).rows[0];
     if (conflict) {
       const c = readPeriod(conflict);
+      // A period without an end date covers every day from its start on, which may lie after today.
+      const dates = c.lastDate ? `${fmt(c.startDate)} – ${fmt(c.lastDate)}` : `${c.startDate > today ? 'from' : 'since'} ${fmt(c.startDate)}, no end date`;
       throw new SubscriptionError(
-        `These dates overlap your ${planLabel(c.planKey, c.label)} period (${fmt(c.startDate)} – ${c.lastDate ? fmt(c.lastDate) : 'today'}). ` +
+        `These dates overlap your ${planLabel(c.planKey, c.label)} period (${dates}). ` +
           'Two plans cannot be active on the same day: adjust the dates, or end the other period first.',
         'overlap',
         c,
@@ -160,9 +212,9 @@ export async function savePeriod(db: SqlDriver, userId: number, timezone: string
     if (input.id) {
       const res = await tx.query<{ id: number }>(
         `UPDATE subscription_periods SET plan_key = $2, label = $3, start_date = $4::date, last_date = $5::date, monthly_price = $6::numeric,
-                currency = $7, notes = $8, is_synthetic = false, updated_at = now()
+                currency = $7, notes = $8, is_synthetic = (is_synthetic AND $10::boolean), updated_at = now()
           WHERE user_id = $1 AND id = $9 RETURNING id`,
-        [...values, input.id],
+        [...values, input.id, options.keepSynthetic === true],
       );
       if (res.rows.length === 0) throw new SubscriptionError('That period no longer exists.', 'not_found');
       return res.rows[0].id;
@@ -201,12 +253,27 @@ export interface SegmentRange {
 }
 
 /**
+ * The recorded history as `buildSegments` needs it: the first day with a record and the
+ * instant that day begins, and optionally the last day with a record and the instant
+ * the day after it begins.
+ */
+export interface UsageBounds {
+  day: string;
+  at: string;
+  lastDay?: string;
+  lastEndAt?: string;
+}
+
+/**
  * The entered periods in order, with the uncovered days between them made explicit.
  * Nothing is assumed about uncovered time: it is labelled "No subscription recorded".
- * A leading gap is only added when imported usage starts before the first period;
- * `firstUsage` is the first day with a record and the instant that day begins.
+ * A leading gap is only added when imported usage starts before the first period. A
+ * trailing gap follows a period that ended before today, and also one that ends today
+ * or later when records are dated after its last day (a daily report or a manual entry
+ * is filed under its UTC date, which can be tomorrow in the Americas), so that every
+ * record belongs to a segment and the segments add up to the totals.
  */
-export function buildSegments(periods: SubscriptionPeriod[], firstUsage: { day: string; at: string } | null, today: string): SegmentRange[] {
+export function buildSegments(periods: SubscriptionPeriod[], usage: UsageBounds | null, today: string): SegmentRange[] {
   const sorted = [...periods].sort((a, b) => a.startDate.localeCompare(b.startDate));
   if (sorted.length === 0) return [];
   const out: SegmentRange[] = [];
@@ -220,14 +287,16 @@ export function buildSegments(periods: SubscriptionPeriod[], firstUsage: { day: 
     start,
     end,
   });
-  if (firstUsage && firstUsage.day < sorted[0].startDate) out.push(gap(firstUsage.day, firstUsage.at, sorted[0].startDate, sorted[0].startedAt));
+  if (usage && usage.day < sorted[0].startDate) out.push(gap(usage.day, usage.at, sorted[0].startDate, sorted[0].startedAt));
   sorted.forEach((p, i) => {
     const endDate = p.lastDate === null ? null : addDays(p.lastDate, 1);
     out.push({ kind: 'period', periodId: p.id, planKey: p.planKey, label: planLabel(p.planKey, p.label), startDate: p.startDate, endDate, start: p.startedAt, end: p.endedAt });
     const next = sorted[i + 1];
     if (endDate === null || p.endedAt === null || p.lastDate === null) return;
     if (next && endDate < next.startDate) out.push(gap(endDate, p.endedAt, next.startDate, next.startedAt));
-    if (!next && p.lastDate < today) out.push(gap(endDate, p.endedAt, null, null));
+    if (next) return;
+    if (p.lastDate < today) out.push(gap(endDate, p.endedAt, null, null));
+    else if (usage?.lastDay && usage.lastEndAt && usage.lastDay > p.lastDate) out.push(gap(endDate, p.endedAt, addDays(usage.lastDay, 1), usage.lastEndAt));
   });
   return out;
 }
@@ -266,19 +335,30 @@ function sharedDays(a: [string | null, string | null], b: [string | null, string
  * of the filter's sources, whatever date range is selected. Days outside it are days
  * nothing was imported for, which is not the same as days without usage.
  */
-async function recordedHistory(db: SqlExecutor, filter: AnalyticsFilter): Promise<{ first: string; last: string; firstAt: string } | null> {
+async function recordedHistory(db: SqlExecutor, filter: AnalyticsFilter): Promise<{ first: string; last: string; firstAt: string; lastEndAt: string } | null> {
   const p = new Params();
   const f = factsFrom({ ...filter, from: null, to: null }, p);
   const row = (
-    await db.query<{ first_day: string | null; last_day: string | null; first_at: unknown }>(
+    await db.query<{ first_day: string | null; last_day: string | null; first_at: unknown; last_end_at: unknown }>(
       `SELECT min(${f.day})::text AS first_day, max(${f.day})::text AS last_day,
-              (min(${f.day})::timestamp AT TIME ZONE ${f.tz}) AS first_at
+              (min(${f.day})::timestamp AT TIME ZONE ${f.tz}) AS first_at,
+              ((max(${f.day}) + 1)::timestamp AT TIME ZONE ${f.tz}) AS last_end_at
          FROM ${f.from} WHERE ${f.where}`,
       p.values,
     )
   ).rows[0];
   if (!row?.first_day || !row.last_day) return null;
-  return { first: row.first_day, last: row.last_day, firstAt: toIso(row.first_at)! };
+  return { first: row.first_day, last: row.last_day, firstAt: toIso(row.first_at)!, lastEndAt: toIso(row.last_end_at)! };
+}
+
+/**
+ * The first and last calendar day with a record of the filter's sources, whatever date
+ * range is selected, or null when nothing is imported. The span of the records that a
+ * figure over the whole history is worked out from.
+ */
+export async function getRecordedHistory(db: SqlExecutor, filter: AnalyticsFilter): Promise<{ first: string; last: string } | null> {
+  const history = await recordedHistory(db, filter);
+  return history ? { first: history.first, last: history.last } : null;
 }
 
 /** The part of the recorded history the filter's date range leaves in scope, as inclusive days. */
@@ -331,16 +411,19 @@ export async function getSegmentStats(
   if (periods.length === 0) return [];
   const history = await recordedHistory(db, filter);
   const today = dayInZone(now, filter.timezone);
-  const segments = buildSegments(periods, history ? { day: history.first, at: history.firstAt } : null, today);
+  const segments = buildSegments(periods, history ? { day: history.first, at: history.firstAt, lastDay: history.last, lastEndAt: history.lastEndAt } : null, today);
   const { rows, values } = await aggregateRanges(db, filter, segments, options);
   const scope = history ? scopeOf(history, filter) : null;
   return segments.map((seg, i) => {
     const r = rows.get(i + 1);
     const lastDay = seg.endDate === null ? null : addDays(seg.endDate, -1);
-    const started = seg.startDate <= today;
+    // Usage can only have accrued up to today, whatever end date was entered. One exception: a record that
+    // only knows its day is filed under its UTC day, which west of UTC can be tomorrow here. Days up to the
+    // last record therefore count as passed, so that a stretch which holds records never reads "not started".
+    const horizon = history !== null && history.last > today ? history.last : today;
+    const started = seg.startDate <= horizon;
     const days = Math.max(1, daysBetween(seg.startDate, lastDay ?? today));
-    // Usage can only have accrued up to today, whatever end date was entered.
-    const elapsedDays = started ? daysBetween(seg.startDate, lastDay !== null && lastDay < today ? lastDay : today) : 0;
+    const elapsedDays = started ? daysBetween(seg.startDate, lastDay !== null && lastDay < horizon ? lastDay : horizon) : 0;
     const recordedDays = scope ? sharedDays([seg.startDate, lastDay], scope) : 0;
     const tokens = toNumber(r?.tokens);
     return {

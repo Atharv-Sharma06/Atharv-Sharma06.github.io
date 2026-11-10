@@ -269,10 +269,19 @@ export interface ActualSpend {
 export async function getActualSpend(db: SqlExecutor, userId: number, timezone: string, now: Date = new Date()): Promise<ActualSpend> {
   const reported = (
     await db.query<{ total: string | null; first_at: string | null; last_at: string | null }>(
-      `SELECT sum(rc.amount_usd)::text AS total, min(rc.occurred_at)::date::text AS first_at, max(rc.occurred_at)::date::text AS last_at
+      // Days by the rule every figure follows: a row of a day or more states UTC days, and covers
+      // `bucket_seconds` from its start, so the range ends on the last day the latest-ending row
+      // covers (a report with one row for September runs to 30 September, not to the 1st it begins
+      // on). A row with a time of day falls on the day it has in the user's timezone.
+      `SELECT sum(rc.amount_usd)::text AS total,
+              min(CASE WHEN rc.bucket_seconds >= 86400 THEN (rc.occurred_at AT TIME ZONE 'UTC')::date
+                       ELSE (rc.occurred_at AT TIME ZONE $2::text)::date END)::text AS first_at,
+              max(CASE WHEN rc.bucket_seconds >= 86400
+                       THEN ((rc.occurred_at + make_interval(secs => rc.bucket_seconds) - interval '1 microsecond') AT TIME ZONE 'UTC')::date
+                       ELSE (rc.occurred_at AT TIME ZONE $2::text)::date END)::text AS last_at
          FROM reported_costs rc JOIN data_sources s ON s.id = rc.source_id
         WHERE rc.user_id = $1 AND s.include_in_totals`,
-      [userId],
+      [userId, timezone],
     )
   ).rows[0];
 

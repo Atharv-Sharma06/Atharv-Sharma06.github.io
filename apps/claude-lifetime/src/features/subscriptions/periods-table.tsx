@@ -1,22 +1,23 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { SegmentStats, SubscriptionPeriod } from '@/analytics/subscriptions';
-import { confidenceOf } from '@/components/data/confidence';
+import { planLabel, type SegmentStats, type SubscriptionPeriod } from '@/analytics/subscriptions';
+import { ConfidenceBadge, confidenceOf } from '@/components/data/confidence';
 import { Button } from '@/components/ui/button';
 import { Table, TableFrame, Td, Th, THead, Tr } from '@/components/ui/table';
 import { cn } from '@/lib/cn';
-import { dayInZone, formatDay, formatInt, formatMoney, formatShare, formatSpan, formatTokens, formatUsd, plural } from '@/lib/format';
-import { averagedOverPartOnly, averagePerDay, describeDates, elapsedDays, hasRecords, leadingUsd, lengthDays, pricedShare, segmentDates, valueLevel, type CostScenario } from './logic';
+import { formatDay, formatInt, formatMoney, formatShare, formatSpan, formatTokens, formatUsd, plural } from '@/lib/format';
+import {
+  addPeriodLabel, averagedOverPartOnly, averagePerDay, describeDates, hasRecords, leadingUsd, lengthDays, pricedShare, segmentDays, valueHint, valueLevel, type CostScenario,
+} from './logic';
 import { BadgedFigure, PlanSwatch, SyntheticTag, Unavailable } from './parts';
 
 export interface PeriodsTableProps {
   /** Periods and the gaps between them, in order. */
   segments: SegmentStats[];
   periods: SubscriptionPeriod[];
-  /** The instant the segments were read at. */
-  now: string;
-  timezone: string;
+  /** Today in the user's timezone, when the segments were read. */
+  today: string;
   scenario: CostScenario;
   /** False while nothing is imported: the usage columns are then left out. */
   hasUsage: boolean;
@@ -39,9 +40,7 @@ const PINNED_EDGE = 'lg:shadow-[inset_1px_0_0_var(--color-line-strong)]';
  * recorded plan, oldest first. A segment without imported records shows a dash and says
  * so; a zero is only ever shown when the records themselves add up to zero.
  */
-export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUsage, onEdit, onDelete, onAddPeriod }: PeriodsTableProps) {
-  const nowMs = Date.parse(now);
-  const today = dayInZone(now, timezone);
+export function PeriodsTable({ segments, periods, today, scenario, hasUsage, onEdit, onDelete, onAddPeriod }: PeriodsTableProps) {
   const byId = new Map(periods.map((period) => [period.id, period]));
 
   const body = useRef<HTMLTableSectionElement | null>(null);
@@ -106,17 +105,17 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
           {segments.map((segment, index) => {
             const period = segment.periodId === null ? undefined : byId.get(segment.periodId);
             const isGap = segment.kind === 'gap';
-            const dates = segmentDates(segment, timezone);
+            const dates = segmentDays(segment);
             const datesText = describeDates(dates, today);
-            const length = lengthDays(segment, nowMs);
-            const elapsed = elapsedDays(segment, nowMs);
+            const length = lengthDays(segment, today);
+            const elapsed = segment.elapsedDays;
             const recorded = hasRecords(segment);
             const average = averagePerDay(segment);
             const level = valueLevel(segment.value);
             const share = pricedShare(segment.value);
 
             return (
-              <Tr key={`${segment.kind}:${segment.periodId ?? index}:${segment.start}`} className={cn(isGap && GAP_ROW)}>
+              <Tr key={`${segment.kind}:${segment.periodId ?? index}:${segment.startDate}`} className={cn(isGap && GAP_ROW)}>
                 <th scope="row" className="py-2.5 pl-5 pr-2 text-left align-top font-normal">
                   <span className="flex items-center gap-2">
                     <PlanSwatch planKey={segment.planKey} />
@@ -172,7 +171,9 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
                               {formatTokens(average)}
                             </span>
                             {/* Days outside the imported history are unknown, not empty, so they are not averaged in. */}
-                            {averagedOverPartOnly(segment) ? <span className="mt-0.5 block text-xs text-ink-3">over {plural(segment.recordedDays, 'day')} with records</span> : null}
+                            {averagedOverPartOnly(segment) ? (
+                              <span className="mt-0.5 block text-xs text-ink-3">over the {plural(segment.recordedDays, 'day')} between your first and last record</span>
+                            ) : null}
                           </>
                         )}
                       </Td>
@@ -189,7 +190,12 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
                           </span>
                         ) : (
                           <>
-                            {formatUsd(leadingUsd(segment.value, scenario), { cents: true })}
+                            <span className="tabular">{formatUsd(leadingUsd(segment.value, scenario), { cents: true })}</span>
+                            {/* The confidence goes with the value, as on the other cards; its hint names the caching scenario where
+                                estimates are priced. Below the figure rather than beside it, so the table keeps its width. */}
+                            <span className="mt-1 flex justify-end">
+                              <ConfidenceBadge level={level} hint={valueHint(segment.value, scenario)} />
+                            </span>
                             {share !== null && share < 1 ? (
                               <span
                                 className="mt-0.5 block text-xs text-ink-3"
@@ -211,11 +217,14 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
                           <span className="w-[5.75rem] pt-0.5 text-left text-xs leading-tight">No recorded usage</span>
                         </span>
                       </Td>
-                      {['average', 'conversations', 'messages', 'value'].map((column) => (
+                      {['average', 'conversations', 'messages'].map((column) => (
                         <Td key={column} numeric className={CELL}>
                           <Unavailable />
                         </Td>
                       ))}
+                      <Td numeric className={CELL}>
+                        <Unavailable />
+                      </Td>
                     </>
                   )
                 ) : null}
@@ -225,7 +234,7 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
                 <Td align="right" className={cn('whitespace-nowrap py-1 pl-2 align-top', pinned, isGap ? cn(GAP_ROW, 'pr-5') : 'bg-surface pr-3')}>
                   {period ? (
                     <span className="inline-flex gap-0.5">
-                      <Button variant="ghost" size="sm" onClick={() => onEdit(period)} aria-label={`Edit ${segment.label}, ${datesText}`}>
+                      <Button variant="ghost" size="sm" onClick={() => onEdit(period)} aria-label={`Edit ${segment.label}, ${datesText}`} data-period-edit={period.id}>
                         Edit
                       </Button>
                       <Button variant="ghost" size="sm" onClick={() => onDelete(period)} aria-label={`Delete ${segment.label}, ${datesText}`}>
@@ -233,10 +242,81 @@ export function PeriodsTable({ segments, periods, now, timezone, scenario, hasUs
                       </Button>
                     </span>
                   ) : isGap ? (
-                    <Button variant="secondary" size="sm" onClick={() => onAddPeriod(dates)} aria-label={`Add period for ${datesText}`}>
+                    <Button variant="secondary" size="sm" onClick={() => onAddPeriod(dates)} aria-label={addPeriodLabel(dates)}>
                       Add period
                     </Button>
                   ) : null}
+                </Td>
+              </Tr>
+            );
+          })}
+        </tbody>
+      </Table>
+    </TableFrame>
+  );
+}
+
+/**
+ * The stored periods alone, for when the figures of the page cannot be read. Built from
+ * nothing but the stored days, so that a period whose dates the statistics cannot cope
+ * with can still be corrected or removed here.
+ */
+export function StoredPeriodsTable({
+  periods,
+  today,
+  onEdit,
+  onDelete,
+}: {
+  periods: SubscriptionPeriod[];
+  today: string;
+  onEdit: (period: SubscriptionPeriod) => void;
+  onDelete: (period: SubscriptionPeriod) => void;
+}) {
+  return (
+    <TableFrame className="rounded-none border-x-0 border-b-0">
+      <Table>
+        <THead>
+          <tr>
+            <Th className="py-2 pl-5 pr-2">Plan</Th>
+            <Th className={HEAD}>Start</Th>
+            <Th className={HEAD}>End</Th>
+            <Th align="right" className={cn(HEAD, 'leading-tight')}>
+              Monthly
+              <br />
+              price
+            </Th>
+            <Th className="py-2 pl-2 pr-5">
+              <span className="sr-only">Actions</span>
+            </Th>
+          </tr>
+        </THead>
+        <tbody>
+          {periods.map((period) => {
+            const label = planLabel(period.planKey, period.label);
+            const datesText = describeDates(period, today);
+            return (
+              <Tr key={period.id}>
+                <th scope="row" className="py-2.5 pl-5 pr-2 text-left align-top font-normal">
+                  <span className="flex items-center gap-2">
+                    <PlanSwatch planKey={period.planKey} />
+                    <span className="whitespace-nowrap text-ink">{label}</span>
+                    {period.isSynthetic ? <SyntheticTag /> : null}
+                  </span>
+                </th>
+                <Td className={cn(CELL, 'whitespace-nowrap')}>{formatDay(period.startDate)}</Td>
+                <Td className={cn(CELL, 'whitespace-nowrap')}>{period.lastDate ? formatDay(period.lastDate) : 'No end date'}</Td>
+                <Td numeric className={cn(CELL, 'whitespace-nowrap')}>
+                  {period.monthlyPrice ? formatMoney(period.monthlyPrice, period.currency) : <Unavailable>Not entered</Unavailable>}
+                </Td>
+                <Td align="right" className="whitespace-nowrap py-1 pl-2 pr-3 align-top">
+                  <span className="inline-flex gap-0.5">
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(period)} aria-label={`Edit ${label}, ${datesText}`} data-period-edit={period.id}>
+                      Edit
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => onDelete(period)} aria-label={`Delete ${label}, ${datesText}`}>
+                      Delete
+                    </Button>
+                  </span>
                 </Td>
               </Tr>
             );

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Field, Input, Select, Textarea } from '@/components/ui/controls';
 import { ErrorNote } from '@/components/ui/feedback';
 import { Dialog } from '@/components/ui/overlay';
-import { formatDay, formatDayRange } from '@/lib/format';
+import { formatDay, formatDayRange, todayInZone } from '@/lib/format';
 import { useApp } from '@/state/app';
 import {
   emptyPeriodForm, endDateResolvingOverlap, formToInput, periodToForm, periodToInput, validatePeriodForm, type PeriodFormField, type PeriodFormValues,
@@ -74,7 +74,7 @@ export function PeriodEditor({
   const endConflictOn = conflict && failure?.startDate === values.startDate ? endDateResolvingOverlap(conflict, values.startDate) : null;
 
   const save = async (endOtherPeriodFirst: boolean) => {
-    const problems = validatePeriodForm(values);
+    const problems = validatePeriodForm(values, todayInZone(app.settings.timezone));
     setFieldErrors(problems);
     if (Object.keys(problems).length > 0) return;
 
@@ -83,7 +83,9 @@ export function PeriodEditor({
     let endedOther = false;
     try {
       if (endOtherPeriodFirst && conflict && endConflictOn) {
-        await savePeriod(app.db, app.userId, app.settings.timezone, { ...periodToInput(conflict), lastDate: endConflictOn });
+        // Only the end date of the other period changes. A demo period stays demo data, so
+        // removing the demo data still removes it; only editing that period itself makes it one's own.
+        await savePeriod(app.db, app.userId, app.settings.timezone, { ...periodToInput(conflict), lastDate: endConflictOn }, { keepSynthetic: true });
         endedOther = true;
       }
       onSaved(await savePeriod(app.db, app.userId, app.settings.timezone, formToInput(values, editing?.id)));

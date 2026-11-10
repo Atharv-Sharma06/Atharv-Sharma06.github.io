@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { ConversationUsage, SideStats, SubscriptionPeriod } from '@/analytics/subscriptions';
 import { ZERO_FIGURES } from '@/analytics/value';
 import {
-  assessComparability, averagedOverPartOnly, averagePerDay, blockLabelFit, boundaryX, DAY_MS, DAYS_PER_MONTH, dayStartInZone, defaultMode, describeDates, describeRatio, elapsedDays,
-  emptyPeriodForm, endDateResolvingOverlap, formToInput, layoutTimeline, leadingUsd, lengthDays, otherUsd, perConversation, periodToForm, periodToInput,
-  placeAxisLabels, pricedShare, ratePer, rateRatio, segmentDates, segmentSpans, sideFigure, timelineTicks, timelineX, validatePeriodForm, valueLevel,
+  addPeriodLabel, assessComparability, averagedOverPartOnly, averagePerDay, blockLabelFit, boundaryX, DAY_MS, DAYS_PER_MONTH, dayStartInZone, defaultMode, describeDates,
+  describeRatio, emptyPeriodForm, endDateResolvingOverlap, focusTargetAfterChange, formToInput, layoutTimeline, leadingUsd, lengthDays, noPaymentReason, otherUsd,
+  paymentSpan, perConversation, periodToForm, periodToInput, placeAxisLabels, pricedShare, pricesEstimates, ratePer, rateRatio, segmentDays, segmentSpans, sideFigure,
+  timelineTicks, timelineX, validatePeriodForm, valueHint, valueLevel,
   type AxisLabel, type Comparability,
 } from '@/features/subscriptions/logic';
 
@@ -34,11 +35,16 @@ describe('calendar days in a timezone', () => {
     expect(new Date(dayStartInZone('2025-06-01', 'Not/AZone')).toISOString()).toBe('2025-06-01T00:00:00.000Z');
   });
 
-  it('gives the first and last day of a segment, whose end is exclusive', () => {
-    // a period entered as 1 Feb – 28 Feb in New York
-    expect(segmentDates({ start: '2025-02-01T05:00:00.000Z', end: '2025-03-01T05:00:00.000Z' }, 'America/New_York')).toEqual({ startDate: '2025-02-01', lastDate: '2025-02-28' });
-    // a gap that begins with the first imported record, in the middle of a day, and is still running
-    expect(segmentDates({ start: '2025-01-10T15:00:00.000Z', end: null }, 'America/New_York')).toEqual({ startDate: '2025-01-10', lastDate: null });
+  it('gives the first and last day of a segment from its stored days, whose end is exclusive', () => {
+    // a period entered as 1 Feb – 28 Feb
+    expect(segmentDays({ startDate: '2025-02-01', endDate: '2025-03-01' })).toEqual({ startDate: '2025-02-01', lastDate: '2025-02-28' });
+    // a running stretch has no last day
+    expect(segmentDays({ startDate: '2025-01-10', endDate: null })).toEqual({ startDate: '2025-01-10', lastDate: null });
+  });
+
+  it('names the button that fills a stretch by its dates, and a running stretch by its first day', () => {
+    expect(addPeriodLabel({ startDate: '2025-03-03', lastDate: '2025-05-31' })).toBe('Add period for Mar 3 – May 31, 2025');
+    expect(addPeriodLabel({ startDate: '2026-02-01', lastDate: null })).toBe('Add period from Feb 1, 2026');
   });
 });
 
@@ -182,30 +188,22 @@ describe('time axis', () => {
 });
 
 describe('segments', () => {
-  const NOW = Date.parse('2026-11-10T12:00:00Z');
+  const TODAY = '2026-11-10';
 
-  it('counts the days that have passed when a period is entered with a future end date', () => {
-    const closed = { start: '2026-09-01T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z', days: 30 };
-    expect(elapsedDays(closed, NOW)).toBe(30);
-
-    const running = { start: '2026-11-01T00:00:00.000Z', end: null, days: 10 };
-    expect(elapsedDays(running, NOW)).toBe(10);
-
-    // entered as 1 – 30 November; only nine and a half days of it have happened
-    const endsLater = { start: '2026-11-01T00:00:00.000Z', end: '2026-12-01T00:00:00.000Z', days: 30 };
-    expect(elapsedDays(endsLater, NOW)).toBe(10);
-
-    const notStarted = { start: '2026-12-01T00:00:00.000Z', end: '2027-01-01T00:00:00.000Z', days: 31 };
-    expect(elapsedDays(notStarted, NOW)).toBe(0);
-
-    expect([closed, running, endsLater, notStarted].map((segment) => lengthDays(segment, NOW))).toEqual([30, 10, 30, 31]);
+  it('gives every period its length, decided on calendar days against today', () => {
+    const closed = { startDate: '2026-09-01', endDate: '2026-10-01', days: 30 };
+    const running = { startDate: '2026-11-01', endDate: null, days: 10 };
+    const endsLater = { startDate: '2026-11-01', endDate: '2026-12-01', days: 30 };
+    const notStarted = { startDate: '2026-12-01', endDate: '2027-01-01', days: 31 };
+    expect([closed, running, endsLater, notStarted].map((segment) => lengthDays(segment, TODAY))).toEqual([30, 10, 30, 31]);
+    // a plan that starts today has started
+    expect(lengthDays({ startDate: TODAY, endDate: null, days: 1 }, TODAY)).toBe(1);
   });
 
   it('gives no length to a running period that has not started', () => {
     // entered as "from 1 December", with no end date, three weeks ahead of time
-    const ahead = { start: '2026-12-01T00:00:00.000Z', end: null, days: 1 };
-    expect(lengthDays(ahead, NOW)).toBeNull();
-    expect(elapsedDays(ahead, NOW)).toBe(0);
+    expect(lengthDays({ startDate: '2026-12-01', endDate: null, days: 1 }, TODAY)).toBeNull();
+    expect(lengthDays({ startDate: '2026-11-11', endDate: null, days: 1 }, TODAY)).toBeNull();
   });
 
   it('averages over the days of a segment that the imported records cover', () => {
@@ -310,7 +308,7 @@ describe('before vs. after: normalised figures', () => {
 });
 
 describe('before vs. after: when a comparison is not meaningful', () => {
-  const context = { timezone: 'UTC', historyStart: null };
+  const context = { historyStart: null };
   const estimated = (spanDays: number, tokens = 10_000) => side({ tokens, exact: 0, estimated: tokens, spanDays, firstAt: '2025-01-01T09:00:00.000Z' });
 
   it('flags sides that cover very different lengths of time, and then opens on a daily average', () => {
@@ -329,24 +327,56 @@ describe('before vs. after: when a comparison is not meaningful', () => {
 
   it('flags a side estimated from text next to a side that is mostly metered', () => {
     const metered = side({ tokens: 1000, exact: 980, estimated: 20, spanDays: 100 });
-    expect(assessComparability(estimated(100), metered, context).measurement).toEqual({ estimatedSide: 'before', meteredShare: 0.98 });
-    expect(assessComparability(metered, estimated(100), context).measurement).toEqual({ estimatedSide: 'after', meteredShare: 0.98 });
+    expect(assessComparability(estimated(100), metered, context).measurement).toEqual({ estimatedSide: 'before', estimatedShare: 1, meteredShare: 0.98 });
+    expect(assessComparability(metered, estimated(100), context).measurement).toEqual({ estimatedSide: 'after', estimatedShare: 1, meteredShare: 0.98 });
     // both estimated, both metered, or an estimated side next to a mostly estimated one: the method is the same enough
     expect(assessComparability(estimated(100), estimated(100), context).measurement).toBeNull();
     expect(assessComparability(metered, metered, context).measurement).toBeNull();
     expect(assessComparability(estimated(100), side({ tokens: 1000, exact: 500, estimated: 500, spanDays: 100 }), context).measurement).toBeNull();
   });
 
+  it('is not switched off by a single metered record on an estimated side', () => {
+    // 400,000 tokens estimated from chat text and one metered record of 400 tokens, against 200 million metered tokens
+    const before = side({ tokens: 400_400, exact: 400, estimated: 400_000, spanDays: 40 });
+    const after = side({ tokens: 200_000_000, exact: 200_000_000, estimated: 0, spanDays: 40 });
+    const comparability = assessComparability(before, after, context);
+    expect(comparability.measurement).toEqual({ estimatedSide: 'before', estimatedShare: 400_000 / 400_400, meteredShare: 1 });
+    // and no ratio is stated
+    expect(rateRatio('day', { figure: sideFigure('day', before, null), spanDays: 40 }, { figure: sideFigure('day', after, null), spanDays: 40 }, comparability)).toBeNull();
+  });
+
+  it('is raised when the metered shares lie far apart, and not when one side is only a little more metered', () => {
+    const at = (metered: number) => side({ tokens: 1000, exact: metered, estimated: 1000 - metered, spanDays: 100 });
+    // 30% against 85% metered: neither side is almost all estimated, but the methods differ by more than half
+    expect(assessComparability(at(300), at(850), context).measurement).toEqual({ estimatedSide: 'before', estimatedShare: 0.7, meteredShare: 0.85 });
+    expect(assessComparability(at(850), at(300), context).measurement).toEqual({ estimatedSide: 'after', estimatedShare: 0.7, meteredShare: 0.85 });
+    // 90% estimated next to 51% metered
+    expect(assessComparability(at(100), at(510), context).measurement).toEqual({ estimatedSide: 'before', estimatedShare: 0.9, meteredShare: 0.51 });
+    // 89% estimated next to 51% metered, 40 points apart: comparable enough
+    expect(assessComparability(at(110), at(510), context).measurement).toBeNull();
+    expect(assessComparability(at(400), at(800), context).measurement).toBeNull();
+  });
+
   it('notes that the earlier side begins with the first imported record', () => {
-    const before = side({ tokens: 500, estimated: 500, spanDays: 30, firstAt: '2024-05-14T13:05:09.000Z' });
+    const before = side({ tokens: 500, estimated: 500, spanDays: 30, firstAt: '2024-05-14T13:05:09.000Z', firstDay: '2024-05-14' });
     expect(assessComparability(before, estimated(30), context).firstRecord).toEqual({ day: '2024-05-14', unrecordedDays: 0 });
     // the entered history starts 74 days before anything was recorded
-    expect(assessComparability(before, estimated(30), { timezone: 'UTC', historyStart: '2024-03-01T00:00:00.000Z' }).firstRecord).toEqual({ day: '2024-05-14', unrecordedDays: 74 });
+    expect(assessComparability(before, estimated(30), { historyStart: '2024-03-01' }).firstRecord).toEqual({ day: '2024-05-14', unrecordedDays: 74 });
+    // a history that starts the day before the first record leaves that one day unrecorded, and one that starts on it none
+    expect(assessComparability(before, estimated(30), { historyStart: '2024-05-13' }).firstRecord).toEqual({ day: '2024-05-14', unrecordedDays: 1 });
+    expect(assessComparability(before, estimated(30), { historyStart: '2024-05-14' }).firstRecord).toEqual({ day: '2024-05-14', unrecordedDays: 0 });
     // records that begin before the first entered period leave nothing unrecorded
-    expect(assessComparability(before, estimated(30), { timezone: 'UTC', historyStart: '2024-06-01T00:00:00.000Z' }).firstRecord).toEqual({ day: '2024-05-14', unrecordedDays: 0 });
-    // the day is the local one
-    expect(assessComparability(side({ tokens: 5, estimated: 5, spanDays: 3, firstAt: '2024-05-14T02:00:00.000Z' }), null, { timezone: 'America/New_York', historyStart: null }).firstRecord?.day).toBe('2024-05-13');
+    expect(assessComparability(before, estimated(30), { historyStart: '2024-06-01' }).firstRecord).toEqual({ day: '2024-05-14', unrecordedDays: 0 });
     expect(assessComparability(side(), estimated(30), context).firstRecord).toBeNull();
+  });
+
+  it('names the day the first record is filed under, as the column heading does', () => {
+    // A daily report row or a manual entry for 9 March is stored at 00:00 UTC; west of UTC that
+    // instant is the evening of 8 March, but the record belongs to 9 March everywhere.
+    const before = side({ tokens: 500, estimated: 500, spanDays: 23, firstAt: '2025-03-09T00:00:00.000Z', firstDay: '2025-03-09', spanFrom: '2025-03-09' });
+    expect(assessComparability(before, estimated(30), context).firstRecord?.day).toBe('2025-03-09');
+    // the day comes from the analytics, whatever the instant says
+    expect(assessComparability(side({ ...before, firstAt: '2025-03-08T12:00:00.000Z' }), estimated(30), context).firstRecord?.day).toBe('2025-03-09');
   });
 
   it('lists sides too short for a steady average', () => {
@@ -377,7 +407,7 @@ describe('before vs. after: the plain ratio', () => {
   });
 
   it('is withheld when the two sides are measured differently', () => {
-    expect(rateRatio('day', of(100), of(300), { measurement: { estimatedSide: 'before', meteredShare: 0.98 } })).toBeNull();
+    expect(rateRatio('day', of(100), of(300), { measurement: { estimatedSide: 'before', estimatedShare: 1, meteredShare: 0.98 } })).toBeNull();
   });
 
   it('is rounded for reading and worded in the direction of the larger side', () => {
@@ -398,6 +428,7 @@ describe('before vs. after: the plain ratio', () => {
 });
 
 describe('period form', () => {
+  const TODAY = '2026-11-10';
   const period: SubscriptionPeriod = {
     id: 7, planKey: 'max_20x', label: 'Max 20x (annual)', startedAt: '2025-03-01T00:00:00.000Z', endedAt: null, startDate: '2025-03-01', lastDate: null,
     monthlyPrice: '200.00', currency: 'EUR', notes: 'Paid yearly', isSynthetic: false,
@@ -426,17 +457,37 @@ describe('period form', () => {
 
   it('reports each problem next to its field, in the words savePeriod uses', () => {
     const valid = { planKey: 'pro', label: '', startDate: '2025-01-10', lastDate: '', monthlyPrice: '20', currency: 'USD', notes: '' };
-    expect(validatePeriodForm(valid)).toEqual({});
-    expect(validatePeriodForm({ ...valid, lastDate: '2025-01-10', monthlyPrice: '19.99', currency: 'eur' })).toEqual({});
-    expect(validatePeriodForm({ ...valid, planKey: '' })).toEqual({ planKey: 'Choose a plan.' });
-    expect(validatePeriodForm({ ...valid, startDate: '' })).toEqual({ startDate: 'Enter a valid start date.' });
-    expect(validatePeriodForm({ ...valid, startDate: '2025-02-30' })).toEqual({ startDate: 'Enter a valid start date.' });
-    expect(validatePeriodForm({ ...valid, lastDate: '2025-13-01' })).toEqual({ lastDate: 'Enter a valid end date, or leave it empty if the plan is still active.' });
-    expect(validatePeriodForm({ ...valid, lastDate: '2025-01-09' })).toEqual({ lastDate: 'The end date is before the start date.' });
-    expect(validatePeriodForm({ ...valid, monthlyPrice: 'twenty' })).toEqual({ monthlyPrice: 'Enter the monthly price as a number, for example 20 or 19.99.' });
-    expect(validatePeriodForm({ ...valid, monthlyPrice: '20.999' })).toHaveProperty('monthlyPrice');
-    expect(validatePeriodForm({ ...valid, currency: 'dollars' })).toEqual({ currency: 'Use a three-letter currency code such as USD.' });
-    expect(Object.keys(validatePeriodForm({ planKey: '', label: '', startDate: '', lastDate: 'x', monthlyPrice: '-1', currency: '', notes: '' })).sort()).toEqual(['currency', 'lastDate', 'monthlyPrice', 'planKey', 'startDate']);
+    expect(validatePeriodForm(valid, TODAY)).toEqual({});
+    expect(validatePeriodForm({ ...valid, lastDate: '2025-01-10', monthlyPrice: '19.99', currency: 'eur' }, TODAY)).toEqual({});
+    expect(validatePeriodForm({ ...valid, planKey: '' }, TODAY)).toEqual({ planKey: 'Choose a plan.' });
+    expect(validatePeriodForm({ ...valid, startDate: '' }, TODAY)).toEqual({ startDate: 'Enter a valid start date.' });
+    expect(validatePeriodForm({ ...valid, startDate: '2025-02-30' }, TODAY)).toEqual({ startDate: 'Enter a valid start date.' });
+    expect(validatePeriodForm({ ...valid, lastDate: '2025-13-01' }, TODAY)).toEqual({ lastDate: 'Enter a valid end date, or leave it empty if the plan is still active.' });
+    expect(validatePeriodForm({ ...valid, lastDate: '2025-01-09' }, TODAY)).toEqual({ lastDate: 'The end date is before the start date.' });
+    expect(validatePeriodForm({ ...valid, monthlyPrice: 'twenty' }, TODAY)).toEqual({ monthlyPrice: 'Enter the monthly price as a number, for example 20 or 19.99.' });
+    expect(validatePeriodForm({ ...valid, monthlyPrice: '20.999' }, TODAY)).toHaveProperty('monthlyPrice');
+    expect(validatePeriodForm({ ...valid, currency: 'dollars' }, TODAY)).toEqual({ currency: 'Use a three-letter currency code such as USD.' });
+    expect(Object.keys(validatePeriodForm({ planKey: '', label: '', startDate: '', lastDate: 'x', monthlyPrice: '-1', currency: '', notes: '' }, TODAY)).sort()).toEqual(['currency', 'lastDate', 'monthlyPrice', 'planKey', 'startDate']);
+  });
+
+  it('refuses dates before 2021 and more than ten years ahead, next to the field', () => {
+    const valid = { planKey: 'pro', label: '', startDate: '2025-01-10', lastDate: '', monthlyPrice: '20', currency: 'USD', notes: '' };
+    // a date field turns the keystrokes 01/10/26 into the year 26
+    expect(validatePeriodForm({ ...valid, startDate: '0026-01-10' }, TODAY)).toEqual({
+      startDate: 'Enter a start date in 2021 or later. There was no Claude usage before then, so check the year.',
+    });
+    expect(validatePeriodForm({ ...valid, startDate: '2020-12-31' }, TODAY)).toHaveProperty('startDate');
+    expect(validatePeriodForm({ ...valid, startDate: '2021-01-01' }, TODAY)).toEqual({});
+    // 31 December 9999, a common way of writing "no end"
+    expect(validatePeriodForm({ ...valid, lastDate: '9999-12-31' }, TODAY)).toEqual({
+      lastDate: 'The end date is more than 10 years from today. Check the year, or leave the end date empty while the plan is active.',
+    });
+    expect(validatePeriodForm({ ...valid, lastDate: '2036-11-10' }, TODAY)).toEqual({});
+    expect(validatePeriodForm({ ...valid, lastDate: '2036-11-11' }, TODAY)).toHaveProperty('lastDate');
+    expect(validatePeriodForm({ ...valid, startDate: '2036-11-11' }, TODAY)).toEqual({ startDate: 'The start date is more than 10 years from today. Check the year.' });
+    // on 29 February, ten years ahead ends on 28 February
+    expect(validatePeriodForm({ ...valid, lastDate: '2034-02-28' }, '2024-02-29')).toEqual({});
+    expect(validatePeriodForm({ ...valid, lastDate: '2034-03-01' }, '2024-02-29')).toHaveProperty('lastDate');
   });
 
   it('offers to end a running period the day before a new one starts, and only then', () => {
@@ -448,5 +499,65 @@ describe('period form', () => {
     expect(endDateResolvingOverlap({ startDate: '2025-01-10', lastDate: null }, '2025-01-10')).toBeNull();
     expect(endDateResolvingOverlap({ startDate: '2025-01-10', lastDate: null }, '2024-12-01')).toBeNull();
     expect(endDateResolvingOverlap({ startDate: '2025-01-10', lastDate: null }, '')).toBeNull();
+  });
+});
+
+describe('money', () => {
+  const period = (over: Partial<SubscriptionPeriod>): SubscriptionPeriod => ({
+    id: 1, planKey: 'pro', label: null, startedAt: '', endedAt: null, startDate: '2025-01-01', lastDate: null, monthlyPrice: '20.00', currency: 'USD', notes: null, isSynthetic: false, ...over,
+  });
+  const TODAY = '2026-11-10';
+
+  it('tells "no period has a price" apart from "the priced period has not started yet"', () => {
+    expect(noPaymentReason([], TODAY)).toEqual({ kind: 'no_periods' });
+    expect(noPaymentReason([period({ monthlyPrice: null })], TODAY)).toEqual({ kind: 'no_price' });
+    expect(noPaymentReason([period({ monthlyPrice: '0.00' })], TODAY)).toEqual({ kind: 'no_price' });
+    expect(noPaymentReason([period({ monthlyPrice: null, lastDate: '2026-11-30' }), period({ id: 2, startDate: '2026-12-01' })], TODAY)).toEqual({
+      kind: 'not_started',
+      startDate: '2026-12-01',
+    });
+  });
+
+  it('states the days the payments are for', () => {
+    expect(paymentSpan([period({ startDate: '2024-06-01' })], TODAY)).toEqual({ from: '2024-06-01', to: TODAY });
+    expect(
+      paymentSpan([period({ startDate: '2024-06-01', lastDate: '2024-12-31' }), period({ id: 2, startDate: '2025-02-01', lastDate: '2025-03-31' }), period({ id: 3, startDate: '2025-04-01', monthlyPrice: null })], TODAY),
+    ).toEqual({ from: '2024-06-01', to: '2025-03-31' });
+    // a period that ends after today counts up to today; one that has not started does not count
+    expect(paymentSpan([period({ startDate: '2026-11-01', lastDate: '2026-11-30' }), period({ id: 2, startDate: '2026-12-01' })], TODAY)).toEqual({ from: '2026-11-01', to: TODAY });
+    expect(paymentSpan([period({ startDate: '2026-12-01' })], TODAY)).toBeNull();
+  });
+});
+
+describe('the confidence of an equivalent API value', () => {
+  const value = (over: Partial<typeof ZERO_FIGURES>) => ({ ...ZERO_FIGURES, pricedTokens: 1000, totalStandardUsd: '1', ...over });
+
+  it('names the caching scenario wherever estimated usage is priced', () => {
+    const estimated = value({ estimatedStandardUsd: '0.5', estimatedCachedUsd: '0.2' });
+    expect(pricesEstimates(estimated)).toBe(true);
+    expect(valueHint(estimated, 'standard')).toBe('Includes token counts estimated from conversation text, priced without prompt caching. Not money you paid.');
+    expect(valueHint(estimated, 'cached')).toBe('Includes token counts estimated from conversation text, priced with a 5-minute prompt cache assumed. Not money you paid.');
+    // metered usage priced at an assumed model: estimated, but no scenario is involved
+    const assumed = value({ exactUsd: '1', assumedTokens: 1000 });
+    expect(pricesEstimates(assumed)).toBe(false);
+    expect(valueLevel(assumed)).toBe('estimated');
+    expect(valueHint(assumed, 'standard')).toBe('Usage with no recorded model is priced as the model you chose in Settings. Not money you paid.');
+    expect(valueHint(value({ exactUsd: '1' }), 'cached')).toBe('Metered token counts multiplied by Anthropic’s published API prices. Not money you paid.');
+  });
+});
+
+describe('the focus after a period was saved or deleted', () => {
+  const element = (name: string, isConnected = true) => ({ name, isConnected });
+  const find = { periodEditButton: (id: number) => (id === 5 ? element('edit 5') : null), main: () => element('main') };
+
+  it('stays on what opened the dialog while that is still on the page', () => {
+    expect(focusTargetAfterChange({ opener: element('Add period'), periodId: 5 }, find)?.name).toBe('Add period');
+  });
+
+  it('moves to the saved period’s row when what opened the dialog was replaced, and to the main content after a delete', () => {
+    // a gap's "Add period" button is gone once the gap is filled
+    expect(focusTargetAfterChange({ opener: element('Add period for Feb 1 – Feb 28, 2026', false), periodId: 5 }, find)?.name).toBe('edit 5');
+    expect(focusTargetAfterChange({ opener: element('Delete Pro', false), periodId: null }, find)?.name).toBe('main');
+    expect(focusTargetAfterChange({ opener: null, periodId: 9 }, find)?.name).toBe('main');
   });
 });

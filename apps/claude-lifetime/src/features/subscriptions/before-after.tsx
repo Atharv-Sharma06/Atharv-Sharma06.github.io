@@ -9,9 +9,9 @@ import { Segmented, Select } from '@/components/ui/controls';
 import { EmptyState } from '@/components/ui/feedback';
 import { Table, TableFrame, THead, Tr } from '@/components/ui/table';
 import { cn } from '@/lib/cn';
-import { dayInZone, formatDay, formatDayRange, formatInt, formatShare, formatTokens, formatUsd, plural } from '@/lib/format';
+import { formatDay, formatDayRange, formatInt, formatShare, formatTokens, formatUsd, plural } from '@/lib/format';
 import {
-  assessComparability, COMPARE_MODES, defaultMode, describeRatio, leadingUsd, pricedShare, rateRatio, sideFigure, valueLevel,
+  assessComparability, COMPARE_MODES, defaultMode, describeRatio, leadingUsd, pricedShare, rateRatio, sideFigure, valueHint, valueLevel,
   type CompareMode, type CostScenario, type Figure, type Side,
 } from './logic';
 import { BadgedFigure, Unavailable } from './parts';
@@ -20,9 +20,8 @@ export interface BeforeAfterCardProps {
   data: BeforeAfter;
   /** Usage that belongs to conversations on each side; null when there is no paid period. */
   inConversations: { before: ConversationUsage; after: ConversationUsage } | null;
-  /** Start of the first entered period, to tell whether the entered history begins before the imported records. */
+  /** First day of the first entered period, to tell whether the entered history begins before the imported records. */
   historyStart: string | null;
-  timezone: string;
   scenario: CostScenario;
   /** How many periods are entered, for the wording of the empty state. */
   periodCount: number;
@@ -32,19 +31,38 @@ export interface BeforeAfterCardProps {
 
 const SIDE_NAME: Record<Side, string> = { before: 'Before', after: 'After' };
 
-/** Tighter on a phone, where the three columns have to share the width of the screen. */
-const CELL = 'px-2 py-2.5 align-top sm:px-3';
+/** Tighter on a phone. */
+const CELL = 'px-2 align-top sm:px-3';
 
+/**
+ * One measure and its figure on each side. Where the table's container is narrower than
+ * 34rem, the name of the measure goes on a line of its own above its two figures, so
+ * that both sides always share the whole width and neither is pushed out of view. That
+ * visible name is hidden from screen readers, which hear the row header instead; the row
+ * header is then only visually hidden.
+ */
 function MeasureRow({ label, hint, before, after }: { label: string; hint?: string; before: ReactNode; after: ReactNode }) {
+  const name = (
+    <>
+      {label}
+      {hint ? <span className="mt-0.5 block text-xs text-ink-3">{hint}</span> : null}
+    </>
+  );
   return (
-    <Tr>
-      <th scope="row" className={cn(CELL, 'text-left font-normal text-ink-2 sm:whitespace-nowrap')}>
-        {label}
-        {hint ? <span className="mt-0.5 block text-xs text-ink-3">{hint}</span> : null}
-      </th>
-      <td className={cn(CELL, 'text-ink')}>{before}</td>
-      <td className={cn(CELL, 'text-ink')}>{after}</td>
-    </Tr>
+    <>
+      <tr aria-hidden="true" className="hidden border-t border-line @max-[34rem]:table-row">
+        <td colSpan={2} className={cn(CELL, 'pt-2.5 text-ink-2')}>
+          {name}
+        </td>
+      </tr>
+      <Tr className="@max-[34rem]:border-t-0">
+        <th scope="row" className={cn(CELL, 'py-2.5 text-left font-normal text-ink-2 @max-[34rem]:sr-only')}>
+          {name}
+        </th>
+        <td className={cn(CELL, 'py-2.5 text-ink @max-[34rem]:pt-1')}>{before}</td>
+        <td className={cn(CELL, 'py-2.5 text-ink @max-[34rem]:pt-1')}>{after}</td>
+      </Tr>
+    </>
   );
 }
 
@@ -107,7 +125,7 @@ function Note({ caution = false, lead, children }: { caution?: boolean; lead: st
  * often in how they were measured, so the card leads with averages, states the range each
  * side really covers, and says in plain words when the comparison should not be trusted.
  */
-export function BeforeAfterCard({ data, inConversations, historyStart, timezone, scenario, periodCount, action }: BeforeAfterCardProps) {
+export function BeforeAfterCard({ data, inConversations, historyStart, scenario, periodCount, action }: BeforeAfterCardProps) {
   const [chosenMode, setChosenMode] = useState<CompareMode | null>(null);
   const { split, before, after } = data;
 
@@ -127,7 +145,7 @@ export function BeforeAfterCard({ data, inConversations, historyStart, timezone,
     );
   }
 
-  const comparability = assessComparability(before, after, { timezone, historyStart });
+  const comparability = assessComparability(before, after, { historyStart });
   const mode = chosenMode ?? defaultMode(comparability);
   const modeInfo = COMPARE_MODES.find((m) => m.value === mode) ?? COMPARE_MODES[0];
   const sides: Array<{ side: Side; stats: SideStats | null; conversations: ConversationUsage | null }> = [
@@ -160,18 +178,21 @@ export function BeforeAfterCard({ data, inConversations, historyStart, timezone,
   );
 
   return (
-    <Card id="before-after" className="scroll-mt-20">
+    // The table and the comparison stand side by side only where the card is wide enough
+    // for the table to keep its three columns next to the comparison; the card's own width
+    // decides, because the sidebar takes a different share of the window at each size.
+    <Card id="before-after" className="@container scroll-mt-20">
       <CardHeader
         title="Before vs. after your first paid plan"
         description={`Your usage on either side of ${splitDay}, the day ${split.label} started. Each side reaches only as far as your imported records do.`}
       />
-      <CardBody className="grid gap-x-10 gap-y-7 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-        <div className="min-w-0">
+      <CardBody className="grid gap-x-10 gap-y-7 @min-[68rem]:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+        <div className="@container min-w-0">
           <TableFrame>
             <Table>
               <THead>
                 <tr>
-                  <th scope="col" className="px-2 py-2 font-medium sm:px-3">
+                  <th scope="col" className="px-2 py-2 font-medium sm:px-3 @max-[34rem]:sr-only">
                     <span className="sr-only">Measure</span>
                   </th>
                   {sides.map(({ side, stats }) => (
@@ -179,7 +200,7 @@ export function BeforeAfterCard({ data, inConversations, historyStart, timezone,
                       <span className="block text-[13px] font-medium text-ink">{SIDE_NAME[side]}</span>
                       {stats && stats.spanDays > 0 ? (
                         <>
-                          <span className="block sm:whitespace-nowrap">{range(stats)}</span>
+                          <span className="block">{range(stats)}</span>
                           <span className="tabular block text-ink-3">{plural(stats.spanDays, 'day')}</span>
                         </>
                       ) : (
@@ -242,14 +263,7 @@ export function BeforeAfterCard({ data, inConversations, historyStart, timezone,
                   }
                   return (
                     <>
-                      <BadgedFigure
-                        level={level}
-                        hint={
-                          level === 'exact'
-                            ? 'Metered token counts multiplied by Anthropic’s published API prices. Not money you paid.'
-                            : 'Includes estimated token counts or an assumed model. Not money you paid.'
-                        }
-                      >
+                      <BadgedFigure level={level} hint={valueHint(stats.value, scenario)}>
                         {formatUsd(leadingUsd(stats.value, scenario), { cents: true })}
                       </BadgedFigure>
                       {share !== null && share < 1 ? (
@@ -265,7 +279,7 @@ export function BeforeAfterCard({ data, inConversations, historyStart, timezone,
           </TableFrame>
         </div>
 
-        <div className="@container min-w-0 border-line lg:border-l lg:pl-10">
+        <div className="@container min-w-0 border-line @min-[68rem]:border-l @min-[68rem]:pl-10">
           {/* The same choice twice: side by side where the column is wide enough, as a menu where it is not. */}
           <Segmented
             label="Compare by"
@@ -304,7 +318,9 @@ export function BeforeAfterCard({ data, inConversations, historyStart, timezone,
                 ) : null}
                 {comparability.measurement ? (
                   <Note caution lead="Measured differently.">
-                    {SIDE_NAME[comparability.measurement.estimatedSide]} is entirely estimated from conversation text, while {formatShare(comparability.measurement.meteredShare)} of{' '}
+                    {SIDE_NAME[comparability.measurement.estimatedSide]} is{' '}
+                    {comparability.measurement.estimatedShare >= 1 ? 'entirely' : formatShare(comparability.measurement.estimatedShare)} estimated from conversation text, while{' '}
+                    {formatShare(comparability.measurement.meteredShare)} of{' '}
                     {comparability.measurement.estimatedSide === 'before' ? 'after' : 'before'} is metered by sources that count tokens. Estimates leave out what an export does not
                     contain, such as system prompts, tool definitions, images and files, so part of the difference comes from the method. No ratio is stated for that reason.
                   </Note>
@@ -313,7 +329,7 @@ export function BeforeAfterCard({ data, inConversations, historyStart, timezone,
                   <Note lead="Before starts at your first imported record.">
                     {comparability.firstRecord.unrecordedDays >= 14 && historyStart ? (
                       <>
-                        The periods you entered start on {formatDay(dayInZone(historyStart, timezone))}, but the earliest record is from {formatDay(comparability.firstRecord.day)}.
+                        The periods you entered start on {formatDay(historyStart)}, but the earliest record is from {formatDay(comparability.firstRecord.day)}.
                         Nothing is recorded for those {plural(comparability.firstRecord.unrecordedDays, 'day')}: either you did not use Claude then, or that usage is not in the
                         imported files.
                       </>

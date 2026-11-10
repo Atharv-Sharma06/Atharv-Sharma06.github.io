@@ -9,10 +9,11 @@
 // Conventions
 //  - Every timestamp is `timestamptz` and stored in UTC. Presentation converts to
 //    the user's IANA timezone (users.timezone) at query time.
-//  - Exact usage (reported by a trusted source) lives in usage_records.
-//    Estimated usage (derived from message text) lives in token_estimates.
-//    They are never mixed in one table; the usage_facts view (0002 migration)
-//    unions them with an explicit confidence column.
+//  - usage_records holds usage whose token counts a file states: metered counts
+//    (confidence 'exact') and counts a CSV, a JSON file or a manual entry states
+//    without declaring them exact (confidence 'estimated'). token_estimates holds
+//    estimates made from message text. The usage_facts view (0002 migration)
+//    unions the two tables and carries the confidence of every row.
 //  - Subscription plans are NOT stored on usage rows. A row's plan is derived at
 //    query time from its timestamp and subscription_periods.
 //  - Prices are NUMERIC and all money math happens in SQL NUMERIC (decimal-safe).
@@ -229,8 +230,10 @@ model Message {
   @@map("messages")
 }
 
-/// EXACT usage: token counts reported by a trusted source, aggregated into time buckets
-/// (15 minutes for Claude Code sessions; the report's own bucket for API reports).
+/// Usage whose token counts a source states, aggregated into time buckets (15 minutes
+/// for Claude Code sessions; the report's own bucket for API reports; the row's own
+/// period for tables and manual entries). `confidence` says whether the counts were
+/// metered (exact) or are stated without being declared exact (estimated).
 /// Aggregating exact counts keeps them exact while keeping the in-browser database small.
 model UsageRecord {
   id                    Int        @id @default(autoincrement())

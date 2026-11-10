@@ -191,4 +191,74 @@ describe('the move of subscription periods from instants to calendar days', () =
       await db.close();
     }
   });
+
+  it('does not add a day to a period that ended at a midnight that happens twice', async () => {
+    const { db, userId } = await open('America/Havana');
+    try {
+      // entered as 1 October – 1 November 2025; on 2 November the clocks go back from 01:00 to
+      // 00:00, and PostgreSQL resolved that midnight to the second one (05:00 UTC)
+      await old(db, userId, 'pro', '2025-10-01T04:00:00Z', '2025-11-02T05:00:00Z');
+      // the same day, stored as the first of the two midnights (04:00 UTC)
+      await old(db, userId, 'max', '2026-10-01T04:00:00Z', '2026-11-01T04:00:00Z');
+      await migrate(db);
+      expect(await days(db)).toEqual([
+        ['pro', '2025-10-01', '2025-11-01'],
+        ['max', '2026-10-01', '2026-10-31'],
+      ]);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('never fails when periods entered in another timezone land on the same first day', async () => {
+    // A one-day period on the 23-hour day of New York (9 March 2025) and a plan from the next
+    // day, read in Bogota (UTC-5 all year): both start on 9 March there.
+    const bogota = await open('America/Bogota');
+    try {
+      await old(bogota.db, bogota.userId, 'pro', '2025-03-09T05:00:00Z', '2025-03-10T04:00:00Z');
+      await old(bogota.db, bogota.userId, 'max', '2025-03-10T04:00:00Z', null);
+      await migrate(bogota.db);
+      expect(await days(bogota.db)).toEqual([
+        ['pro', '2025-03-09', '2025-03-09'],
+        ['max', '2025-03-10', null],
+      ]);
+    } finally {
+      await bogota.db.close();
+    }
+    // Three periods entered in Berlin around the day clocks go forward, read in Lagos (UTC+1 all year).
+    const lagos = await open('Africa/Lagos');
+    try {
+      await old(lagos.db, lagos.userId, 'free', '2025-03-01T23:00:00Z', '2025-03-29T23:00:00Z');
+      await old(lagos.db, lagos.userId, 'pro', '2025-03-29T23:00:00Z', '2025-03-30T22:00:00Z');
+      await old(lagos.db, lagos.userId, 'max', '2025-03-30T22:00:00Z', null);
+      await migrate(lagos.db);
+      expect(await days(lagos.db)).toEqual([
+        ['free', '2025-03-02', '2025-03-29'],
+        ['pro', '2025-03-30', '2025-03-30'],
+        ['max', '2025-03-31', null],
+      ]);
+    } finally {
+      await lagos.db.close();
+    }
+  });
+
+  it('gives every period its own first day when several fall on one, and reads an unknown timezone as UTC', async () => {
+    const { db, userId } = await open('Not/AZone');
+    try {
+      // three one-hour periods of one UTC day, then a running plan the same day
+      await old(db, userId, 'free', '2025-05-01T01:00:00Z', '2025-05-01T02:00:00Z');
+      await old(db, userId, 'pro', '2025-05-01T02:00:00Z', '2025-05-01T03:00:00Z');
+      await old(db, userId, 'team', '2025-05-01T03:00:00Z', '2025-05-01T04:00:00Z');
+      await old(db, userId, 'max', '2025-05-01T04:00:00Z', null);
+      await migrate(db);
+      expect(await days(db)).toEqual([
+        ['free', '2025-05-01', '2025-05-01'],
+        ['pro', '2025-05-02', '2025-05-02'],
+        ['team', '2025-05-03', '2025-05-03'],
+        ['max', '2025-05-04', null],
+      ]);
+    } finally {
+      await db.close();
+    }
+  });
 });

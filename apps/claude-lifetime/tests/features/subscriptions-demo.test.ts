@@ -5,8 +5,8 @@ import {
 } from '@/analytics/subscriptions';
 import { getApiValue } from '@/analytics/value';
 import {
-  assessComparability, averagePerDay, boundaryX, DAY_MS, DAYS_PER_MONTH, DAYS_PER_WEEK, defaultMode, elapsedDays, layoutTimeline, leadingUsd, lengthDays, pricedShare,
-  rateRatio, segmentDates, segmentSpans, sideFigure, timelineTicks, timelineX, valueLevel,
+  assessComparability, averagePerDay, boundaryX, DAY_MS, DAYS_PER_MONTH, DAYS_PER_WEEK, defaultMode, layoutTimeline, leadingUsd, lengthDays, pricedShare,
+  rateRatio, segmentDays, segmentSpans, sideFigure, timelineTicks, timelineX, valueLevel,
 } from '@/features/subscriptions/logic';
 import { loadDemoDataset } from '@/import/demo/load';
 import { createTestDb, type TestDb } from '../helpers/db';
@@ -117,8 +117,8 @@ describe('timeline of the demo history', () => {
     expect(x).toBeLessThan(layout.blocks[1].x);
   });
 
-  it('reads the dates of each block back from its instants', () => {
-    expect(segments.map((s) => segmentDates(s, TZ))).toEqual(periods.map((p) => ({ startDate: p.startDate, lastDate: p.lastDate })));
+  it('shows the stored days of each block', () => {
+    expect(segments.map((s) => segmentDays(s))).toEqual(periods.map((p) => ({ startDate: p.startDate, lastDate: p.lastDate })));
   });
 });
 
@@ -143,9 +143,8 @@ describe('periods table of the demo history', () => {
       // the last day of the segment: the day before its exclusive end, or today while it runs
       const last = segment.end ? dayOf(Date.parse(segment.end)) - 1 : dayOf(NOW.getTime());
       const days = last - first + 1;
-      expect(lengthDays(segment, NOW.getTime())).toBe(days);
+      expect(lengthDays(segment, NOW.toISOString().slice(0, 10))).toBe(days);
       expect(segment.elapsedDays).toBe(days);
-      expect(Math.abs(elapsedDays(segment, NOW.getTime()) - days)).toBeLessThanOrEqual(1);
       const recorded = Math.min(last, historyLast) - Math.max(first, historyFirst) + 1;
       expect(recorded).toBeGreaterThan(0);
       expect(segment.recordedDays).toBe(recorded);
@@ -222,7 +221,7 @@ describe('before vs. after the first paid plan, on the demo history', () => {
   });
 
   it('raises the three guards the demo history calls for, and opens on the daily average', async () => {
-    const comparability = assessComparability(sides.before, sides.after, { timezone: TZ, historyStart: periods[0].startedAt });
+    const comparability = assessComparability(sides.before, sides.after, { historyStart: periods[0].startDate });
 
     // a) free for some months, paid for much longer
     expect(sides.after!.spanDays).toBeGreaterThanOrEqual(2 * sides.before!.spanDays);
@@ -231,7 +230,7 @@ describe('before vs. after the first paid plan, on the demo history', () => {
 
     // b) chat text before, mostly metered Claude Code and API usage after
     expect(sides.before!.exact).toBe(0);
-    expect(comparability.measurement).toEqual({ estimatedSide: 'before', meteredShare: sides.after!.exact / sides.after!.tokens });
+    expect(comparability.measurement).toEqual({ estimatedSide: 'before', estimatedShare: 1, meteredShare: sides.after!.exact / sides.after!.tokens });
     expect(comparability.measurement!.meteredShare).toBeGreaterThan(0.9);
 
     // c) the earlier side begins with the first imported record, a little after the first period starts
@@ -245,7 +244,7 @@ describe('before vs. after the first paid plan, on the demo history', () => {
   });
 
   it('states no ratio while the sides are measured differently, though both are long enough', () => {
-    const comparability = assessComparability(sides.before, sides.after, { timezone: TZ, historyStart: periods[0].startedAt });
+    const comparability = assessComparability(sides.before, sides.after, { historyStart: periods[0].startDate });
     const figure = (mode: 'day' | 'total') => ({
       before: { figure: sideFigure(mode, sides.before, null), spanDays: sides.before!.spanDays },
       after: { figure: sideFigure(mode, sides.after, null), spanDays: sides.after!.spanDays },
