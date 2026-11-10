@@ -199,7 +199,7 @@ describe('an import that was saved by a tab’s worker which went away before it
     // Before the fix this resolved with notOnDevice, and the page said: "The import is saved … It is in the figures
     // now … Do not import the file a second time". After a move the figures come from what reached storage.
     await expect(commitImport(moved, t.userId, parsed({ source: CODE, contentHash: 'c1' }))).rejects.toThrow(
-      'The tab that held the database was closed or reloaded at that moment, and another tab has taken over. Check whether this was saved, and do it again if it was not.',
+      'The tab that held the database was closed or reloaded at that moment, and another tab has taken over. It is not known whether your change was stored: check, and make it again if it is missing.',
     );
   });
 });

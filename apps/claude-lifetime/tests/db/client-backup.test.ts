@@ -166,6 +166,28 @@ describe('Download backup', () => {
   });
 });
 
+describe('a backup that is being made when the tab that holds the database is closed', () => {
+  it('ends at once, because the page is told that the database moved: nobody has to wait out the silence', async () => {
+    const database = await openDatabase();
+    // The worker takes the request up and is never heard of again: its tab was closed.
+    fakeDatabases.answerBackup = () => null;
+
+    const asked = messageOf(database.exportBackup());
+    await waitFor(() => timeline.includes('backup claude-lifetime: no answer'));
+    const before = Date.now();
+    fakeDatabases.move();
+
+    // Before the fix the page showed "Preparing the backup…" for another 90 seconds.
+    expect(await asked).toBe('The tab that was making the backup was closed before it was finished, so nothing was downloaded. Try again.');
+    expect(Date.now() - before).toBeLessThan(2_000);
+    // The page stops listening for moves when the request is over.
+    const listening = fakeDatabases.moveListeners.size;
+    fakeDatabases.answerBackup = null;
+    expect((await database.exportBackup()).size).toBeGreaterThan(0);
+    expect(fakeDatabases.moveListeners.size).toBe(listening);
+  });
+});
+
 describe('what the page reads from the control channel about a backup', () => {
   const archive = new Blob(['x']);
 

@@ -8,6 +8,7 @@ import { Button, buttonClass } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { ErrorNote, Progress } from '@/components/ui/feedback';
 import { ImportError, type ImportFile, type ImportProgress } from '@/core/types';
+import { DatabaseMovedError } from '@/db/driver';
 import type { CommitResult } from '@/import/commit';
 import type { Detected } from '@/import/detect';
 import { FORMATS } from '@/import/formats';
@@ -31,10 +32,11 @@ type Stage =
   | { name: 'preview'; prepared: PreparedImport }
   | { name: 'saving'; prepared: PreparedImport }
   | { name: 'done'; prepared: PreparedImport; result: CommitResult }
-  | { name: 'error'; message: string; code: string; details?: string };
+  /** `unknownOutcome`: the import may have been stored all the same, so the card must not say that nothing was. */
+  | { name: 'error'; message: string; code: string; details?: string; unknownOutcome?: boolean };
 
 /** What to do about an error, by its code. The message itself already says what went wrong. */
-const NEXT_STEP: Record<string, string> = {
+export const NEXT_STEP: Record<string, string> = {
   zip_truncated: 'Request a new export on claude.ai and download it again; the link in the email works only for a short time.',
   truncated_file: 'Request a new export on claude.ai and download it again; the link in the email works only for a short time.',
   range_conflict:
@@ -48,7 +50,31 @@ const NEXT_STEP: Record<string, string> = {
   stale_preview: 'Start the import again. The preview has to be recomputed against what is stored now.',
   worker_failed: 'Reload the page and try again. If the file is very large, close other tabs first to free memory.',
   demo_requires_empty_workspace: 'Remove your imported data in Settings first if you want to see the demo again.',
+  moved_while_reading: 'Choose the file again: reading it has to start over.',
+  moved_while_saving:
+    'It is not known whether the import was stored. Look for it in the list of imports below. If it is not there, import the file again: what is already stored is recognised and not counted twice.',
 };
+
+/** What the card says when the tab that held the database went away in the middle of an import, by what the import was doing. */
+export const MOVED_MESSAGE = {
+  reading: 'The tab that held the database was closed or reloaded while this file was being read, and another tab has taken over.',
+  saving: 'The tab that held the database was closed or reloaded while this import was being saved, and another tab has taken over.',
+};
+
+/**
+ * The card for an import that failed. `during` says what the import was doing: while a
+ * file is read nothing is stored yet, and an import that was being saved may be.
+ */
+export function failureStage(error: unknown, during: 'reading' | 'saving'): Extract<Stage, { name: 'error' }> {
+  // The driver's own sentence for a database that moved is written for a change of any kind. Here it is known what was going on.
+  if (error instanceof DatabaseMovedError) {
+    return during === 'saving'
+      ? { name: 'error', message: MOVED_MESSAGE.saving, code: 'moved_while_saving', unknownOutcome: true }
+      : { name: 'error', message: MOVED_MESSAGE.reading, code: 'moved_while_reading' };
+  }
+  if (error instanceof ImportError) return { name: 'error', message: error.message, code: error.code, details: error.details };
+  return { name: 'error', message: error instanceof Error ? error.message : String(error), code: 'unexpected' };
+}
 
 export interface WizardHandle {
   /** Starts an import with files picked elsewhere on the page. */
@@ -119,14 +145,13 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
     }
   }, [stage.name]);
 
-  const fail = useCallback((error: unknown) => {
+  const fail = useCallback((error: unknown, during: 'reading' | 'saving' = 'reading') => {
     if (error instanceof ImportError && error.code === 'cancelled') {
       returnFocus.current = true;
       setStage({ name: 'idle' });
       return;
     }
-    if (error instanceof ImportError) setStage({ name: 'error', message: error.message, code: error.code, details: error.details });
-    else setStage({ name: 'error', message: error instanceof Error ? error.message : String(error), code: 'unexpected' });
+    setStage(failureStage(error, during));
   }, []);
 
   const run = useCallback(
@@ -197,7 +222,9 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
       rememberChoices.current = null;
       setStage({ name: 'done', prepared, result });
     } catch (error) {
-      fail(error);
+      // The list of imports below is read again: after a move it shows what did reach storage.
+      if (error instanceof DatabaseMovedError) app.notifyDataChanged();
+      fail(error, 'saving');
     }
   };
 
@@ -429,7 +456,9 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
               {NEXT_STEP[stage.code] ? <p>{NEXT_STEP[stage.code]}</p> : null}
               {stage.details ? <p className="mt-1 break-words text-xs text-ink-3">Detail: {stage.details}</p> : null}
             </ErrorNote>
-            <p className="text-[13px] text-ink-2">Nothing was saved, and nothing that was already stored has changed.</p>
+            {stage.unknownOutcome ? null : (
+              <p className="text-[13px] text-ink-2">Nothing was saved, and nothing that was already stored has changed.</p>
+            )}
             <div className="flex justify-end">
               <Button variant="primary" onClick={reset}>
                 Choose another file

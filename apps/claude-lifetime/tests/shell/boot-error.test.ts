@@ -130,7 +130,7 @@ describe('BootError, for a database that is there but held by another tab', () =
     expect(screen).toContain('Try again');
     expect(screen).not.toContain('incognito');
     // The sentence for a change that may not have been saved is not for a start: nothing was being saved.
-    expect(screen).not.toContain('Check whether this was saved');
+    expect(screen).not.toContain('whether your change was stored');
   });
 });
 

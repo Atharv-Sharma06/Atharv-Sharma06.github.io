@@ -146,12 +146,14 @@ async function saveWrites(name: string): Promise<void> {
       outcome.reason,
     );
   }
-  // No answer in time is deliberately not an error. The change is already committed in the database,
-  // which copies itself to storage in the background after every statement whether or not anyone asks.
-  // A large database can simply take longer to copy than this wait. And when the tab that hosted the
-  // database has just been closed, the tab taking over is still starting and cannot answer yet. In none
-  // of these cases is it known that anything was lost, so telling the person that their change could
-  // not be saved would be wrong more often than right.
+  // No answer in time is deliberately not an error. The change is committed in the database, which copies
+  // itself to storage in the background after every statement whether or not anyone asks, and a large
+  // database can simply take longer to copy than this wait. Telling the person that their change could
+  // not be saved would then be wrong more often than right.
+  //
+  // The case in which silence does mean that the change may be lost is handled before it gets here: when the
+  // tab that held the database is closed before its worker has answered, the database moves, and the
+  // driver ends the wait with a DatabaseMovedError (see SqlDriver.flush in pglite-driver.ts).
 }
 
 // ── Backups ─────────────────────────────────────────────────────────────────────
@@ -195,6 +197,8 @@ export function readBackupMessage(message: unknown, id: string): BackupMessage |
 export function requestBackup(
   name: string,
   timeouts: { startMs?: number; quietMs?: number; totalMs?: number } = {},
+  /** Calls its argument when the database moves to another tab's worker, until the function it returns is called. */
+  onMove?: (listener: () => void) => () => void,
 ): Promise<Blob> {
   const { startMs = BACKUP_START_TIMEOUT_MS, quietMs = BACKUP_QUIET_TIMEOUT_MS, totalMs = BACKUP_TIMEOUT_MS } = timeouts;
   return new Promise((resolve, reject) => {
@@ -205,12 +209,18 @@ export function requestBackup(
       clearTimeout(startTimer);
       clearTimeout(quietTimer);
       clearTimeout(totalTimer);
+      stopWatching?.();
       channel.close();
     };
     const fail = (message: string) => {
       end();
       reject(new Error(message));
     };
+    // The backup is made by the worker that holds the database. When the database moves, that worker is gone and
+    // the backup with it: there is no point in waiting for the silence that follows to say so.
+    const stopWatching = onMove?.(() =>
+      fail('The tab that was making the backup was closed before it was finished, so nothing was downloaded. Try again.'),
+    );
     const startTimer = setTimeout(
       () =>
         fail(
@@ -242,8 +252,8 @@ export function requestBackup(
 }
 
 /** `Database.exportBackup()` for database `name`. */
-async function makeBackup(name: string): Promise<Blob> {
-  const backup = await requestBackup(name);
+async function makeBackup(name: string, onMove?: (listener: () => void) => () => void): Promise<Blob> {
+  const backup = await requestBackup(name, {}, onMove);
   // Checked the way a restore checks it, so that a file that could not be restored is never saved as a backup.
   if (!(await looksLikeDatabaseDump(backup))) throw new Error('No backup was made: the copy of the data did not come out as a readable archive. Try again.');
   return backup;
@@ -572,7 +582,7 @@ export function openDatabase(onPhase?: (phase: BootPhase) => void): Promise<Data
   pending = (async () => {
     onPhase?.('starting');
     const name = activeName();
-    const { db, stop, giveUp } = await connect(name);
+    const { pg, db, stop, giveUp } = await connect(name);
 
     onPhase?.('migrating');
     let userId: number;
@@ -599,7 +609,7 @@ export function openDatabase(onPhase?: (phase: BootPhase) => void): Promise<Data
       userId,
       name,
       stop,
-      exportBackup: () => makeBackup(name),
+      exportBackup: () => makeBackup(name, (listener) => pg.onLeaderChange(listener)),
     };
   })();
   pending.catch(() => {

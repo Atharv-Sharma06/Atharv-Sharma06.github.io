@@ -195,7 +195,7 @@ describe('a change that is under way when the tab that held the database goes aw
     const failure = await saving;
     expect(failure).toBeInstanceOf(DatabaseMovedError);
     expect(failure?.message).toBe(
-      'The tab that held the database was closed or reloaded at that moment, and another tab has taken over. Check whether this was saved, and do it again if it was not.',
+      'The tab that held the database was closed or reloaded at that moment, and another tab has taken over. It is not known whether your change was stored: check, and make it again if it is missing.',
     );
     expect((await updateSettings(db, userId, { basis: 'new' })).basis).toBe('new');
   });

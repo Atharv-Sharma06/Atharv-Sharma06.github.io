@@ -91,7 +91,7 @@ describe('an operation that is under way when the database moves to another tab'
     const result = await reading.outcome();
     expect(result).toMatchObject({ error: expect.any(DatabaseMovedError) });
     expect((result as { error: Error }).error.message).toBe(
-      'The tab that held the database was closed or reloaded at that moment, and another tab has taken over. Check whether this was saved, and do it again if it was not.',
+      'The tab that held the database was closed or reloaded at that moment, and another tab has taken over. It is not known whether your change was stored: check, and make it again if it is missing.',
     );
     // The driver stops listening for moves once the operation is over.
     expect(page.listeners.size).toBe(1);
