@@ -1,0 +1,105 @@
+// A small in-memory rate limiter with a sliding window.
+// Written as a fixture for the token estimator tests.
+
+export interface RateLimitOptions {
+  /** Maximum number of calls allowed inside one window. */
+  limit: number;
+  /** Window length in milliseconds. */
+  windowMs: number;
+  /** Injected clock, so tests do not need to sleep. */
+  now?: () => number;
+}
+
+export interface RateLimitResult {
+  allowed: boolean;
+  remaining: number;
+  retryAfterMs: number;
+}
+
+type Bucket = { hits: number[]; lastSeen: number };
+
+export class SlidingWindowLimiter {
+  private readonly buckets = new Map<string, Bucket>();
+  private readonly limit: number;
+  private readonly windowMs: number;
+  private readonly now: () => number;
+
+  constructor(options: RateLimitOptions) {
+    if (!Number.isInteger(options.limit) || options.limit <= 0) {
+      throw new RangeError(`limit must be a positive integer, got ${options.limit}`);
+    }
+    this.limit = options.limit;
+    this.windowMs = options.windowMs;
+    this.now = options.now ?? Date.now;
+  }
+
+  /** Records one call for `key` and reports whether it is allowed. */
+  check(key: string): RateLimitResult {
+    const t = this.now();
+    const bucket = this.buckets.get(key) ?? { hits: [], lastSeen: t };
+    const cutoff = t - this.windowMs;
+
+    // Drop timestamps that have fallen out of the window.
+    let firstValid = 0;
+    while (firstValid < bucket.hits.length && bucket.hits[firstValid] <= cutoff) {
+      firstValid++;
+    }
+    if (firstValid > 0) bucket.hits.splice(0, firstValid);
+
+    bucket.lastSeen = t;
+    this.buckets.set(key, bucket);
+
+    if (bucket.hits.length >= this.limit) {
+      const oldest = bucket.hits[0];
+      return { allowed: false, remaining: 0, retryAfterMs: oldest + this.windowMs - t };
+    }
+
+    bucket.hits.push(t);
+    return {
+      allowed: true,
+      remaining: this.limit - bucket.hits.length,
+      retryAfterMs: 0,
+    };
+  }
+
+  /** Removes buckets that have been idle for longer than `maxIdleMs`. */
+  sweep(maxIdleMs: number = this.windowMs * 2): number {
+    const t = this.now();
+    let removed = 0;
+    for (const [key, bucket] of this.buckets) {
+      if (t - bucket.lastSeen > maxIdleMs) {
+        this.buckets.delete(key);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
+
+  get size(): number {
+    return this.buckets.size;
+  }
+}
+
+export function formatRetryAfter(ms: number): string {
+  if (ms <= 0) return 'now';
+  const seconds = Math.ceil(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
+}
+
+async function demo(): Promise<void> {
+  const limiter = new SlidingWindowLimiter({ limit: 3, windowMs: 1_000 });
+  const results = ['a', 'a', 'a', 'a', 'b'].map((k) => [k, limiter.check(k)] as const);
+  for (const [key, r] of results) {
+    console.log(`${key}: allowed=${r.allowed} remaining=${r.remaining} retry=${formatRetryAfter(r.retryAfterMs)}`);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  console.log('after window:', limiter.check('a'), 'buckets:', limiter.size);
+}
+
+demo().catch((err: unknown) => {
+  console.error('demo failed', err);
+  process.exitCode = 1;
+});

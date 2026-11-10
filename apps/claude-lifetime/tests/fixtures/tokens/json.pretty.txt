@@ -1,0 +1,95 @@
+{
+  "id": "ord_8f3a21c7",
+  "object": "order",
+  "created_at": "2025-03-14T09:26:53.589Z",
+  "updated_at": "2025-03-14T09:31:07.004Z",
+  "status": "paid",
+  "currency": "EUR",
+  "customer": {
+    "id": "cus_51b9e0",
+    "name": "Ingrid Solberg",
+    "email": "ingrid.solberg@example.com",
+    "phone": "+47 400 00 123",
+    "marketing_opt_in": false,
+    "addresses": [
+      {
+        "type": "shipping",
+        "line1": "Fjordgata 12B",
+        "line2": null,
+        "postal_code": "7010",
+        "city": "Trondheim",
+        "country": "NO"
+      },
+      {
+        "type": "billing",
+        "line1": "Postboks 418",
+        "line2": "c/o Solberg Design AS",
+        "postal_code": "7004",
+        "city": "Trondheim",
+        "country": "NO"
+      }
+    ]
+  },
+  "items": [
+    {
+      "sku": "LAMP-OAK-02",
+      "title": "Desk lamp, oak base",
+      "quantity": 1,
+      "unit_price": 129.0,
+      "tax_rate": 0.25,
+      "attributes": { "colour": "natural", "bulb_included": true }
+    },
+    {
+      "sku": "CABLE-USBC-2M",
+      "title": "USB-C cable, 2 m, braided",
+      "quantity": 3,
+      "unit_price": 14.5,
+      "tax_rate": 0.25,
+      "attributes": { "colour": "graphite", "length_cm": 200 }
+    },
+    {
+      "sku": "GIFT-WRAP",
+      "title": "Gift wrapping",
+      "quantity": 1,
+      "unit_price": 4.0,
+      "tax_rate": 0.25,
+      "attributes": {}
+    }
+  ],
+  "totals": {
+    "subtotal": 176.5,
+    "shipping": 9.9,
+    "discount": -17.65,
+    "tax": 42.19,
+    "grand_total": 210.94
+  },
+  "discounts": [
+    { "code": "SPRING10", "type": "percentage", "value": 10, "applies_to": "items" }
+  ],
+  "payment": {
+    "method": "card",
+    "brand": "visa",
+    "last4": "4242",
+    "captured": true,
+    "transaction_id": "txn_00h7k2m9q4",
+    "risk": { "score": 12, "level": "low", "checks": ["cvc", "postal_code", "3ds"] }
+  },
+  "shipments": [
+    {
+      "carrier": "Posten",
+      "service": "parcel_home",
+      "tracking_number": "70730259481236547",
+      "estimated_delivery": "2025-03-18",
+      "events": [
+        { "at": "2025-03-14T15:02:00Z", "code": "label_created", "location": null },
+        { "at": "2025-03-15T07:45:10Z", "code": "in_transit", "location": "Oslo terminal" }
+      ]
+    }
+  ],
+  "metadata": {
+    "source": "web",
+    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_3) AppleWebKit/605.1.15",
+    "ab_tests": { "checkout_layout": "B", "free_shipping_banner": "control" },
+    "notes": "Leave with the neighbour at 12A if nobody is home."
+  }
+}

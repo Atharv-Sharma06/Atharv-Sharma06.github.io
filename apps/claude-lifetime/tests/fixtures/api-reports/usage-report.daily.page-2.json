@@ -1,0 +1,76 @@
+{
+  "data": [
+    {
+      "starting_at": "2026-03-04T00:00:00Z",
+      "ending_at": "2026-03-05T00:00:00Z",
+      "results": [
+        {
+          "uncached_input_tokens": 7000,
+          "cache_creation": { "ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 0 },
+          "cache_read_input_tokens": 0,
+          "output_tokens": 3000,
+          "server_tool_use": { "web_search_requests": 0 },
+          "account_id": null,
+          "api_key_id": null,
+          "context_window": "0-200k",
+          "inference_geo": null,
+          "model": "claude-opus-4-8",
+          "service_account_id": null,
+          "service_tier": "standard",
+          "speed": "fast",
+          "workspace_id": null
+        }
+      ]
+    },
+    {
+      "starting_at": "2026-03-05T00:00:00Z",
+      "ending_at": "2026-03-06T00:00:00Z",
+      "results": []
+    },
+    {
+      "starting_at": "2026-03-06T00:00:00Z",
+      "ending_at": "2026-03-07T00:00:00Z",
+      "results": [
+        {
+          "uncached_input_tokens": 250000,
+          "cache_creation": { "ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 0 },
+          "cache_read_input_tokens": 0,
+          "output_tokens": 9000,
+          "server_tool_use": { "web_search_requests": 0 },
+          "account_id": null,
+          "api_key_id": null,
+          "context_window": "200k-1M",
+          "inference_geo": null,
+          "model": "claude-sonnet-4-5-20250929",
+          "service_account_id": null,
+          "service_tier": "standard",
+          "speed": "standard",
+          "workspace_id": null
+        },
+        {
+          "uncached_input_tokens": 1000,
+          "cache_creation": { "ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 0 },
+          "cache_read_input_tokens": 0,
+          "output_tokens": 200,
+          "server_tool_use": { "web_search_requests": 0 },
+          "account_id": null,
+          "api_key_id": null,
+          "context_window": "0-200k",
+          "inference_geo": null,
+          "model": "claude-nova-9-20270101",
+          "service_account_id": null,
+          "service_tier": "priority",
+          "speed": "standard",
+          "workspace_id": null
+        }
+      ]
+    },
+    {
+      "starting_at": "2026-03-07T00:00:00Z",
+      "ending_at": "2026-03-08T00:00:00Z",
+      "results": []
+    }
+  ],
+  "has_more": false,
+  "next_page": null
+}

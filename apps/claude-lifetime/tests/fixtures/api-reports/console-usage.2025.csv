@@ -1,0 +1,3 @@
+usage_date_utc,model_version,api_key,workspace,usage_type,usage_input_tokens_no_cache,usage_input_tokens_cache_write_5m,usage_input_tokens_cache_write_1h,usage_input_tokens_cache_read,usage_output_tokens,web_search_count
+2025-06-12,claude-3-5-haiku-20241022,team-key,Default,standard,9700,0,0,0,450,0
+2025-06-12,claude-sonnet-4-20250514,team-key,Default,standard,70,31000,0,76000,800,1

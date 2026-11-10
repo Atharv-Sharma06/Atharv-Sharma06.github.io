@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reading list</title>
+  <style>
+    :root {
+      --bg: #fdfcf8;
+      --ink: #1f2430;
+      --muted: #6b7280;
+      --accent: #2f6f4f;
+      --radius: 10px;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #14161b; --ink: #e8e6e1; --muted: #9aa0ab; --accent: #7fc8a0; }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 2rem 1rem;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.55;
+    }
+    main { max-width: 42rem; margin: 0 auto; }
+    h1 { font-size: clamp(1.6rem, 4vw, 2.4rem); margin-bottom: 0.25em; }
+    .lede { color: var(--muted); margin-top: 0; }
+    .book-list { list-style: none; padding: 0; display: grid; gap: 0.75rem; }
+    .book {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 0.9rem 1.1rem;
+      border: 1px solid color-mix(in srgb, var(--ink) 15%, transparent);
+      border-radius: var(--radius);
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+    .book:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgb(0 0 0 / 0.08); }
+    .book__title { font-weight: 600; }
+    .book__author { color: var(--muted); font-size: 0.9rem; }
+    .tag {
+      font-size: 0.75rem;
+      padding: 0.15rem 0.55rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent) 18%, transparent);
+      color: var(--accent);
+      white-space: nowrap;
+    }
+    button.primary {
+      margin-top: 1.5rem;
+      padding: 0.6rem 1.2rem;
+      border: 0;
+      border-radius: var(--radius);
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+    }
+    button.primary:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Reading list</h1>
+      <p class="lede">Twelve books for the winter, in no particular order.</p>
+    </header>
+
+    <ul class="book-list" id="books">
+      <li class="book" data-status="reading">
+        <div>
+          <div class="book__title">The Salt Path to Nowhere</div>
+          <div class="book__author">I. Marchetti &middot; 312 pages</div>
+        </div>
+        <span class="tag">reading</span>
+      </li>
+      <li class="book" data-status="queued">
+        <div>
+          <div class="book__title">A Field Guide to Small Machines</div>
+          <div class="book__author">Dorothea Kwan &middot; 198 pages</div>
+        </div>
+        <span class="tag">queued</span>
+      </li>
+      <li class="book" data-status="done">
+        <div>
+          <div class="book__title">Letters from a Slow Train</div>
+          <div class="book__author">P. Oyelaran &middot; 254 pages</div>
+        </div>
+        <span class="tag">finished</span>
+      </li>
+    </ul>
+
+    <form id="add-form" action="/books" method="post" novalidate>
+      <label for="title">Add a book</label>
+      <input id="title" name="title" type="text" placeholder="Title" required minlength="2">
+      <button class="primary" type="submit">Add to list</button>
+    </form>
+  </main>
+
+  <script>
+    const form = document.querySelector('#add-form');
+    const list = document.querySelector('#books');
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const title = new FormData(form).get('title')?.toString().trim();
+      if (!title) return;
+      const item = document.createElement('li');
+      item.className = 'book';
+      item.dataset.status = 'queued';
+      item.innerHTML = `<div><div class="book__title"></div></div><span class="tag">queued</span>`;
+      item.querySelector('.book__title').textContent = title;
+      list.append(item);
+      form.reset();
+    });
+  </script>
+</body>
+</html>

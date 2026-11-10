@@ -1,0 +1,106 @@
+{
+  "data": [
+    {
+      "starting_at": "2026-09-01T00:00:00Z",
+      "ending_at": "2026-10-01T00:00:00Z",
+      "group": {
+        "product": null,
+        "model": "claude-opus-5",
+        "context_window": null,
+        "inference_geo": null,
+        "speed": null,
+        "slack_channel_id": null,
+        "claude_tag_category": null,
+        "claude_tag_user_id": null,
+        "rbac_group_id": null,
+        "workspace_id": null,
+        "service_tier": null,
+        "user_profile_id": null,
+        "agent_id": null,
+        "environment_id": null,
+        "deployment_id": null,
+        "session_id": null,
+        "actor": null,
+        "actor_type": null,
+        "api_key_id": null,
+        "cost_type": "tokens",
+        "token_type": "cache_read_input_tokens"
+      },
+      "cost": {
+        "currency": "USD",
+        "amount": "41280.000000",
+        "list_amount": "51600.000000",
+        "requests": null
+      }
+    },
+    {
+      "starting_at": "2026-09-01T00:00:00Z",
+      "ending_at": "2026-10-01T00:00:00Z",
+      "group": {
+        "product": null,
+        "model": "claude-opus-5",
+        "context_window": null,
+        "inference_geo": null,
+        "speed": null,
+        "slack_channel_id": null,
+        "claude_tag_category": null,
+        "claude_tag_user_id": null,
+        "rbac_group_id": null,
+        "workspace_id": null,
+        "service_tier": null,
+        "user_profile_id": null,
+        "agent_id": null,
+        "environment_id": null,
+        "deployment_id": null,
+        "session_id": null,
+        "actor": null,
+        "actor_type": null,
+        "api_key_id": null,
+        "cost_type": "tokens",
+        "token_type": "output_tokens"
+      },
+      "cost": {
+        "currency": "USD",
+        "amount": "98765.432100",
+        "list_amount": "98765.432100",
+        "requests": null
+      }
+    },
+    {
+      "starting_at": "2026-09-01T00:00:00Z",
+      "ending_at": "2026-10-01T00:00:00Z",
+      "group": {
+        "product": null,
+        "model": "claude-opus-5",
+        "context_window": null,
+        "inference_geo": null,
+        "speed": null,
+        "slack_channel_id": null,
+        "claude_tag_category": null,
+        "claude_tag_user_id": null,
+        "rbac_group_id": null,
+        "workspace_id": null,
+        "service_tier": null,
+        "user_profile_id": null,
+        "agent_id": null,
+        "environment_id": null,
+        "deployment_id": null,
+        "session_id": null,
+        "actor": null,
+        "actor_type": null,
+        "api_key_id": null,
+        "cost_type": "web_search",
+        "token_type": null
+      },
+      "cost": {
+        "currency": "USD",
+        "amount": "1250.000000",
+        "list_amount": "1250.000000",
+        "requests": null
+      }
+    }
+  ],
+  "has_more": false,
+  "next_page": null,
+  "data_refreshed_at": "2026-10-09T08:00:00Z"
+}

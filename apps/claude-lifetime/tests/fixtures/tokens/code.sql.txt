@@ -1,0 +1,102 @@
+-- Schema and reporting queries for a small bookshop.
+-- Fixture for the token estimator tests: PostgreSQL-flavoured SQL with
+-- DDL, constraints, a view, window functions and a CTE.
+
+CREATE TABLE customers (
+    id          BIGSERIAL PRIMARY KEY,
+    email       TEXT        NOT NULL UNIQUE,
+    full_name   TEXT        NOT NULL,
+    country     CHAR(2)     NOT NULL DEFAULT 'NL',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE books (
+    isbn        CHAR(13)       PRIMARY KEY,
+    title       TEXT           NOT NULL,
+    author      TEXT           NOT NULL,
+    price_cents INTEGER        NOT NULL CHECK (price_cents >= 0),
+    stock       INTEGER        NOT NULL DEFAULT 0,
+    published   DATE
+);
+
+CREATE TABLE orders (
+    id           BIGSERIAL PRIMARY KEY,
+    customer_id  BIGINT      NOT NULL REFERENCES customers (id) ON DELETE RESTRICT,
+    status       TEXT        NOT NULL DEFAULT 'pending'
+                 CHECK (status IN ('pending', 'paid', 'shipped', 'cancelled')),
+    ordered_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE order_items (
+    order_id    BIGINT   NOT NULL REFERENCES orders (id) ON DELETE CASCADE,
+    isbn        CHAR(13) NOT NULL REFERENCES books (isbn),
+    quantity    INTEGER  NOT NULL CHECK (quantity > 0),
+    unit_cents  INTEGER  NOT NULL,
+    PRIMARY KEY (order_id, isbn)
+);
+
+CREATE INDEX idx_orders_customer ON orders (customer_id, ordered_at DESC);
+CREATE INDEX idx_books_author    ON books (lower(author));
+
+-- One row per order with its total.
+CREATE OR REPLACE VIEW order_totals AS
+SELECT o.id            AS order_id,
+       o.customer_id,
+       o.status,
+       o.ordered_at,
+       SUM(i.quantity * i.unit_cents) AS total_cents,
+       COUNT(*)                       AS line_count
+FROM orders o
+JOIN order_items i ON i.order_id = o.id
+GROUP BY o.id, o.customer_id, o.status, o.ordered_at;
+
+-- Monthly revenue with a running total and month-over-month change.
+WITH monthly AS (
+    SELECT date_trunc('month', ordered_at)::date AS month,
+           SUM(total_cents) / 100.0              AS revenue
+    FROM order_totals
+    WHERE status IN ('paid', 'shipped')
+    GROUP BY 1
+)
+SELECT month,
+       ROUND(revenue, 2)                                          AS revenue,
+       ROUND(SUM(revenue) OVER (ORDER BY month), 2)               AS running_total,
+       ROUND(100.0 * (revenue - LAG(revenue) OVER (ORDER BY month))
+             / NULLIF(LAG(revenue) OVER (ORDER BY month), 0), 1)  AS change_pct
+FROM monthly
+ORDER BY month;
+
+-- Top five customers of the last 90 days.
+SELECT c.full_name,
+       c.email,
+       COUNT(DISTINCT t.order_id)         AS orders,
+       SUM(t.total_cents) / 100.0         AS spent
+FROM customers c
+JOIN order_totals t ON t.customer_id = c.id
+WHERE t.ordered_at >= now() - INTERVAL '90 days'
+  AND t.status <> 'cancelled'
+GROUP BY c.id, c.full_name, c.email
+HAVING SUM(t.total_cents) > 5000
+ORDER BY spent DESC
+LIMIT 5;
+
+-- Books that sold out but still have open orders.
+SELECT b.isbn, b.title, SUM(i.quantity) AS waiting
+FROM books b
+JOIN order_items i ON i.isbn = b.isbn
+JOIN orders o      ON o.id = i.order_id AND o.status = 'pending'
+WHERE b.stock = 0
+GROUP BY b.isbn, b.title
+ORDER BY waiting DESC, b.title;
+
+-- Restock in one statement and report what changed.
+UPDATE books
+SET stock = stock + 20
+WHERE isbn IN ('9780000000017', '9780000000024')
+RETURNING isbn, title, stock;
+
+BEGIN;
+INSERT INTO customers (email, full_name, country)
+VALUES ('ana@example.com', 'Ana Ferreira', 'PT')
+ON CONFLICT (email) DO UPDATE SET full_name = EXCLUDED.full_name;
+COMMIT;

@@ -1,0 +1,7 @@
+usage_date_utc,model_version,api_key,workspace,usage_type,context_window,usage_input_tokens_no_cache,usage_input_tokens_cache_write_5m,usage_input_tokens_cache_write_1h,usage_input_tokens_cache_read,usage_output_tokens,web_search_count,inference_geo,speed
+2026-07-05,claude-fable-5,dev-key,Default,standard,≤ 200k,5300,58000,0,242000,4600,0,global,
+2026-07-05,claude-haiku-4-5-20251001,dev-key,Default,standard,≤ 200k,1000,0,0,0,40,2,not_available,
+2026-07-06,claude-sonnet-5,claude_code_key_sam_abcd,Claude Code,standard,≤ 200k,51000,1200,300,90000,16000,0,global,standard
+2026-07-06,claude-sonnet-4-5-20250929,dev-key,Default,standard,200k - 1M,400000,0,0,0,9000,0,not_available,
+2026-07-08,claude-opus-4-8,dev-key,Default,batch,≤ 200k,7000,0,0,0,800,0,global,
+2026-07-08,claude-opus-4-8,dev-key,Default,standard,≤ 200k,3000,0,0,0,500,0,us,fast

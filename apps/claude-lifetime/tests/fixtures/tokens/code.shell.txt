@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# backup.sh - make a dated, compressed copy of a directory and prune old ones.
+# Fixture for the token estimator tests: a typical maintenance script.
+
+set -euo pipefail
+IFS=$'\n\t'
+
+readonly SCRIPT_NAME="$(basename "$0")"
+readonly DEFAULT_KEEP=7
+
+usage() {
+  cat <<EOF
+Usage: $SCRIPT_NAME [-k days] [-n] <source-dir> <backup-dir>
+
+  -k days   how many daily archives to keep (default: $DEFAULT_KEEP)
+  -n        dry run: print what would be done
+  -h        show this help
+EOF
+}
+
+log()  { printf '%s [%s] %s\n' "$(date +%Y-%m-%dT%H:%M:%S)" "$1" "$2" >&2; }
+die()  { log ERROR "$1"; exit "${2:-1}"; }
+
+keep="$DEFAULT_KEEP"
+dry_run=false
+
+while getopts ':k:nh' opt; do
+  case "$opt" in
+    k) keep="$OPTARG" ;;
+    n) dry_run=true ;;
+    h) usage; exit 0 ;;
+    :) die "option -$OPTARG needs an argument" 2 ;;
+    \?) die "unknown option: -$OPTARG" 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+
+[[ $# -eq 2 ]] || { usage; exit 2; }
+src="${1%/}"
+dest="${2%/}"
+
+[[ -d "$src" ]] || die "source directory not found: $src"
+[[ "$keep" =~ ^[0-9]+$ ]] || die "-k expects a number, got '$keep'"
+command -v tar >/dev/null 2>&1 || die "tar is not installed"
+
+stamp="$(date +%Y%m%d-%H%M%S)"
+archive="$dest/$(basename "$src")-$stamp.tar.gz"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+run() {
+  if "$dry_run"; then
+    echo "[dry-run] $*"
+  else
+    "$@"
+  fi
+}
+
+log INFO "backing up $src -> $archive"
+run mkdir -p "$dest"
+run tar --exclude='*.tmp' --exclude='node_modules' -czf "$tmp/archive.tar.gz" -C "$(dirname "$src")" "$(basename "$src")"
+run mv "$tmp/archive.tar.gz" "$archive"
+
+if ! "$dry_run"; then
+  size="$(du -h "$archive" | cut -f1)"
+  sum="$(sha256sum "$archive" | awk '{print $1}')"
+  echo "$sum  $(basename "$archive")" >> "$dest/SHA256SUMS"
+  log INFO "wrote $archive ($size, sha256 ${sum:0:12}...)"
+fi
+
+# Prune archives older than $keep days.
+mapfile -t old < <(find "$dest" -maxdepth 1 -name "$(basename "$src")-*.tar.gz" -mtime +"$keep" | sort)
+if (( ${#old[@]} > 0 )); then
+  log INFO "removing ${#old[@]} archive(s) older than $keep days"
+  for f in "${old[@]}"; do
+    run rm -f -- "$f"
+  done
+else
+  log INFO "nothing to prune"
+fi
+
+free_kb="$(df -Pk "$dest" | awk 'NR==2 {print $4}')"
+if (( free_kb < 1048576 )); then
+  log WARN "less than 1 GiB free on $(df -P "$dest" | awk 'NR==2 {print $6}')"
+fi
+
+log INFO "done"
