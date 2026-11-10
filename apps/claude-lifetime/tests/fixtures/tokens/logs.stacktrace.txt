@@ -1,0 +1,84 @@
+Traceback (most recent call last):
+  File "/srv/app/manage.py", line 22, in <module>
+    main()
+  File "/srv/app/manage.py", line 18, in main
+    execute_from_command_line(sys.argv)
+  File "/srv/app/.venv/lib/python3.12/site-packages/framework/core/management/__init__.py", line 442, in execute_from_command_line
+    utility.execute()
+  File "/srv/app/reports/commands/export_invoices.py", line 87, in handle
+    rows = list(self.iter_rows(start, end))
+  File "/srv/app/reports/commands/export_invoices.py", line 131, in iter_rows
+    yield self.serialize(invoice)
+  File "/srv/app/reports/serializers.py", line 54, in serialize
+    "total": format_money(invoice.total, invoice.currency),
+  File "/srv/app/reports/formatting.py", line 19, in format_money
+    symbol = CURRENCY_SYMBOLS[currency]
+KeyError: 'XBT'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/srv/app/worker/runner.py", line 203, in run_job
+    result = job.func(*job.args, **job.kwargs)
+  File "/srv/app/reports/tasks.py", line 41, in export_invoices_task
+    raise ExportFailed(f"invoice export for {period} aborted") from exc
+reports.errors.ExportFailed: invoice export for 2025-03 aborted
+
+---
+
+Exception in thread "main" java.lang.IllegalStateException: Failed to load configuration from /etc/billing/app.yaml
+	at com.example.billing.config.ConfigLoader.load(ConfigLoader.java:74)
+	at com.example.billing.Application.bootstrap(Application.java:52)
+	at com.example.billing.Application.main(Application.java:31)
+Caused by: java.io.UncheckedIOException: java.nio.file.NoSuchFileException: /etc/billing/app.yaml
+	at com.example.billing.config.ConfigLoader.read(ConfigLoader.java:102)
+	at com.example.billing.config.ConfigLoader.load(ConfigLoader.java:68)
+	... 2 more
+Caused by: java.nio.file.NoSuchFileException: /etc/billing/app.yaml
+	at java.base/sun.nio.fs.UnixException.translateToIOException(UnixException.java:92)
+	at java.base/sun.nio.fs.UnixFileSystemProvider.newByteChannel(UnixFileSystemProvider.java:218)
+	at java.base/java.nio.file.Files.readAllBytes(Files.java:3288)
+	at com.example.billing.config.ConfigLoader.read(ConfigLoader.java:99)
+	... 3 more
+
+---
+
+TypeError: Cannot read properties of undefined (reading 'map')
+    at renderInvoiceRows (/srv/web/dist/server/chunks/invoices-4f2a91.js:118:27)
+    at InvoiceTable (/srv/web/dist/server/chunks/invoices-4f2a91.js:164:12)
+    at renderWithHooks (/srv/web/node_modules/react-dom/cjs/react-dom-server.node.production.js:5724:16)
+    at renderElement (/srv/web/node_modules/react-dom/cjs/react-dom-server.node.production.js:6128:9)
+    at async handleRequest (/srv/web/dist/server/entry.js:88:20)
+    at async Server.<anonymous> (/srv/web/dist/server/entry.js:142:5) {
+  digest: '2847193650',
+  page: '/invoices/[id]',
+  requestId: 'req_01HV8Z3K9Q'
+}
+
+---
+
+thread 'tokio-runtime-worker' panicked at src/ingest/parser.rs:211:38:
+called `Result::unwrap()` on an `Err` value: ParseIntError { kind: InvalidDigit }
+stack backtrace:
+   0: rust_begin_unwind
+   1: core::panicking::panic_fmt
+   2: core::result::unwrap_failed
+   3: ingest::parser::parse_record
+             at ./src/ingest/parser.rs:211:38
+   4: ingest::pipeline::run::{{closure}}
+             at ./src/ingest/pipeline.rs:97:25
+   5: tokio::runtime::task::harness::poll_future
+note: run with `RUST_BACKTRACE=full` for a verbose backtrace.
+
+---
+
+panic: runtime error: index out of range [5] with length 5
+
+goroutine 17 [running]:
+main.(*Scheduler).next(0xc00012e000, 0x5)
+	/home/build/scheduler/queue.go:144 +0x1b5
+main.(*Scheduler).Run(0xc00012e000, {0x10f2a60, 0xc000022090})
+	/home/build/scheduler/scheduler.go:63 +0x9c
+created by main.main in goroutine 1
+	/home/build/scheduler/main.go:38 +0x1ea
+exit status 2

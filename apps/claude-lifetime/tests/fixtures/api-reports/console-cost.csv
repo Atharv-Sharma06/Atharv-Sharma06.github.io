@@ -1,0 +1,8 @@
+usage_date_utc,model,workspace,api_key,usage_type,context_window,token_type,cost_usd,cost_type,inference_geo,speed
+2026-02-12,--,Default,chat-key,--,--,--,0.05,web_search,--,--
+2026-02-12,Claude Haiku 4.5,Default,chat-key,message,≤ 200k,input_no_cache,0.11,token,not_available,
+2026-02-12,Claude Sonnet 4.5,Default,chat-key,message,≤ 200k,input_cache_write_5m,0.70,token,not_available,
+2026-02-12,Claude Sonnet 4.5,Default,chat-key,message,≤ 200k,input_cache_write_5m,1.20,token,not_available,
+2026-02-12,Claude Sonnet 4.5,Default,chat-key,message,≤ 200k,output,1.80,token,not_available,
+2026-02-14,Claude Sonnet 4.5,Default,chat-key,message,≤ 200k,input_cache_read,7.00,token,not_available,
+2026-02-14,Claude Nova 9,Default,chat-key,message,≤ 200k,output,2.14,token,global,

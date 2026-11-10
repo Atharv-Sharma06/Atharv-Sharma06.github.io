@@ -1,0 +1,54 @@
+{
+  "format": "claude-lifetime/usage",
+  "version": 1,
+  "source": { "label": "My proxy logs" },
+  "records": [
+    {
+      "timestamp": "2026-03-01T09:15:00Z",
+      "model": "claude-sonnet-4-6",
+      "input_tokens": 1200,
+      "output_tokens": 350,
+      "cache_read_tokens": 8000,
+      "cache_write_5m_tokens": 0,
+      "cache_write_1h_tokens": 0,
+      "requests": 1,
+      "conversation_id": "conv-1",
+      "conversation_title": "Refactoring notes",
+      "id": "req-0001",
+      "price_tier": "standard"
+    },
+    {
+      "timestamp": "2026-03-01T10:20:30+01:00",
+      "model": "claude-sonnet-4-6",
+      "input_tokens": 2200,
+      "output_tokens": 410,
+      "cache_read_tokens": 9100,
+      "cache_write_5m_tokens": 500,
+      "requests": 1,
+      "conversation_id": "conv-1",
+      "conversation_title": "Refactoring notes",
+      "id": "req-0002"
+    },
+    {
+      "timestamp": "2026-03-02",
+      "model": "claude-opus-4-6",
+      "input_tokens": 50000,
+      "output_tokens": 12000,
+      "requests": 40,
+      "id": "day-2026-03-02",
+      "price_tier": "batch"
+    },
+    {
+      "timestamp": 1772532000,
+      "model": "claude-haiku-4-5-20251001",
+      "input_tokens": "900",
+      "output_tokens": "100",
+      "cache_write_1h_tokens": 250,
+      "requests": 1,
+      "conversation_id": "conv-2",
+      "conversation_title": "Quoted, title",
+      "id": "req-0003",
+      "bucket_seconds": 60
+    }
+  ]
+}

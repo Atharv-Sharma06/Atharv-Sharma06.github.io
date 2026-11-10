@@ -1,0 +1,131 @@
+@import "tailwindcss";
+@import "@fontsource/ibm-plex-sans/latin-400.css";
+@import "@fontsource/ibm-plex-sans/latin-500.css";
+@import "@fontsource/ibm-plex-sans/latin-600.css";
+
+/*
+  Claude Lifetime — design tokens.
+  Dark by default: near-black page, neutral hairline borders, white type and one soft
+  violet accent. Colour is reserved for data and for state; chrome stays neutral.
+
+  Chart colours are a fixed, ordered categorical palette validated for colour-vision
+  deficiency against the card surface (#111116) with the dataviz palette validator:
+  adjacent pairs clear the CVD and normal-vision floors and every slot is >= 3:1 on
+  the surface. The order is part of the palette — never reorder or cycle it.
+*/
+@theme {
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  --color-page: #09090c;
+  --color-surface: #111116;
+  --color-raised: #17171d;
+  --color-hover: #1e1e26;
+  --color-line: rgb(255 255 255 / 0.08);
+  --color-line-strong: rgb(255 255 255 / 0.16);
+
+  --color-ink: #f4f4f6;
+  --color-ink-2: #a9a9b4;
+  /* muted text: 4.8:1 on raised, 5.0:1 on surface, 5.3:1 on page (WCAG AA for small text) */
+  --color-ink-3: #83838f;
+
+  --color-accent: #9085e9;
+  --color-accent-soft: #b9b1f5;
+  --color-accent-wash: rgb(144 133 233 / 0.14);
+
+  /* state: confidence and status. Always paired with an icon and a label. */
+  --color-good: #2ebd62;
+  --color-warning: #fab219;
+  --color-serious: #ec835a;
+  --color-critical: #e5604f;
+
+  /* categorical series, in fixed order */
+  --color-series-1: #9085e9; /* violet  */
+  --color-series-2: #d95926; /* orange  */
+  --color-series-3: #199e70; /* aqua    */
+  --color-series-4: #c98500; /* yellow  */
+  --color-series-5: #d55181; /* magenta */
+  --color-series-6: #008300; /* green   */
+  --color-series-7: #3987e5; /* blue    */
+  --color-series-8: #e66767; /* red     */
+  --color-series-none: #5d5d69; /* no identity: unknown model, no plan */
+
+  /* sequential violet, dark surface: more is brighter */
+  --color-seq-0: #1f1f29; /* "none": clearly a cell, clearly empty, on the #111116 surface */
+  --color-seq-1: #2a2650;
+  --color-seq-2: #433b85;
+  --color-seq-3: #6459c0;
+  --color-seq-4: #9085e9;
+  --color-seq-5: #c3bcf7;
+
+  --radius-card: 14px;
+  --radius-control: 8px;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  background: var(--color-page);
+}
+
+body {
+  background: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgb(144 133 233 / 0.35);
+}
+
+/* In the base layer, so a component can replace the ring with its own focus style (inputs
+   change their border instead). No radius here: the outline follows the element's own shape. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
+/* Columns of figures align; large standalone figures keep proportional digits. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Estimated values: the same hue as exact ones, lighter, with a diagonal hatch. */
+.hatch-estimated {
+  background-image: repeating-linear-gradient(135deg, rgb(255 255 255 / 0.22) 0 1.5px, transparent 1.5px 6px);
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.16) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes spin-slow {
+  to { transform: rotate(360deg); }
+}

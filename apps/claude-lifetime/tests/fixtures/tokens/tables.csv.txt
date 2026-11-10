@@ -1,0 +1,36 @@
+order_id,date,customer,country,product,category,quantity,unit_price,discount,total,paid
+10001,2025-01-03,Amara Nwosu,NG,Wireless mouse,accessories,2,24.90,0.00,49.80,true
+10002,2025-01-03,Jonas Lindqvist,SE,Mechanical keyboard,accessories,1,119.00,10.00,109.00,true
+10003,2025-01-04,Mei Tanaka,JP,27-inch monitor,displays,1,289.50,0.00,289.50,true
+10004,2025-01-04,Carlos Méndez,MX,USB-C hub (7 ports),accessories,3,39.99,5.00,114.97,false
+10005,2025-01-05,Fatima Al-Sayed,EG,Laptop stand,furniture,1,54.00,0.00,54.00,true
+10006,2025-01-06,Oliver Brandt,DE,Webcam 1080p,video,2,69.95,13.99,125.91,true
+10007,2025-01-06,Priya Raman,IN,Noise-cancelling headphones,audio,1,199.00,20.00,179.00,true
+10008,2025-01-07,Lucas Moreau,FR,"Desk mat, large",furniture,4,18.50,0.00,74.00,true
+10009,2025-01-08,Hannah O'Brien,IE,Portable SSD 1TB,storage,1,104.99,0.00,104.99,false
+10010,2025-01-08,Dmitri Volkov,KZ,HDMI cable 2m,cables,5,7.49,0.00,37.45,true
+10011,2025-01-09,Sofia Rossi,IT,Ergonomic chair,furniture,1,349.00,35.00,314.00,true
+10012,2025-01-10,Kwame Mensah,GH,Wireless charger,accessories,2,29.00,0.00,58.00,true
+10013,2025-01-10,Elena Petrova,BG,"Monitor arm, dual",furniture,1,89.90,0.00,89.90,true
+10014,2025-01-11,Noah Williams,US,Bluetooth speaker,audio,1,59.99,6.00,53.99,true
+10015,2025-01-12,Aiko Suzuki,JP,Graphics tablet,input,1,249.00,0.00,249.00,false
+10016,2025-01-12,Mateus Oliveira,BR,Microphone USB,audio,1,129.90,12.99,116.91,true
+10017,2025-01-13,Zanele Dlamini,ZA,Surge protector,power,3,22.75,0.00,68.25,true
+10018,2025-01-14,Erik Johansson,NO,Docking station,accessories,1,179.00,0.00,179.00,true
+10019,2025-01-14,Leila Haddad,LB,Screen cleaner kit,accessories,6,6.25,3.75,33.75,true
+10020,2025-01-15,Thomas Becker,AT,External DVD drive,storage,1,34.50,0.00,34.50,true
+10021,2025-01-16,Yuki Nakamura,JP,Keyboard wrist rest,accessories,2,15.80,0.00,31.60,true
+10022,2025-01-16,Grace Kim,KR,4K webcam,video,1,159.00,15.90,143.10,false
+10023,2025-01-17,Ivan Horvat,HR,Ethernet cable 10m,cables,4,9.90,0.00,39.60,true
+10024,2025-01-18,Chloé Dubois,BE,Standing desk frame,furniture,1,419.00,41.90,377.10,true
+10025,2025-01-18,Ahmed Karimi,AE,Thermal paste,components,10,4.99,4.99,44.91,true
+10026,2025-01-19,Isabella García,ES,RGB light strip,lighting,2,27.45,0.00,54.90,true
+10027,2025-01-20,William Taylor,GB,UPS 850VA,power,1,139.00,0.00,139.00,true
+10028,2025-01-20,Nguyen Van An,VN,Laptop sleeve 14",bags,3,21.00,6.30,56.70,true
+10029,2025-01-21,Freya Andersen,DK,Trackball mouse,input,1,84.90,0.00,84.90,false
+10030,2025-01-22,Tariq Mahmood,PK,Cable organiser box,accessories,2,12.40,0.00,24.80,true
+10031,2025-01-22,Emma Schmidt,DE,Blue-light glasses,accessories,1,44.00,4.40,39.60,true
+10032,2025-01-23,Santiago Ruiz,AR,Capture card,video,1,119.99,0.00,119.99,true
+10033,2025-01-24,Olga Nowak,PL,Label printer,office,1,74.50,7.45,67.05,true
+10034,2025-01-24,Ravi Patel,IN,Thunderbolt 4 cable,cables,2,32.00,0.00,64.00,true
+10035,2025-01-25,Maria Costa,PT,Footrest,furniture,1,36.90,0.00,36.90,true

@@ -1,0 +1,113 @@
+"""Summarise a folder of CSV expense reports.
+
+Fixture for the token estimator tests: ordinary application-style Python
+with type hints, a dataclass, some error handling and a small CLI.
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import logging
+import sys
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+from typing import Iterable, Iterator
+
+log = logging.getLogger("expenses")
+
+REQUIRED_COLUMNS = {"date", "category", "amount", "currency"}
+
+
+@dataclass(frozen=True)
+class Expense:
+    day: date
+    category: str
+    amount: Decimal
+    currency: str = "EUR"
+    note: str = ""
+
+
+@dataclass
+class Summary:
+    total: Decimal = Decimal("0")
+    by_category: dict[str, Decimal] = field(default_factory=lambda: defaultdict(Decimal))
+    by_month: dict[str, Decimal] = field(default_factory=lambda: defaultdict(Decimal))
+    skipped_rows: int = 0
+
+    def add(self, expense: Expense) -> None:
+        self.total += expense.amount
+        self.by_category[expense.category] += expense.amount
+        self.by_month[expense.day.strftime("%Y-%m")] += expense.amount
+
+
+def read_expenses(path: Path) -> Iterator[Expense]:
+    """Yield the valid rows of one CSV file, logging the ones we skip."""
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        missing = REQUIRED_COLUMNS - set(reader.fieldnames or [])
+        if missing:
+            raise ValueError(f"{path.name}: missing columns {sorted(missing)}")
+        for line_no, row in enumerate(reader, start=2):
+            try:
+                yield Expense(
+                    day=datetime.strptime(row["date"], "%Y-%m-%d").date(),
+                    category=row["category"].strip().lower() or "uncategorised",
+                    amount=Decimal(row["amount"].replace(",", ".")),
+                    currency=row["currency"].upper(),
+                    note=row.get("note", ""),
+                )
+            except (KeyError, ValueError, InvalidOperation) as exc:
+                log.warning("%s:%d skipped (%s)", path.name, line_no, exc)
+
+
+def summarise(expenses: Iterable[Expense], currency: str = "EUR") -> Summary:
+    summary = Summary()
+    for expense in expenses:
+        if expense.currency != currency:
+            summary.skipped_rows += 1
+            continue
+        summary.add(expense)
+    return summary
+
+
+def render(summary: Summary, top: int = 5) -> str:
+    lines = [f"Total: {summary.total:,.2f}", "", "Top categories:"]
+    ranked = sorted(summary.by_category.items(), key=lambda kv: kv[1], reverse=True)
+    for name, amount in ranked[:top]:
+        share = (amount / summary.total * 100) if summary.total else Decimal("0")
+        lines.append(f"  {name:<20} {amount:>10,.2f}  ({share:.1f}%)")
+    lines.append("")
+    lines.append("By month:")
+    for month in sorted(summary.by_month):
+        lines.append(f"  {month}  {summary.by_month[month]:>10,.2f}")
+    if summary.skipped_rows:
+        lines.append(f"\n{summary.skipped_rows} row(s) in other currencies were ignored.")
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("folder", type=Path, help="folder containing *.csv files")
+    parser.add_argument("--currency", default="EUR")
+    parser.add_argument("-v", "--verbose", action="store_true")
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING)
+    files = sorted(args.folder.glob("*.csv"))
+    if not files:
+        print(f"no CSV files found in {args.folder}", file=sys.stderr)
+        return 1
+
+    def all_rows() -> Iterator[Expense]:
+        for csv_file in files:
+            yield from read_expenses(csv_file)
+
+    print(render(summarise(all_rows(), currency=args.currency)))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

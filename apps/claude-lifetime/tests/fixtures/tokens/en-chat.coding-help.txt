@@ -1,0 +1,36 @@
+hey, quick question about react state. I have a list of todos and when I check one off the whole list re-renders and it feels laggy with ~500 items. is that normal?
+
+It's expected behaviour, but it's fixable. When the parent's state changes, every child re-renders by default, even the ones whose props didn't change. Three things usually help:
+
+1. Wrap the row component in `React.memo` so it skips rendering when its props are equal.
+2. Make sure the callbacks you pass down are stable. If you create `onToggle` inline, every row gets a new function each time and memo can't help.
+3. Give each row a stable `key` (the todo id, not the array index).
+
+Something like this:
+
+```tsx
+const TodoRow = React.memo(function TodoRow({ todo, onToggle }: Props) {
+  return (
+    <li>
+      <input type="checkbox" checked={todo.done} onChange={() => onToggle(todo.id)} />
+      {todo.title}
+    </li>
+  );
+});
+
+const onToggle = useCallback((id: string) => {
+  setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
+}, []);
+```
+
+ok that makes sense. but I'm already using the index as key, is that actually bad or just a style thing?
+
+It's a real problem once the list can be reordered, filtered or have items removed. React uses the key to decide which component instance belongs to which item. With index keys, deleting the first todo makes every row "become" the one below it, so React re-renders all of them and any local state (focus, an open menu, a half-typed edit) ends up attached to the wrong row. If the list is append-only and never reorders, you can get away with it, but ids are safer and cost nothing.
+
+got it. switched to ids + memo and it's way smoother. one more thing: do I need useMemo for the filtered list too?
+
+Probably not yet. Filtering 500 items takes well under a millisecond. I'd only add `useMemo` if profiling shows the filter itself is slow, or if the filtered array is passed to a memoized child that would otherwise see a new array on every render. A quick way to check: open the Profiler tab in React DevTools, record while you toggle a todo, and look at which components actually rendered and why.
+
+perfect, thanks! last q, I promise :) is there a rule of thumb for when to reach for a virtualized list?
+
+Rough rule: if you have more than a few hundred rows visible in the DOM *and* each row is non-trivial, virtualize. Below that, memo plus stable keys is nearly always enough. Libraries like react-window or TanStack Virtual only mount the rows that are on screen, so 50,000 items cost about the same as 50. The trade-off is that things like "find in page" (Ctrl+F) and variable row heights get harder, so don't add it before you need it.

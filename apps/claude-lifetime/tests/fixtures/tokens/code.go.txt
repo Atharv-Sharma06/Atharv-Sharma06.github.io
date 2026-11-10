@@ -1,0 +1,132 @@
+// Package retry runs a function until it succeeds or the attempts run out.
+//
+// Fixture for the token estimator tests: idiomatic Go with tabs,
+// interfaces, goroutines, channels and a table-driven test.
+package retry
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math/rand"
+	"sync"
+	"time"
+)
+
+// ErrGiveUp is returned when every attempt has failed.
+var ErrGiveUp = errors.New("retry: all attempts failed")
+
+// Policy describes how long to wait between attempts.
+type Policy struct {
+	Attempts   int
+	BaseDelay  time.Duration
+	MaxDelay   time.Duration
+	Multiplier float64
+	Jitter     bool
+}
+
+// DefaultPolicy is a sensible starting point for network calls.
+var DefaultPolicy = Policy{
+	Attempts:   5,
+	BaseDelay:  100 * time.Millisecond,
+	MaxDelay:   5 * time.Second,
+	Multiplier: 2.0,
+	Jitter:     true,
+}
+
+func (p Policy) delay(attempt int) time.Duration {
+	d := float64(p.BaseDelay)
+	for i := 1; i < attempt; i++ {
+		d *= p.Multiplier
+	}
+	if max := float64(p.MaxDelay); d > max {
+		d = max
+	}
+	if p.Jitter {
+		d = d/2 + rand.Float64()*d/2
+	}
+	return time.Duration(d)
+}
+
+// Do calls fn until it returns nil, the context is cancelled,
+// or the policy is exhausted.
+func Do(ctx context.Context, p Policy, fn func(ctx context.Context) error) error {
+	var last error
+	for attempt := 1; attempt <= p.Attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if last = fn(ctx); last == nil {
+			return nil
+		}
+		if attempt == p.Attempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(p.delay(attempt)):
+		}
+	}
+	return fmt.Errorf("%w after %d attempts: %v", ErrGiveUp, p.Attempts, last)
+}
+
+// Result pairs the name of a job with its outcome.
+type Result struct {
+	Name string
+	Err  error
+}
+
+// All runs every job concurrently with the same policy and collects the results.
+func All(ctx context.Context, p Policy, jobs map[string]func(context.Context) error) []Result {
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		results = make([]Result, 0, len(jobs))
+	)
+	for name, job := range jobs {
+		wg.Add(1)
+		go func(name string, job func(context.Context) error) {
+			defer wg.Done()
+			err := Do(ctx, p, job)
+			mu.Lock()
+			results = append(results, Result{Name: name, Err: err})
+			mu.Unlock()
+		}(name, job)
+	}
+	wg.Wait()
+	return results
+}
+
+// --- test file contents below (kept in one fixture for convenience) ---
+
+type flaky struct{ failures int }
+
+func (f *flaky) call(context.Context) error {
+	if f.failures > 0 {
+		f.failures--
+		return errors.New("temporary failure")
+	}
+	return nil
+}
+
+func exampleTable() {
+	cases := []struct {
+		name     string
+		failures int
+		attempts int
+		wantErr  bool
+	}{
+		{"succeeds immediately", 0, 3, false},
+		{"succeeds on last attempt", 2, 3, false},
+		{"gives up", 5, 3, true},
+	}
+	for _, tc := range cases {
+		f := &flaky{failures: tc.failures}
+		p := Policy{Attempts: tc.attempts, BaseDelay: time.Millisecond, Multiplier: 1}
+		err := Do(context.Background(), p, f.call)
+		if (err != nil) != tc.wantErr {
+			panic(fmt.Sprintf("%s: got err=%v, wantErr=%t", tc.name, err, tc.wantErr))
+		}
+	}
+}

@@ -1,0 +1,42 @@
+my docker build keeps failing and I have no idea why. it worked yesterday
+
+Can you paste the last 20 or so lines of the output, and tell me what changed since yesterday (even small things)?
+
+nothing changed I think?? here's the error:
+
+ => ERROR [builder 4/7] RUN npm ci                                    41.2s
+------
+ > [builder 4/7] RUN npm ci:
+#12 38.91 npm ERR! code ERESOLVE
+#12 38.92 npm ERR! ERESOLVE could not resolve
+#12 38.92 npm ERR! While resolving: eslint-plugin-foo@3.1.0
+#12 38.92 npm ERR! Found: eslint@9.4.0
+#12 38.93 npm ERR! Could not resolve dependency:
+#12 38.93 npm ERR! peer eslint@"^8.0.0" from eslint-plugin-foo@3.1.0
+
+Thanks, that's clear. The build isn't broken by Docker itself. `npm ci` is refusing to install because `eslint-plugin-foo@3.1.0` wants eslint 8 and your lockfile now has eslint 9.4.0.
+
+Two questions:
+1. Did someone (or a bot like Dependabot/Renovate) merge a dependency update recently? `git log -5 -- package-lock.json` will show it.
+2. Does `npm ci` fail the same way on your machine, outside Docker?
+
+oh. yeah there's a renovate PR from last night that bumped eslint. and yes it fails locally too, I just hadn't pulled
+
+That's the cause then. You have three ways out, from quickest to cleanest:
+
+a) Revert the bump: `git revert <sha>` and rebuild. Fine as a stopgap.
+b) Check whether the plugin has a release that supports eslint 9: `npm view eslint-plugin-foo versions --json | tail -5`. If there is one, upgrade both together.
+c) If the plugin is abandoned, remove it and replace the two or three rules you actually use.
+
+I would not use `--legacy-peer-deps` in the Dockerfile. It makes the error disappear but you end up running a plugin against an eslint version it was never tested with.
+
+went with (b), there's a 4.0.1 that supports eslint 9. build is green again. how do I stop this from happening next time?
+
+A few cheap guards:
+- Run `npm ci` in CI on every PR, including the bot's PRs, so a broken lockfile can't be merged.
+- In Renovate, group `eslint` with its plugins (`"groupName": "eslint"` plus a `matchPackagePatterns` rule) so they're bumped in one PR.
+- Turn off auto-merge for major versions.
+
+With the first one alone, last night's PR would have gone red instead of landing on main.
+
+makes sense. added the CI step, took 5 min. thank you!

@@ -1,0 +1,267 @@
+# Architecture
+
+## The constraint that shaped it
+
+Claude Lifetime is published as a sub-path of a portfolio that GitHub Pages serves as
+plain files. There is no server to run route handlers or a database. At the same time the
+app needs what a database gives: integrity constraints, transactions for imports,
+deduplication and non-trivial analytics queries.
+
+The answer is to run the database in the browser. **PGlite** is PostgreSQL compiled to
+WebAssembly; it runs in a Web Worker and persists to IndexedDB. The app is a static
+Next.js export, and everything that would be "backend" (schema, migrations, import
+pipeline, analytics queries) is ordinary TypeScript and SQL that runs against that
+database.
+
+This also happens to be the strongest privacy position available: conversation data never
+leaves the device because there is nowhere for it to go.
+
+```
+ browser tab
+ ┌──────────────────────────────────────────────────────────────────────┐
+ │  React pages (src/features, src/components)                          │
+ │      │  useData(): typed query functions                             │
+ │      ▼                                                               │
+ │  analytics (src/analytics)  ──SQL──▶  SqlDriver (src/db/driver.ts)   │
+ │                                            │                         │
+ │  import session (src/import/session.ts)    │                         │
+ │      │ files            ▲ batches          ▼                         │
+ │      ▼                  │           ┌──────────────────────────┐     │
+ │  import worker ─────────┘           │ database worker          │     │
+ │  (parsers, token estimator)         │ PGlite = PostgreSQL/WASM │     │
+ │                                     │ persisted in IndexedDB   │     │
+ │                                     └──────────────────────────┘     │
+ └──────────────────────────────────────────────────────────────────────┘
+```
+
+All tabs of the app share one database: the worker of one tab holds it, and the other
+tabs reach it through that worker. A Web Lock makes sure only one import is prepared at a
+time (file imports, folder syncs, manual entries and the demo data all take it), and a
+BroadcastChannel tells the other tabs to re-read after a write, to let go of the
+database before it is erased, and to reload after it was erased or replaced by a backup.
+Tabs that start at the same moment set the database up one after the other.
+
+A tab can be closed or reloaded at any moment, also in the middle of a transaction, and
+the other tabs must not pay for that:
+
+- **A tab that only uses the database goes away.** The worker that holds the database
+  (`src/db/worker/host.ts`) rolls back what that tab left unfinished before the next tab
+  gets its turn, and gives no turn to a tab that was still waiting in line. The pages
+  talk to the worker through PGlite's page class; the worker's side is the app's own
+  code, because PGlite's counterpart handed a turn to a tab that was gone (after which
+  no tab got an answer again) and let the next tab commit a closed tab's half-finished
+  transaction. A statement is only carried out for a tab during a turn this worker gave it.
+- **The tab whose worker holds the database goes away.** The worker of another tab opens
+  the database from IndexedDB and takes over. Whatever was under way goes with the old
+  worker: the driver (`src/db/pglite-driver.ts`) fails it at once with a message that
+  says what happened, and a transaction that was under way sends nothing more. Reads are
+  run again by themselves. A change is not repeated, because it is not known whether it
+  was stored: the person is told to check. The same goes for a change that the old worker
+  had made but not yet confirmed as copied to storage. The one exception is the
+  automatic reading of the Claude Code folder, which adds nothing twice and is simply
+  done again. An import that was being saved is not stored in part, and can be imported
+  again.
+- **A tab starts while the database is busy.** The worker that holds the database does
+  one thing at a time, so the tab waits: first to be connected, then for its turn. It
+  says after a few seconds what it is probably waiting for (another tab's import or
+  backup). When either wait lasts two minutes it stops with a screen that says so, and
+  lets the next tab try.
+- **No tab can open the database after the one that held it went away.** Opening it
+  needs the files of the database engine, which a device that is offline by then cannot
+  load. What a tab then asks of the database waits for a while (twenty seconds once the
+  tab's own attempt has failed, ninety otherwise) and fails with a message that says
+  what happened and to reload the page.
+
+A backup is not the database's own files. PostgreSQL keeps deleted rows in its table
+files until the space is reused, and in its write-ahead log, so those files would give
+away titles and folder names that were deleted. On request the database worker starts
+a second, empty database in memory, gives it the same schema, copies every table's
+live rows into it (`src/db/clean-copy.ts`), counts each table on both sides, and packs
+the files of that copy. If the copy cannot be made, no backup is made; the raw files
+are never the fallback.
+
+## Source layout
+
+| Path | Contents |
+|---|---|
+| `prisma/schema.prisma` | The data model, with the reasoning for each table in comments |
+| `prisma/migrations/` | SQL migrations: tables, indexes and foreign keys as generated by Prisma; CHECK constraints, the exclusion constraint for subscription periods, the `usage_facts` view and the bucket refresh function hand-written |
+| `src/db/` | Driver interface, migration runner, seed of the built-in catalog, browser client, database worker, the row-by-row copy backups are made from |
+| `src/core/` | Model and price catalog, token estimator, decimal arithmetic, limitation flags, import contracts |
+| `src/import/` | Staging, preview, commit, deletion; one folder per importer; format detection; the import worker and session |
+| `src/analytics/` | Every figure the UI shows, as SQL query functions |
+| `src/features/` | One folder per page |
+| `src/components/`, `src/lib/`, `src/state/` | Shared UI, formatting and chart helpers, application state |
+| `tests/` | Unit and integration tests; `e2e/` holds the browser tests |
+| `scripts/` | Asset preparation, migration bundling, collector build, calibration, publishing |
+
+## Data model
+
+Timestamps are stored in UTC (`timestamptz`) and shown in the user's timezone. Day
+boundaries for charts are computed in SQL with the IANA zone from Settings. Subscription
+periods are the exception: a plan runs from one calendar day to another, so its first
+and last day are stored as dates, exactly as entered, and do not move when the timezone
+setting changes.
+
+| Table | Purpose |
+|---|---|
+| `users` | The one local user: timezone and settings |
+| `data_sources` | Where data came from (kind, label, identity). Can be left out of totals, and marks synthetic demo data |
+| `import_batches` | One row per import: file name, size, content hash, format, parser version, coverage, counts, warnings, the request keys it counted |
+| `conversations` | Chats and Claude Code sessions, unique per `(user, dedup_key)` |
+| `messages` | Message metadata (sizes, role, time), unique per `(conversation, external_id)`. No text. |
+| `usage_records` | Usage whose token counts a file states: counts per category in a time bucket, with model, price tier and a `confidence` column, unique per `(user, dedup_key)`. Claude Code and API reports are always `exact`; a CSV or JSON table and a manual entry are `exact` or `estimated`, as the person declared them |
+| `token_estimates` | Usage the app estimates from the text of messages (chat exports): one row per message, in base units, with the estimation method and limitation flags. Always estimated |
+| `estimate_buckets` | Derived from `token_estimates` for speed: the estimates of an import summed into 15-minute buckets per conversation and method |
+| `estimation_methods` | The factor and uncertainty band of each tokenizer generation |
+| `reported_costs` | Actual billed amounts from cost reports |
+| `subscription_periods` | Plan history entered by the user, as first and last calendar day; an exclusion constraint forbids two plans on one day |
+| `model_catalog` | Known models with family, tokenizer generation, release and retirement dates |
+| `pricing_history` | Prices per model, tier and effective date, each with its source link and retrieval date |
+| `synced_files` | Which transcript files of a folder were already read, for incremental sync |
+
+Decisions worth knowing:
+
+- **Every usage row says whether it is exact or estimated.** `usage_records` holds both
+  kinds, told apart by its `confidence` column, so a query over that table alone must
+  filter or group by `confidence`; it is not a table of exact usage. `token_estimates`
+  (summed into `estimate_buckets`) holds only estimates. The view `usage_facts` brings
+  the two together and gives every row a `confidence` (`estimated` for every row from
+  the buckets). Wherever the analytics add up usage from both tables they read that view
+  and split the total by that column, so no figure adds exact and estimated tokens
+  without saying which is which.
+- **Estimates are stored in base units** (tokens of the published legacy tokenizer) and
+  converted with the factor of their method. Improving a factor does not require
+  importing again.
+- **Analytics never scan one row per message.** A large export has hundreds of thousands
+  of messages, and PostgreSQL in WebAssembly aggregates them at roughly a million rows
+  per second per query. `estimate_buckets` holds the same figures summed into 15-minute
+  buckets (the per-message values are rounded first, so totals are identical to the
+  token), which makes every query several times faster. Fifteen minutes is the widest
+  bucket that never straddles a local midnight, because every timezone offset in use is a
+  multiple of 15 minutes. The table is rebuilt by one SQL function after an import and
+  when a factor changes, and it is removed with its import by cascading foreign keys.
+  `tests/db/estimate-buckets.test.ts` checks that buckets and messages always agree.
+- **Usage rows never store a subscription plan.** The plan of a record is derived at
+  query time from the calendar day it is charted on and `subscription_periods`, so
+  editing a period re-classifies everything, and a record that only knows its date (a
+  daily report bucket, a manual entry) lands in the plan that was active on that date.
+- **Averages count only days the imported records cover.** A per-day figure for a plan,
+  or for either side of the first paid plan, divides by the days between the first and
+  the last imported record that fall into it (and into the selected range). Days before
+  the first import or after the last are unknown, not empty.
+- **Everything imported hangs off a source and a batch** through `ON DELETE CASCADE`
+  foreign keys. Deleting an import removes exactly the rows it added. A conversation
+  that two sources added to is handed to the remaining source before its first source
+  is removed, so the other source's records are not swept away with it. One thing a
+  deletion cannot undo: rows that a later report replaced (see below) do not come back
+  when that report is deleted; the import history says so on both imports.
+- **Money is `numeric`**, never floating point, and decimal strings in TypeScript
+  (`src/core/decimal.ts`).
+
+## Import pipeline
+
+```
+files ─▶ detect ─▶ parser (worker) ─▶ staging tables ─▶ preview ─▶ commit (one transaction)
+```
+
+1. **Detect** (`src/import/detect.ts`) looks at the beginning of each file, not at its
+   name, and picks a parser or explains why none fits.
+2. A **parser** turns its input into the small set of normalised records defined in
+   `src/core/types.ts` and hands them to a sink. Parsers stream: the claude.ai export is
+   read conversation by conversation from the ZIP, transcripts line by line.
+3. The page writes the records to session-local **staging tables** in batches; the worker
+   waits for acknowledgements, which bounds memory.
+4. The **preview** is computed from the staging tables with SQL: what is new, what is
+   already stored, what would be replaced, how many tokens would be added.
+5. **Commit** merges the staged rows in one transaction. A crash or a cancelled import
+   leaves the stored data untouched.
+
+The staging tables belong to the one database session all tabs share. Besides the lock,
+every reset of the tables hands out a token, and a commit presents the token it was
+given: if the tables were reset in between (another import, or the tab that hosted the
+database was closed) the commit is refused and nothing is saved. A Claude Code import
+is also refused when any import was saved or deleted after its preview, because its
+requests were compared with what was stored at that moment.
+
+Deduplication, by kind of record:
+
+| Record | Recognised by |
+|---|---|
+| Conversation | source-aware key, e.g. `claude_ai:<uuid>` |
+| Message | id within its conversation |
+| Claude Code response | 64-bit hash of its message id (or, for an id that Anthropic did not issue, of the uuid of the response's first row), stored on the batch that counted it |
+| API report row | period and dimensions. A newer report replaces the same source's rows in the time it speaks for where it states them differently or no longer lists them; rows it repeats exactly are left alone. Each file of an import speaks for its own stretch of time (`ParsedImport.replaceRanges`), so the time between two files is not touched. A report that starts or ends inside a stored total (an hourly report cutting into a daily row) is refused, as is one period under two groupings in one import and a ranked report without its last page |
+| CSV/JSON row | its `id`, or a hash of its fields, within the source it is imported under. The same file imported into the same source again replaces the rows of its earlier import that read differently now. A row that adds up more than one day is stored as one row for each day, with its counts divided evenly and keys derived from the row's, so that every day-based figure takes the right share of it |
+| Whole file | SHA-256, reported in the preview ("this exact file was imported before"), with a warning when that was under another source |
+
+Synthetic demo data and real data never coexist: the demo can only be loaded into an
+empty workspace and is removed by the first real import.
+
+## Analytics
+
+Each page calls typed functions in `src/analytics/`. They build SQL over `usage_facts`
+with one shared filter (`factsFrom` in `base.ts`: user, timezone, date range, included
+sources) so that every figure on a page is consistent with the others. The header of
+`base.ts` defines which token categories each total includes; `value.ts` documents how
+usage is priced.
+
+## Why Prisma, when the queries are hand-written SQL
+
+Prisma defines the schema and generates the migrations, which keeps the data model
+reviewable in one file and portable. Prisma Client is not used at runtime: it cannot run
+in a browser against PGlite, and the analytics are aggregate SQL that a query builder
+would not make clearer. The migration runner (`src/db/migrate.ts`) applies the same
+`migration.sql` files Prisma generated, records them with checksums, and refuses to run
+when an applied migration was changed.
+
+Writing a new migration is the one step that needs a PostgreSQL server: `npm run
+db:migration` has Prisma replay the existing migrations in a scratch database named by
+`SHADOW_DATABASE_URL`, which it erases, and compare the result with the schema. The
+README's Configuration section says how to set it.
+
+## Moving to a server later
+
+Nothing in the data model depends on the browser.
+
+- The migrations are plain PostgreSQL. `prisma migrate deploy` with `DATABASE_URL` set
+  applies them to a server database.
+- The analytics and import code talk to the `SqlDriver` interface (`query`, `exec`,
+  `transaction`). An implementation over `pg` is about thirty lines, after which the
+  same functions run in route handlers.
+- `user_id` is on the tables that hold a person's data: `data_sources`,
+  `import_batches`, `conversations`, `usage_records`, `token_estimates`,
+  `estimate_buckets`, `reported_costs` and `subscription_periods`. `messages` and
+  `synced_files` have none, but each row belongs to a user through its conversation or
+  source. Three tables are shared by everyone in the database: `model_catalog` (to which
+  an import adds models it finds), `pricing_history` (which also holds the prices a
+  person adds in Settings, and those take precedence over the built-in ones) and
+  `estimation_methods`. In the browser there is only one user, so that is correct. On a
+  server with more than one user, `pricing_history` and `model_catalog` would need a
+  `user_id` (null for the built-in rows) and every query that reads them would have to
+  filter by it; otherwise one person's prices would apply to everybody's usage.
+- The static export would be replaced by a normal Next.js deployment; pages would fetch
+  from route handlers instead of calling the query functions directly.
+
+## Deployment
+
+`npm run publish:site` builds the static export and copies it to `claude-lifetime/` at
+the repository root. GitHub Pages serves that folder at `/claude-lifetime/`.
+
+- `.nojekyll` at the repository root stops GitHub Pages from dropping `_next/`.
+- The PostgreSQL WebAssembly files are shipped gzip-compressed under `pglite/` (5.5 MB
+  instead of 15.6 MB) and decompressed in the worker; the uncompressed copies the bundler
+  emits are left out of the published folder.
+- There are no dynamic routes. A conversation's detail page is addressed with a query
+  parameter (`/conversations/?id=…`).
+
+## Tests
+
+- **Unit and integration** (`npm test`, Vitest): parsers, token estimator, accounting,
+  decimal arithmetic, and the import pipeline, analytics and deletion against a real
+  in-memory PostgreSQL with the app's migrations applied.
+- **End-to-end** (`npm run test:e2e`, Playwright): the published static files, served the
+  way GitHub Pages serves them. Besides the user flows, every test fails on a script
+  error, a failed request, or any request to another origin: the `test` of
+  `e2e/helpers.ts` watches the page of every test, and a unit test keeps the spec files
+  from using any other.

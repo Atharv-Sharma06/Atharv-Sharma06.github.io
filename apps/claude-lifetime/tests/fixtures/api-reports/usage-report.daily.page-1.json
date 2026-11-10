@@ -1,0 +1,71 @@
+{
+  "data": [
+    {
+      "starting_at": "2026-03-01T00:00:00Z",
+      "ending_at": "2026-03-02T00:00:00Z",
+      "results": [
+        {
+          "uncached_input_tokens": 120000,
+          "cache_creation": { "ephemeral_1h_input_tokens": 4000, "ephemeral_5m_input_tokens": 30000 },
+          "cache_read_input_tokens": 900000,
+          "output_tokens": 45000,
+          "server_tool_use": { "web_search_requests": 3 },
+          "account_id": null,
+          "api_key_id": null,
+          "context_window": "0-200k",
+          "inference_geo": null,
+          "model": "claude-sonnet-4-6",
+          "service_account_id": null,
+          "service_tier": "standard",
+          "speed": "standard",
+          "workspace_id": null
+        },
+        {
+          "uncached_input_tokens": 500000,
+          "cache_creation": { "ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 0 },
+          "cache_read_input_tokens": 0,
+          "output_tokens": 80000,
+          "server_tool_use": { "web_search_requests": 0 },
+          "account_id": null,
+          "api_key_id": null,
+          "context_window": "0-200k",
+          "inference_geo": null,
+          "model": "claude-haiku-4-5-20251001",
+          "service_account_id": null,
+          "service_tier": "batch",
+          "speed": "standard",
+          "workspace_id": null
+        }
+      ]
+    },
+    {
+      "starting_at": "2026-03-02T00:00:00Z",
+      "ending_at": "2026-03-03T00:00:00Z",
+      "results": []
+    },
+    {
+      "starting_at": "2026-03-03T00:00:00Z",
+      "ending_at": "2026-03-04T00:00:00Z",
+      "results": [
+        {
+          "uncached_input_tokens": 60000,
+          "cache_creation": { "ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 0 },
+          "cache_read_input_tokens": 100000,
+          "output_tokens": 20000,
+          "server_tool_use": { "web_search_requests": 0 },
+          "account_id": null,
+          "api_key_id": null,
+          "context_window": "0-200k",
+          "inference_geo": null,
+          "model": "claude-sonnet-4-6",
+          "service_account_id": null,
+          "service_tier": "standard",
+          "speed": "standard",
+          "workspace_id": null
+        }
+      ]
+    }
+  ],
+  "has_more": true,
+  "next_page": "page_MjAyNi0wMy0wNFQwMDowMDowMFo="
+}
