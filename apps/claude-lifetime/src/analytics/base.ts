@@ -57,6 +57,16 @@ export function dayExpr(tz: string): string {
 }
 
 /**
+ * The last local calendar day a fact covers. A row that adds up a day or more (a daily
+ * report row, a monthly total) reaches to the end of its period, in UTC days; a row with a
+ * time of day lies on the day it has in the user's timezone.
+ */
+export function lastDayExpr(tz: string): string {
+  return `(CASE WHEN f.bucket_seconds >= 86400 THEN ((f.occurred_at + make_interval(secs => f.bucket_seconds - 1)) AT TIME ZONE 'UTC')::date
+                ELSE (f.occurred_at AT TIME ZONE ${tz})::date END)`;
+}
+
+/**
  * Whether a conversation is shown. It belongs to the source that imported it first (`s`), but another
  * source can have added records to it. Its records are counted source by source, so it is shown when
  * its own source counts toward the totals or any source that has records in it does: a conversation
@@ -75,7 +85,7 @@ export const conversationShown = (c = 'c', s = 's'): string => `(${s}.include_in
 export function factsFrom(
   filter: AnalyticsFilter,
   p: Params,
-): { from: string; where: string; tz: string; day: string; conversationJoin: string; conversationId: string } {
+): { from: string; where: string; tz: string; day: string; lastDay: string; conversationJoin: string; conversationId: string } {
   // The cast lets PostgreSQL type the parameter wherever it is used (AT TIME ZONE takes text).
   const tz = `${p.add(filter.timezone)}::text`;
   const day = dayExpr(tz);
@@ -92,6 +102,7 @@ export function factsFrom(
     where: conditions.join(' AND '),
     tz,
     day,
+    lastDay: lastDayExpr(tz),
     // For counting conversations: add `conversationJoin` to the FROM clause and count DISTINCT
     // `conversationId`. Rows of API reports and generic imports hang off containers of kind
     // usage_bucket, which are not conversations and must not be counted as such.

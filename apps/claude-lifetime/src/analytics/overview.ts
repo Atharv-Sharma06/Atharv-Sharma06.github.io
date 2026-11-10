@@ -97,6 +97,8 @@ const TOTAL_COLUMNS = (tok: string) => `
   -- Re-read context is modelled for estimates made from chat text, the only facts with a method.
   COALESCE(bool_or(f.method_id IS NOT NULL OR f.replay_tokens > 0), false) AS records_replay`;
 
+const clipDay = (day: string | null, to: string | null | undefined): string | null => (day !== null && to && day > to ? to : day);
+
 export function readTotals(row: Record<string, unknown>): TokenTotals {
   return {
     total: toNumber(row.total),
@@ -134,7 +136,7 @@ export async function getOverview(db: SqlExecutor, filter: AnalyticsFilter): Pro
               COALESCE(sum(f.assistant_message_count), 0)::bigint AS assistant_messages,
               COALESCE(sum(f.request_count), 0)::bigint AS requests,
               min(f.occurred_at) AS first_at, max(f.occurred_at) AS last_at,
-              min(${f.day})::text AS first_day, max(${f.day})::text AS last_day,
+              min(${f.day})::text AS first_day, max(${f.lastDay})::text AS last_day,
               count(DISTINCT ${f.day})::int AS active_days
          FROM ${f.from} WHERE ${f.where}`,
       p.values,
@@ -217,7 +219,8 @@ export async function getOverview(db: SqlExecutor, filter: AnalyticsFilter): Pro
     firstUsageAt: toIso(totals.first_at),
     lastUsageAt: toIso(totals.last_at),
     firstDay: (totals.first_day as string | null) ?? null,
-    lastDay: (totals.last_day as string | null) ?? null,
+    // A row that adds up several days reaches to the end of its period, but never beyond the selected range.
+    lastDay: clipDay((totals.last_day as string | null) ?? null, filter.to),
     activeDays: toNumber(totals.active_days),
     mostActiveDay,
   };
@@ -246,6 +249,11 @@ export interface SeriesPoint {
   messages: number;
   conversations: number;
   requests: number;
+  /**
+   * The last day a record of this bucket covers. Later than the bucket itself for a row that
+   * adds up several days, which is counted where it starts and speaks for every day to its end.
+   */
+  lastDay?: string;
 }
 
 const GROUPS: Record<SeriesGroup, { expr: string; join: string | ((day: string) => string) }> = {
@@ -290,7 +298,8 @@ export async function getTimeSeries(
             sum(f.replay_tokens)::bigint AS replay,
             sum(f.user_message_count + f.assistant_message_count)::bigint AS messages,
             count(DISTINCT ${f.conversationId})::int AS conversations,
-            sum(f.request_count)::bigint AS requests
+            sum(f.request_count)::bigint AS requests,
+            max(${f.lastDay})::text AS last_day
        FROM ${f.from} ${typeof g.join === 'function' ? g.join(f.day) : g.join} ${f.conversationJoin}
       WHERE ${f.where}
       GROUP BY 1, 2 ORDER BY 1, 2`,
@@ -311,5 +320,6 @@ export async function getTimeSeries(
     messages: toNumber(r.messages),
     conversations: toNumber(r.conversations),
     requests: toNumber(r.requests),
+    lastDay: clipDay(typeof r.last_day === 'string' ? r.last_day : null, filter.to) ?? undefined,
   }));
 }

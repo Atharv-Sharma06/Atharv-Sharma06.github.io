@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { listImports } from '@/analytics/coverage';
-import { getOverview } from '@/analytics/overview';
+import { getCoverage, listImports } from '@/analytics/coverage';
+import { getOverview, getTimeSeries } from '@/analytics/overview';
 import { addManualUsage } from '@/analytics/settings';
 import type { StagedCost } from '@/core/types';
+import { recordedHistory } from '@/features/usage/usage-model';
 import { createTestDb, type TestDb } from '../helpers/db';
 import { conv, importRecords, msg, usage } from '../helpers/staged';
 
@@ -128,3 +129,64 @@ describe('the days an import covers', () => {
     ]);
   });
 });
+
+describe('a report row that adds up a whole month', () => {
+  // An Analytics API report asked for without daily buckets: one row for September, exact.
+  const september = () =>
+    importRecords(
+      t.db,
+      t.userId,
+      { usage: [usage('sep', { occurredAt: '2026-09-01T00:00:00.000Z', bucketSeconds: 30 * 86_400 })] },
+      { source: API, contentHash: 'sep', fileName: 'analytics-usage.json', replaceRanges: [{ start: '2026-09-01T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z' }] },
+    );
+
+  it('reaches to the end of the month on the overview and in the coverage summary, as in the import history', async () => {
+    await september();
+    expect(await daysOf(NEW_YORK)).toEqual([['analytics-usage.json', { first: '2026-09-01', last: '2026-09-30' }]]);
+
+    const overview = await getOverview(t.db, { userId: t.userId, timezone: NEW_YORK, basis: 'processed' });
+    expect([overview.firstDay, overview.lastDay]).toEqual(['2026-09-01', '2026-09-30']);
+
+    const coverage = await getCoverage(t.db, t.userId, NEW_YORK);
+    expect([coverage.earliestDay, coverage.latestDay]).toEqual(['2026-09-01', '2026-09-30']);
+    expect([coverage.sources[0].firstDay, coverage.sources[0].lastDay]).toEqual(['2026-09-01', '2026-09-30']);
+
+    // The history of Lifetime Usage ends with the month as well, so its averages divide by thirty days.
+    const daily = await getTimeSeries(t.db, { userId: t.userId, timezone: NEW_YORK, basis: 'processed' }, 'day');
+    expect(daily.map((p) => [p.bucket, p.lastDay])).toEqual([['2026-09-01', '2026-09-30']]);
+    expect(recordedHistory(daily)).toEqual({ first: '2026-09-01', last: '2026-09-30' });
+  });
+
+  it('never reaches beyond the selected range', async () => {
+    await september();
+    const overview = await getOverview(t.db, { userId: t.userId, timezone: 'UTC', basis: 'processed', from: '2026-09-01', to: '2026-09-10' });
+    expect(overview.lastDay).toBe('2026-09-10');
+  });
+
+  it('is the same for a cost report with one row for the month', async () => {
+    const cost: StagedCost = {
+      modelKey: 'claude-sonnet-4-5',
+      occurredAt: '2026-09-01T00:00:00.000Z',
+      bucketSeconds: 30 * 86_400,
+      costType: 'tokens',
+      tokenType: 'output_tokens',
+      description: null,
+      amountUsd: '12.00',
+      dedupKey: 'sep',
+    };
+    await importRecords(
+      t.db,
+      t.userId,
+      { costs: [cost] },
+      {
+        source: { kind: 'api_cost_report', label: 'Anthropic API cost report', externalRef: '' },
+        contentHash: 'cost-sep',
+        fileName: 'analytics-cost.json',
+        replaceRanges: [{ start: '2026-09-01T00:00:00.000Z', end: '2026-10-01T00:00:00.000Z' }],
+      },
+    );
+    const source = (await getCoverage(t.db, t.userId, NEW_YORK)).sources[0];
+    expect([source.firstDay, source.lastDay]).toEqual(['2026-09-01', '2026-09-30']);
+  });
+});
+

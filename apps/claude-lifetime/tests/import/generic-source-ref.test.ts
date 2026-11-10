@@ -19,10 +19,29 @@ describe('sourceRefFromName', () => {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '')
         .slice(0, 48);
-    const names = ['Proxy EU', 'proxy-eu', '  Gateway logs  ', 'My_Table (v2)!', 'A', '2026', 'log.2026-03.csv', '-- x --', 'x'.repeat(80), 'ab '.repeat(30), `${'a'.repeat(47)} b`];
+    const names = ['Proxy EU', 'proxy-eu', '  Gateway logs  ', 'My_Table (v2)!', 'A', '2026', 'log.2026-03.csv', '-- x --', 'x'.repeat(48), 'ab '.repeat(16), `${'a'.repeat(46)} b`];
     for (const name of names) expect(sourceRefFromName(name), name).toBe(before(name));
     expect(sourceRefFromName('Proxy EU')).toBe('proxy-eu');
     expect(sourceRefFromName('My_Table (v2)!')).toBe('my-table-v2');
+  });
+
+  it('keeps long names apart that only differ after the point where a reference is cut', () => {
+    const west = 'Internal gateway request log, production cluster EU-West';
+    const east = 'Internal gateway request log, production cluster US-East';
+    expect(sourceRefFromName(west)).not.toBe(sourceRefFromName(east));
+    // The beginning of the name, then a short hash of all of it: 48 characters, as the longest reference always was.
+    expect(sourceRefFromName(west)).toMatch(/^internal-gateway-request-log-produc~[0-9a-f]{12}$/);
+    expect(sourceRefFromName(west)).toHaveLength(48);
+    // The same name gives the same reference however it is typed.
+    expect(sourceRefFromName(`  ${west.toUpperCase()}  `)).toBe(sourceRefFromName(west));
+    // A name of exactly 48 characters is not cut and has no hash; one character more is.
+    expect(sourceRefFromName('x'.repeat(48))).toBe('x'.repeat(48));
+    expect(sourceRefFromName('x'.repeat(49))).toMatch(/^x{35}~[0-9a-f]{12}$/);
+    expect(sourceRefFromName('x'.repeat(49))).not.toBe(sourceRefFromName('x'.repeat(50)));
+    // Counted in characters: a long name of astral characters is cut between characters, not inside one.
+    const emoji = sourceRefFromName(`${'𝒜'.repeat(60)}`);
+    expect(Array.from(emoji)).toHaveLength(48);
+    expect(emoji.isWellFormed()).toBe(true);
   });
 
   it('gives names in other scripts a reference of their own', () => {
@@ -76,10 +95,11 @@ describe('sourceRefFromName', () => {
   });
 
   it('limits the length without cutting a character in half', () => {
-    expect(sourceRefFromName('ж'.repeat(80))).toBe('ж'.repeat(48));
+    expect(sourceRefFromName('ж'.repeat(48))).toBe('ж'.repeat(48));
+    expect(sourceRefFromName('ж'.repeat(80))).toMatch(/^ж{35}~[0-9a-f]{12}$/);
     // Characters outside the basic plane take two code units each.
     const long = sourceRefFromName('𠮷'.repeat(60));
     expect(Array.from(long)).toHaveLength(48);
-    expect(long).toBe('𠮷'.repeat(48));
+    expect(long.startsWith('𠮷'.repeat(35) + '~')).toBe(true);
   });
 });

@@ -75,11 +75,11 @@ function downloadText(name: string, text: string, type: string) {
 }
 
 /**
- * The reference of the source a named computer's usage is filed under. Made from the name in
- * whatever script it is written, so two names never share a reference because neither has an
- * ASCII letter; a name is cut to 40 characters, as it always was.
+ * The reference of the source a named computer's usage is filed under. Made from the whole name
+ * in whatever script it is written, so two names never share a reference because neither has an
+ * ASCII letter, or because they only differ towards their end.
  */
-const computerRef = (name: string) => sourceRefFromName(Array.from(name.trim()).slice(0, 40).join(''));
+const computerRef = (name: string) => sourceRefFromName(name);
 
 export function ImportPage() {
   const app = useApp();

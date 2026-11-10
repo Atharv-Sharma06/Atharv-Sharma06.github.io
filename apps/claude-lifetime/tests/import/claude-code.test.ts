@@ -401,6 +401,47 @@ describe('subagents and sidechain replays', () => {
     expect(both.parsed.stats.duplicateLines).toBe(1);
     expect(both.parsed.requestKeys).toEqual(wrapperOnly.parsed.requestKeys);
   });
+
+  it('counts the responses of subagents that ran side by side once, also behind a gateway with its own ids', async () => {
+    // Two subagents at once, each response written as two lines with the same usage. The gateway issues its own
+    // ids and passes no request id on, so a response is only known by its lines. Old versions wrapped those lines
+    // into the parent's file as they arrived: A, B, A, B.
+    const wrap = (sub: Json, ts: string): Json => ({
+      type: 'progress',
+      uuid: rowUuid(),
+      timestamp: ts,
+      sessionId: SESSION_A,
+      cwd: '/home/alex/demo',
+      toolUseID: 'toolu_TEST',
+      data: { type: 'agent_progress', message: { timestamp: sub.timestamp, uuid: sub.uuid, requestId: sub.requestId, isSidechain: true, message: sub.message } },
+    });
+    const a1 = assistant({ id: 'chatcmpl-A', req: null, ts: at('09:10:00'), sidechain: true, usage: usage(10, 100), stop: 'tool_use' });
+    const a2 = assistant({ id: 'chatcmpl-A', req: null, ts: at('09:10:01'), sidechain: true, usage: usage(10, 100), stop: 'tool_use' });
+    const b1 = assistant({ id: 'chatcmpl-B', req: null, ts: at('09:10:00.500'), sidechain: true, usage: usage(20, 200), stop: 'tool_use' });
+    const b2 = assistant({ id: 'chatcmpl-B', req: null, ts: at('09:10:01.500'), sidechain: true, usage: usage(20, 200), stop: 'tool_use' });
+    const prompt = user('PROMPT', { ts: at('09:09:00') });
+    const reply = assistant({ id: 'chatcmpl-M', req: null, ts: at('09:09:30'), usage: usage(1, 1), stop: 'tool_use' });
+    const wrappers = [wrap(a1, at('09:10:00.1')), wrap(b1, at('09:10:00.6')), wrap(a2, at('09:10:01.1')), wrap(b2, at('09:10:01.6'))];
+    const withWrappers = file(`projects/-home-alex-demo/${SESSION_A}.jsonl`, jsonl([prompt, reply, ...wrappers]));
+    const withoutWrappers = file(`projects/-home-alex-demo/${SESSION_A}.jsonl`, jsonl([prompt, reply]));
+    const subA = file(`projects/-home-alex-demo/${SESSION_A}/subagents/agent-a.jsonl`, jsonl([a1, a2]));
+    const subB = file(`projects/-home-alex-demo/${SESSION_A}/subagents/agent-b.jsonl`, jsonl([b1, b2]));
+
+    const truth = { input: 31, output: 301, requests: 3 };
+    expect(totals((await run([withoutWrappers, subA, subB])).sink.usages)).toMatchObject(truth);
+    // The wrappers alone, and the wrappers next to the subagent files they repeat.
+    const wrappersOnly = await run([withWrappers]);
+    const everything = await run([withWrappers, subA, subB]);
+    expect(totals(wrappersOnly.sink.usages)).toMatchObject(truth);
+    expect(totals(everything.sink.usages)).toMatchObject(truth);
+    expect(everything.parsed.requestKeys).toEqual(wrappersOnly.parsed.requestKeys);
+
+    // Two different responses under one gateway id are still two: their usage differs.
+    const c1 = assistant({ id: 'chatcmpl-C', req: null, ts: at('09:20:00'), sidechain: true, usage: usage(5, 50), stop: 'end_turn' });
+    const c2 = assistant({ id: 'chatcmpl-C', req: null, ts: at('09:20:05'), sidechain: true, usage: usage(6, 60), stop: 'end_turn' });
+    const reused = file(`projects/-home-alex-demo/${SESSION_A}.jsonl`, jsonl([prompt, reply, wrap(c1, at('09:20:00.1')), wrap(b1, at('09:20:01')), wrap(c2, at('09:20:05.1'))]));
+    expect(totals((await run([reused])).sink.usages)).toMatchObject({ input: 1 + 5 + 20 + 6, output: 1 + 50 + 200 + 60, requests: 4 });
+  });
 });
 
 describe('human prompts', () => {

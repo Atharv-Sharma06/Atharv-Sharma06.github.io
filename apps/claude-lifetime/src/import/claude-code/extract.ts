@@ -471,6 +471,12 @@ interface FileState {
   waiting: Array<(ts: number) => void>;
   /** The gateway response whose lines are being read, if the last usage row was one. */
   gatewayRun: GatewayRun | null;
+  /**
+   * The same for responses that old versions wrapped into the parent's file as progress rows, one
+   * open run per session and message id. Subagents that ran side by side had their wrappers written
+   * interleaved (A, B, A, B), so the lines of one response do not stand next to each other there.
+   */
+  wrappedRuns: Map<string, GatewayRun>;
 }
 
 interface SessionState {
@@ -505,7 +511,8 @@ interface Group {
  * same id and the same request id or, where rows carry no request id, the same usage (a
  * snapshot written while the response streamed may hold less), with no row of the person,
  * of a tool or of another response in between. The run is known again by the uuid of its
- * first row, which every kind of copy keeps.
+ * first row, which every kind of copy keeps. Rows inside progress wrappers are the exception
+ * to "standing together": see FileState.wrappedRuns.
  */
 interface GatewayRun {
   session: string;
@@ -591,6 +598,7 @@ class TranscriptReader {
       lastRawTime: undefined,
       waiting: [],
       gatewayRun: null,
+      wrappedRuns: new Map(),
     };
     this.files.push(report);
     this.counters.filesRead++;
@@ -847,9 +855,24 @@ class TranscriptReader {
     const outerUuid = outer !== null ? text(outer.uuid) : null;
 
     // Only an id issued by Anthropic names a response; any other is recognised by its lines standing together.
-    const run = messageId !== null && isAnthropicMessageId(messageId) ? null : this.joinRun(f, session.id, messageId, requestId, rec);
-    // A usage row of any other response ends the run that was open.
-    f.gatewayRun = run;
+    const named = messageId !== null && isAnthropicMessageId(messageId);
+    let run: GatewayRun | null;
+    if (outer === null) {
+      run = named ? null : this.joinRun(f.gatewayRun, session.id, messageId, requestId, rec);
+      // A usage row of any other response ends the run that was open.
+      f.gatewayRun = run;
+    } else if (named) {
+      run = null;
+    } else {
+      // A wrapped row: the wrappers of subagents that ran side by side are interleaved, so the run is
+      // looked up by session and id rather than taken from the line before. Rows without an id have
+      // nothing to be looked up by and only continue the wrapped row directly before them.
+      const key = `${session.id}\u0000${messageId ?? ''}`;
+      const idless = `${session.id}\u0000`;
+      if (key !== idless) f.wrappedRuns.delete(idless);
+      run = this.joinRun(f.wrappedRuns.get(key) ?? null, session.id, messageId, requestId, rec);
+      f.wrappedRuns.set(key, run);
+    }
 
     // A wrapped message without its own timestamp was written when its wrapper was.
     const rawTime = outer !== null && Number.isNaN(timeOf(env.timestamp)) ? outer.timestamp : env.timestamp;
@@ -879,10 +902,9 @@ class TranscriptReader {
     });
   }
 
-  /** The run of lines this usage row belongs to: the one open in the file, or a new one (see GatewayRun). */
-  private joinRun(f: FileState, session: string, messageId: string | null, requestId: string | null, rec: ResponseRecord): GatewayRun {
+  /** The run of lines this usage row belongs to: the open one it continues, or a new one (see GatewayRun). */
+  private joinRun(open: GatewayRun | null, session: string, messageId: string | null, requestId: string | null, rec: ResponseRecord): GatewayRun {
     const partial = (rec.flags & ResponseFlag.PARTIAL) !== 0;
-    const open = f.gatewayRun;
     if (open !== null && open.session === session && open.messageId === messageId) {
       const sameResponse =
         open.requestId !== null && requestId !== null ? open.requestId === requestId : open.partial || partial || sameCounts(open.usage, rec);

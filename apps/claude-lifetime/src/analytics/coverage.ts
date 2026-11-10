@@ -1,7 +1,7 @@
 import { decodeLimitations, type LimitationName } from '@/core/limitations';
 import type { SourceKind } from '@/core/types';
 import { toIso, toNumber, type SqlExecutor } from '@/db/driver';
-import { dayExpr, tokenExpr, type TokenBasis } from './base';
+import { dayExpr, lastDayExpr, tokenExpr, type TokenBasis } from './base';
 
 /**
  * "What we know about your Claude history": where each number comes from and what is
@@ -96,8 +96,11 @@ export async function getCoverage(
   gapDays = 14,
 ): Promise<Coverage> {
   const day = dayExpr('$2::text');
-  // The day a cost row starts on, by the same rule: a row of a day or more is a UTC day, a row with a time of day is local.
-  const costDay = `(CASE WHEN c.bucket_seconds >= 86400 THEN (c.occurred_at AT TIME ZONE 'UTC')::date ELSE (c.occurred_at AT TIME ZONE $2::text)::date END)`;
+  // The last day a row covers: a row that adds up several days reaches to the end of its period.
+  const lastDay = lastDayExpr('$2::text');
+  // The same for a cost row: a row of a day or more is counted by UTC days, a row with a time of day is local.
+  const costDay = firstDayOf('c');
+  const costLastDay = lastDayOf('c');
   const tokens = tokenExpr(basis);
   const sources = (
     await db.query<Record<string, unknown>>(
@@ -114,7 +117,7 @@ export async function getCoverage(
          FROM data_sources s
          LEFT JOIN LATERAL (
            SELECT min(f.occurred_at) AS first_at, max(f.occurred_at) AS last_at,
-                  min(${day}) AS first_day, max(${day}) AS last_day, count(*) AS facts,
+                  min(${day}) AS first_day, max(${lastDay}) AS last_day, count(*) AS facts,
                   count(*) FILTER (WHERE f.confidence = 'exact') AS exact_facts,
                   sum(${tokens}) FILTER (WHERE f.confidence = 'exact')::bigint AS exact,
                   sum(${tokens}) FILTER (WHERE f.confidence = 'estimated')::bigint AS estimated,
@@ -123,7 +126,7 @@ export async function getCoverage(
              FROM usage_facts f WHERE f.source_id = s.id) x ON true
          LEFT JOIN LATERAL (
            SELECT min(c.occurred_at) AS first_at, max(c.occurred_at) AS last_at,
-                  min(${costDay}) AS first_day, max(${costDay}) AS last_day,
+                  min(${costDay}) AS first_day, max(${costLastDay}) AS last_day,
                   sum(c.amount_usd) AS total
              FROM reported_costs c WHERE c.source_id = s.id) rc ON true
         WHERE s.user_id = $1
@@ -135,7 +138,7 @@ export async function getCoverage(
   const totals = (
     await db.query<Record<string, unknown>>(
       `SELECT min(f.occurred_at) AS first_at, max(f.occurred_at) AS last_at,
-              min(${day})::text AS first_day, max(${day})::text AS last_day,
+              min(${day})::text AS first_day, max(${lastDay})::text AS last_day,
               COALESCE(sum(${tokens}) FILTER (WHERE f.confidence = 'exact'), 0)::bigint AS exact,
               COALESCE(sum(${tokens}) FILTER (WHERE f.confidence = 'estimated'), 0)::bigint AS estimated,
               COALESCE(sum(${tokens}) FILTER (WHERE f.method_id IS NOT NULL), 0)::bigint AS text_estimated,

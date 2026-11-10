@@ -325,7 +325,8 @@ var TranscriptReader = class {
       lastModified: source.lastModified,
       lastRawTime: void 0,
       waiting: [],
-      gatewayRun: null
+      gatewayRun: null,
+      wrappedRuns: /* @__PURE__ */ new Map()
     };
     this.files.push(report);
     this.counters.filesRead++;
@@ -562,8 +563,20 @@ var TranscriptReader = class {
     const requestId = text(env.requestId);
     const ownUuid = text(env.uuid);
     const outerUuid = outer !== null ? text(outer.uuid) : null;
-    const run = messageId !== null && isAnthropicMessageId(messageId) ? null : this.joinRun(f, session.id, messageId, requestId, rec);
-    f.gatewayRun = run;
+    const named = messageId !== null && isAnthropicMessageId(messageId);
+    let run;
+    if (outer === null) {
+      run = named ? null : this.joinRun(f.gatewayRun, session.id, messageId, requestId, rec);
+      f.gatewayRun = run;
+    } else if (named) {
+      run = null;
+    } else {
+      const key = `${session.id}\0${messageId ?? ""}`;
+      const idless = `${session.id}\0`;
+      if (key !== idless) f.wrappedRuns.delete(idless);
+      run = this.joinRun(f.wrappedRuns.get(key) ?? null, session.id, messageId, requestId, rec);
+      f.wrappedRuns.set(key, run);
+    }
     const rawTime = outer !== null && Number.isNaN(timeOf(env.timestamp)) ? outer.timestamp : env.timestamp;
     this.withTime(rawTime, f, (ts, inferred) => {
       rec.ts = ts;
@@ -581,10 +594,9 @@ var TranscriptReader = class {
       if ((rec.flags & ResponseFlag.SIDECHAIN) !== 0) session.sidechainUsage = true;
     });
   }
-  /** The run of lines this usage row belongs to: the one open in the file, or a new one (see GatewayRun). */
-  joinRun(f, session, messageId, requestId, rec) {
+  /** The run of lines this usage row belongs to: the open one it continues, or a new one (see GatewayRun). */
+  joinRun(open, session, messageId, requestId, rec) {
     const partial = (rec.flags & ResponseFlag.PARTIAL) !== 0;
-    const open = f.gatewayRun;
     if (open !== null && open.session === session && open.messageId === messageId) {
       const sameResponse = open.requestId !== null && requestId !== null ? open.requestId === requestId : open.partial || partial || sameCounts(open.usage, rec);
       if (sameResponse) {

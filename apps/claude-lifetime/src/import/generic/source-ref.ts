@@ -13,6 +13,8 @@ import { sha256Hex } from '@/core/sha256';
 
 /** Longest reference made from a name, in characters. */
 const MAX_REFERENCE_LENGTH = 48;
+/** Characters of a short hash that stands for what a longer name loses when it is cut. */
+const HASH_LENGTH = 12;
 
 /**
  * What separates the words of a name: every run of characters that are neither
@@ -28,13 +30,20 @@ export function sourceRefFromName(name: string): string {
   // Only a name that was not given stands for the unnamed source.
   if (text === '') return '';
 
-  // Cut by characters, not by UTF-16 units, so that no character is left as half a pair.
-  const words = Array.from(text.replace(SEPARATORS, '-').replace(/^-+|-+$/g, '')).slice(0, MAX_REFERENCE_LENGTH).join('');
+  // Counted and cut by characters, not by UTF-16 units, so that no character is left as half a pair.
+  const characters = Array.from(text.replace(SEPARATORS, '-').replace(/^-+|-+$/g, ''));
+  let words = characters.join('');
+  if (characters.length > MAX_REFERENCE_LENGTH) {
+    // A long name is cut, and what the cut loses is kept as a short hash of the whole name: two names
+    // that only differ after the cut ("... production cluster EU-West", "... US-East") stay two sources.
+    // The tilde cannot come out of the lines above, so no shorter name shares a reference with it.
+    words = `${characters.slice(0, MAX_REFERENCE_LENGTH - HASH_LENGTH - 1).join('')}~${sha256Hex(words).slice(0, HASH_LENGTH)}`;
+  }
   if (/[\p{L}\p{N}]/u.test(words)) return words;
 
   // A name of symbols only ("***", an emoji) has no letters to build a reference from.
   // It still is a name: a short hash keeps it apart from other such names and from the
   // unnamed source. The tilde cannot come out of the lines above, so no name made of
   // letters shares a reference with it.
-  return `~${sha256Hex(text.replace(/\s+/g, ' ')).slice(0, 12)}`;
+  return `~${sha256Hex(text.replace(/\s+/g, ' ')).slice(0, HASH_LENGTH)}`;
 }

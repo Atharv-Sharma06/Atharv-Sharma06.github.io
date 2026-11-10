@@ -52,14 +52,19 @@ export interface RecordedHistory {
   last: string;
 }
 
-/** First and last local day with any record, read from the daily series of the whole history. */
+/**
+ * First and last local day the records speak for, read from the daily series of the whole
+ * history. A row that adds up several days is counted on the day it starts and reaches to
+ * the end of its period, so the history does not end on that first day.
+ */
 export function recordedHistory(days: SeriesPoint[]): RecordedHistory | null {
   if (days.length === 0) return null;
   let first = days[0].bucket;
   let last = days[0].bucket;
   for (const d of days) {
     if (d.bucket < first) first = d.bucket;
-    if (d.bucket > last) last = d.bucket;
+    const end = d.lastDay !== undefined && d.lastDay > d.bucket ? d.lastDay : d.bucket;
+    if (end > last) last = end;
   }
   return { first, last };
 }
