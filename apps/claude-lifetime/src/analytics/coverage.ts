@@ -20,6 +20,9 @@ export interface SourceCoverage {
   lastImportAt: string | null;
   firstRecordAt: string | null;
   lastRecordAt: string | null;
+  /** The same as local dates (see Overview.firstDay). Cost reports count by their UTC day. */
+  firstDay: string | null;
+  lastDay: string | null;
   conversations: number;
   /** Processed tokens, split by confidence. */
   exactTokens: number;
@@ -34,6 +37,9 @@ export interface Coverage {
   hasSyntheticData: boolean;
   earliestRecordAt: string | null;
   latestRecordAt: string | null;
+  /** First and last local day with usage in the sources that count towards totals. */
+  earliestDay: string | null;
+  latestDay: string | null;
   sources: SourceCoverage[];
   importCount: number;
   /** Processed tokens of sources that count towards totals. */
@@ -53,6 +59,7 @@ export interface Coverage {
 const PROCESSED = `(f.input_tokens + f.output_tokens + f.cache_write_5m_tokens + f.cache_write_1h_tokens + f.cache_read_tokens + f.replay_tokens)`;
 
 export async function getCoverage(db: SqlExecutor, userId: number, timezone: string, gapDays = 14): Promise<Coverage> {
+  const day = dayExpr('$2::text');
   const sources = (
     await db.query<Record<string, unknown>>(
       `SELECT s.id, s.kind::text AS kind, s.label, s.is_synthetic, s.include_in_totals, s.exclusion_reason,
@@ -60,36 +67,40 @@ export async function getCoverage(db: SqlExecutor, userId: number, timezone: str
               (SELECT max(b.created_at) FROM import_batches b WHERE b.source_id = s.id) AS last_import_at,
               (SELECT count(*) FROM conversations c WHERE c.source_id = s.id AND c.kind IN ('chat', 'code_session'))::int AS conversations,
               LEAST(x.first_at, rc.first_at) AS first_at, GREATEST(x.last_at, rc.last_at) AS last_at,
+              LEAST(x.first_day, rc.first_day)::text AS first_day, GREATEST(x.last_day, rc.last_day)::text AS last_day,
               COALESCE(x.exact, 0) AS exact, COALESCE(x.estimated, 0) AS estimated, rc.total::text AS reported_cost
          FROM data_sources s
          LEFT JOIN LATERAL (
            SELECT min(f.occurred_at) AS first_at, max(f.occurred_at) AS last_at,
+                  min(${day}) AS first_day, max(${day}) AS last_day,
                   sum(${PROCESSED}) FILTER (WHERE f.confidence = 'exact')::bigint AS exact,
                   sum(${PROCESSED}) FILTER (WHERE f.confidence = 'estimated')::bigint AS estimated
              FROM usage_facts f WHERE f.source_id = s.id) x ON true
          LEFT JOIN LATERAL (
-           SELECT min(c.occurred_at) AS first_at, max(c.occurred_at) AS last_at, sum(c.amount_usd) AS total
+           SELECT min(c.occurred_at) AS first_at, max(c.occurred_at) AS last_at,
+                  min((c.occurred_at AT TIME ZONE 'UTC')::date) AS first_day, max((c.occurred_at AT TIME ZONE 'UTC')::date) AS last_day,
+                  sum(c.amount_usd) AS total
              FROM reported_costs c WHERE c.source_id = s.id) rc ON true
         WHERE s.user_id = $1
         ORDER BY s.created_at, s.id`,
-      [userId],
+      [userId, timezone],
     )
   ).rows;
 
   const totals = (
     await db.query<Record<string, unknown>>(
       `SELECT min(f.occurred_at) AS first_at, max(f.occurred_at) AS last_at,
+              min(${day})::text AS first_day, max(${day})::text AS last_day,
               COALESCE(sum(${PROCESSED}) FILTER (WHERE f.confidence = 'exact'), 0)::bigint AS exact,
               COALESCE(sum(${PROCESSED}) FILTER (WHERE f.confidence = 'estimated'), 0)::bigint AS estimated,
               COALESCE(sum(${PROCESSED}) FILTER (WHERE f.model_id IS NOT NULL), 0)::bigint AS with_model,
               COALESCE(sum(${PROCESSED}) FILTER (WHERE f.model_id IS NULL), 0)::bigint AS without_model
          FROM usage_facts f JOIN data_sources s ON s.id = f.source_id
         WHERE f.user_id = $1 AND s.include_in_totals`,
-      [userId],
+      [userId, timezone],
     )
   ).rows[0];
 
-  const day = dayExpr('$2::text');
   const gaps = (
     await db.query<{ from_day: string; to_day: string; days: number }>(
       `WITH days AS (
@@ -128,6 +139,8 @@ export async function getCoverage(db: SqlExecutor, userId: number, timezone: str
     lastImportAt: toIso(r.last_import_at),
     firstRecordAt: toIso(r.first_at),
     lastRecordAt: toIso(r.last_at),
+    firstDay: (r.first_day as string | null) ?? null,
+    lastDay: (r.last_day as string | null) ?? null,
     conversations: toNumber(r.conversations),
     exactTokens: toNumber(r.exact),
     estimatedTokens: toNumber(r.estimated),
@@ -139,6 +152,8 @@ export async function getCoverage(db: SqlExecutor, userId: number, timezone: str
     hasSyntheticData: mapped.some((s) => s.isSynthetic),
     earliestRecordAt: toIso(totals.first_at),
     latestRecordAt: toIso(totals.last_at),
+    earliestDay: (totals.first_day as string | null) ?? null,
+    latestDay: (totals.last_day as string | null) ?? null,
     sources: mapped,
     importCount: mapped.reduce((s, r) => s + r.imports, 0),
     exactTokens: toNumber(totals.exact),

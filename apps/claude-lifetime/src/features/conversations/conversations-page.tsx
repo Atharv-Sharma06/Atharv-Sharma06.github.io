@@ -16,7 +16,7 @@ function ConversationsRoute() {
   const params = useSearchParams();
   const target = parseTarget(params);
   const state = parseExplorerState(params);
-  return target.view === 'detail' ? <ConversationDetailView id={target.id} listState={state} /> : <Explorer state={state} />;
+  return target.view === 'detail' ? <ConversationDetailView id={target.id} listState={state} /> : <Explorer urlState={state} />;
 }
 
 export function ConversationsPage() {

@@ -340,3 +340,41 @@ describe('settings and manual entries', () => {
     expect((await getOverview(t.db, filter())).tokens).toEqual(before);
   });
 });
+
+describe('source filter', () => {
+  it('restricts every figure to the chosen kinds of source', async () => {
+    const all = await getOverview(t.db, filter());
+    const chats = await getOverview(t.db, filter({ sourceKinds: ['claude_export'] }));
+    const metered = await getOverview(t.db, filter({ sourceKinds: ['claude_code', 'api_usage_report'] }));
+    expect(chats.tokens.total).toBe(625);
+    expect(chats.tokens.exact).toBe(0);
+    expect(metered.tokens.estimated).toBe(0);
+    expect(chats.tokens.total + metered.tokens.total).toBe(all.tokens.total);
+    expect((await getOverview(t.db, filter({ sourceKinds: [] }))).tokens.total).toBe(all.tokens.total);
+  });
+});
+
+describe('first and last day of the records', () => {
+  it('follow the chart rule: a daily bucket is a UTC calendar day, a timed record a local day', async () => {
+    // The dataset's API report holds daily buckets at UTC midnight; in New York that instant is the evening before.
+    const o = await getOverview(t.db, filter({ sourceKinds: ['api_usage_report'] }));
+    expect(o.firstUsageAt).toMatch(/T00:00:00\.000Z$/);
+    expect(o.firstDay).toBe(o.firstUsageAt!.slice(0, 10));
+    expect(o.lastDay).toBe(o.lastUsageAt!.slice(0, 10));
+
+    // Timed records are assigned to the local day: the latest chat message is at 03:30 UTC on 9 March,
+    // which is still 8 March in New York.
+    const chats = await getOverview(t.db, filter({ sourceKinds: ['claude_export'] }));
+    expect(chats.lastUsageAt).toBe('2025-03-09T03:30:00.000Z');
+    expect(chats.lastDay).toBe('2025-03-08');
+
+    // Over everything, the last day is the daily bucket's own day, not the instant converted to New York.
+    const all = await getOverview(t.db, filter());
+    expect(all.lastDay).toBe('2025-03-09');
+
+    const c = await getCoverage(t.db, t.userId, 'America/New_York');
+    expect([c.earliestDay, c.latestDay]).toEqual([all.firstDay, all.lastDay]);
+    const api = c.sources.find((s) => s.kind === 'api_usage_report')!;
+    expect([api.firstDay, api.lastDay]).toEqual([o.firstDay, o.lastDay]);
+  });
+});

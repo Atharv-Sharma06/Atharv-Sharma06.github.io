@@ -69,7 +69,8 @@ export function utcOffsetLabel(timezone: string, at: Date = new Date()): string 
       .formatToParts(at)
       .find((part) => part.type === 'timeZoneName')?.value;
     if (!name) return null;
-    return name.replace(/^GMT/, 'UTC').replace('-', '−');
+    // Engines write a zero offset as "GMT" or as "GMT+00:00"; one form is shown.
+    return name === 'GMT' ? 'UTC+00:00' : name.replace(/^GMT/, 'UTC').replace('-', '−');
   } catch {
     return null;
   }

@@ -24,57 +24,32 @@ import { ConfidenceMark } from './confidence-mark';
 import { isPlainClick, onOpenClick, openConversation, takePendingFocus } from './navigation';
 import { ensurePlannerStatistics } from './planner-statistics';
 import { KindIcon, shortProject, UNTITLED } from './shared';
-import {
-  clearFilters,
-  detailHref,
-  explorerParams,
-  hasFilters,
-  pageWindow,
-  toggleSort,
-  toQuery,
-  UNKNOWN_MODEL,
-  withChange,
-  type ExplorerState,
-} from './url-state';
+import { clearFilters, detailHref, hasFilters, pageWindow, toggleSort, toQuery, UNKNOWN_MODEL, withChange, type ExplorerState } from './url-state';
+import { useExplorerState } from './use-explorer-state';
 
 /** "Every value" in a filter. Radix Select has no empty value, and no model, source or plan key looks like this. */
 const ALL = '__all__';
 const SEARCH_DELAY_MS = 250;
 
-/**
- * Writes the list state to the query string. The History API changes the URL in place:
- * nothing is requested and nothing reloads, and Next keeps useSearchParams in step.
- */
-function writeState(next: ExplorerState) {
-  const query = explorerParams(next).toString();
-  window.history.replaceState(null, '', query === '' ? window.location.pathname : `?${query}`);
-}
-
 function SearchBox({ committed, onCommit }: { committed: string; onCommit: (value: string) => void }) {
   const [text, setText] = useState(committed);
-  // `seen` is the search last found in the URL; `sent` holds what this box has written
-  // that the URL does not show yet. When the URL changes to something this box did not
-  // send (Clear filters, the back button), the text follows it. When it is our own
-  // write arriving, the text is left alone: the user may already have typed more.
-  const [sync, setSync] = useState<{ seen: string; sent: string[] }>({ seen: committed, sent: [] });
-  if (committed !== sync.seen) {
-    const arrived = sync.sent.indexOf(committed);
-    console.log('DBG sync', JSON.stringify({ committed, seen: sync.seen, sent: sync.sent, text, arrived }));
-    setSync({ seen: committed, sent: arrived >= 0 ? sync.sent.slice(arrived + 1) : [] });
-    if (arrived < 0) setText(committed);
+  // The search this box last wrote or took over. A different committed search came
+  // from somewhere else (Clear filters, the back button), and the text follows it.
+  const [basis, setBasis] = useState(committed);
+  if (committed !== basis) {
+    setBasis(committed);
+    setText(committed);
   }
-  const latest = sync.sent.length > 0 ? sync.sent[sync.sent.length - 1] : sync.seen;
 
   useEffect(() => {
     const value = text.trim();
-    if (value === latest) return;
+    if (value === basis) return;
     const timer = window.setTimeout(() => {
-      console.log('DBG write', JSON.stringify({ value, latest }));
-      setSync((s) => ({ seen: s.seen, sent: [...s.sent, value] }));
+      setBasis(value);
       onCommit(value);
     }, SEARCH_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [text, latest, onCommit]);
+  }, [text, basis, onCommit]);
 
   return (
     <div className="relative col-span-2 min-w-0 sm:flex-[1_1_15rem]">
@@ -185,8 +160,9 @@ function TableSkeleton() {
   );
 }
 
-export function Explorer({ state }: { state: ExplorerState }) {
+export function Explorer({ urlState }: { urlState: ExplorerState }) {
   const app = useApp();
+  const [state, change] = useExplorerState(urlState);
   const { resolved, settings } = app;
   const scoped = resolved.from !== null || resolved.to !== null;
   const rangeLabel = formatDayRange(resolved.from, resolved.to);
@@ -202,21 +178,18 @@ export function Explorer({ state }: { state: ExplorerState }) {
     (a) => ensurePlannerStatistics(a.db, a.dataVersion).then(() => listConversations(a.db, a.lifetime, toQuery(state, a.resolved))),
   );
 
-  // The latest state for callbacks that must not change identity on every keystroke.
-  const current = useRef(state);
-  useEffect(() => {
-    current.current = state;
-  }, [state]);
-
-  const commitSearch = useCallback((search: string) => writeState(withChange(current.current, { search })), []);
+  const commitSearch = useCallback((search: string) => change((s) => withChange(s, { search })), [change]);
 
   const shown = pageWindow(state.page, page.data?.total ?? 0);
 
   // A page beyond the end (a stale link, or rows removed by a deleted import) falls back to the last page.
   const outOfRange = page.data !== undefined && !page.isPlaceholderData && page.data.total > 0 && page.data.rows.length === 0;
+  const lastPage = shown.pages;
   useEffect(() => {
-    if (outOfRange) writeState({ ...current.current, page: shown.pages });
-  }, [outOfRange, shown.pages]);
+    if (!outOfRange) return;
+    const timer = window.setTimeout(() => change((s) => ({ ...s, page: lastPage })), 0);
+    return () => window.clearTimeout(timer);
+  }, [outOfRange, lastPage, change]);
 
   const modelOptions = useMemo(() => {
     const named = (models.data ?? []).filter((m) => m.modelKey !== null).map((m) => ({ value: m.modelKey as string, label: m.displayName }));
@@ -254,7 +227,7 @@ export function Explorer({ state }: { state: ExplorerState }) {
 
   const sortProps = (sort: ConversationSort) => ({
     sort: state.sort === sort ? state.direction : null,
-    onSort: () => writeState(toggleSort(state, sort)),
+    onSort: () => change((s) => toggleSort(s, sort)),
   });
 
   const openRow = (event: MouseEvent<HTMLTableRowElement>, id: number) => {
@@ -274,7 +247,7 @@ export function Explorer({ state }: { state: ExplorerState }) {
   }, [listed]);
 
   const goToPage = (next: number) => {
-    writeState({ ...state, page: next });
+    change((s) => ({ ...s, page: next }));
     // After "Next" at the bottom of a long page, the top of the new page should be in view.
     const top = frame.current?.getBoundingClientRect().top ?? 0;
     if (top < 0) frame.current?.scrollIntoView({ block: 'start' });
@@ -317,26 +290,26 @@ export function Explorer({ state }: { state: ExplorerState }) {
             <Select
               label="Model"
               value={state.model ?? ALL}
-              onChange={(v) => writeState(withChange(state, { model: v === ALL ? null : v }))}
+              onChange={(v) => change((s) => withChange(s, { model: v === ALL ? null : v }))}
               options={modelOptions}
               className="w-full sm:w-[12.5rem]"
             />
             <Select
               label="Source"
               value={state.source ?? ALL}
-              onChange={(v) => writeState(withChange(state, { source: v === ALL ? null : (v as SourceKind) }))}
+              onChange={(v) => change((s) => withChange(s, { source: v === ALL ? null : (v as SourceKind) }))}
               options={sourceOptions}
               className="w-full sm:w-[11rem]"
             />
             <Select
               label="Plan when the conversation started"
               value={state.plan ?? ALL}
-              onChange={(v) => writeState(withChange(state, { plan: v === ALL ? null : v }))}
+              onChange={(v) => change((s) => withChange(s, { plan: v === ALL ? null : v }))}
               options={planOptions}
               className="w-full sm:w-[13.5rem]"
             />
             {filtered ? (
-              <Button variant="ghost" onClick={() => writeState(clearFilters(state))}>
+              <Button variant="ghost" onClick={() => change(clearFilters)}>
                 Clear filters
               </Button>
             ) : null}
@@ -357,7 +330,7 @@ export function Explorer({ state }: { state: ExplorerState }) {
                 <EmptyState
                   title="No conversations match these filters"
                   action={
-                    <Button onClick={() => writeState(clearFilters(state))}>Clear filters</Button>
+                    <Button onClick={() => change(clearFilters)}>Clear filters</Button>
                   }
                 >
                   <p>Nothing matches {new Intl.ListFormat('en', { type: 'conjunction' }).format(activeFilters)}.</p>

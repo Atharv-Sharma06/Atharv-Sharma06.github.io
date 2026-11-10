@@ -50,7 +50,7 @@
   --color-series-none: #5d5d69; /* no identity: unknown model, no plan */
 
   /* sequential violet, dark surface: more is brighter */
-  --color-seq-0: #18181f;
+  --color-seq-0: #1f1f29; /* "none": clearly a cell, clearly empty, on the #111116 surface */
   --color-seq-1: #2a2650;
   --color-seq-2: #433b85;
   --color-seq-3: #6459c0;

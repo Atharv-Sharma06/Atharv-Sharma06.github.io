@@ -11,7 +11,7 @@ import {
 const day = (iso: string) => Date.parse(`${iso}T00:00:00Z`);
 
 const side = (over: Partial<SideStats> = {}): SideStats => ({
-  tokens: 0, exact: 0, estimated: 0, conversations: 0, messages: 0, activeDays: 0, firstAt: null, lastAt: null, spanDays: 0, value: ZERO_FIGURES, ...over,
+  tokens: 0, exact: 0, estimated: 0, conversations: 0, messages: 0, activeDays: 0, firstAt: null, lastAt: null, firstDay: null, lastDay: null, spanDays: 0, value: ZERO_FIGURES, ...over,
 });
 
 const NONE: Comparability = { lengths: null, measurement: null, firstRecord: null, short: [] };

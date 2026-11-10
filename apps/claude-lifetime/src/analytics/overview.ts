@@ -26,6 +26,13 @@ export interface Overview {
   averageConversationLength: number | null;
   firstUsageAt: string | null;
   lastUsageAt: string | null;
+  /**
+   * First and last day with usage as local dates, by the same rule the charts use
+   * (daily aggregates are UTC calendar days). Use these for display, not the instants:
+   * converting a daily bucket's instant to a timezone west of UTC lands on the day before.
+   */
+  firstDay: string | null;
+  lastDay: string | null;
   activeDays: number;
   mostActiveDay: {
     day: string;
@@ -79,6 +86,7 @@ export async function getOverview(db: SqlExecutor, filter: AnalyticsFilter): Pro
               COALESCE(sum(f.assistant_message_count), 0)::bigint AS assistant_messages,
               COALESCE(sum(f.request_count), 0)::bigint AS requests,
               min(f.occurred_at) AS first_at, max(f.occurred_at) AS last_at,
+              min(${f.day})::text AS first_day, max(${f.day})::text AS last_day,
               count(DISTINCT ${f.day})::int AS active_days
          FROM ${f.from} WHERE ${f.where}`,
       p.values,
@@ -153,6 +161,8 @@ export async function getOverview(db: SqlExecutor, filter: AnalyticsFilter): Pro
     averageConversationLength: withMessages > 0 ? conversationMessages / withMessages : null,
     firstUsageAt: toIso(totals.first_at),
     lastUsageAt: toIso(totals.last_at),
+    firstDay: (totals.first_day as string | null) ?? null,
+    lastDay: (totals.last_day as string | null) ?? null,
     activeDays: toNumber(totals.active_days),
     mostActiveDay,
   };

@@ -118,8 +118,8 @@ export function BeforeAfterCard({ data, inConversations, historyStart, timezone,
         <CardBody>
           <EmptyState title="This comparison needs a paid period" action={action}>
             <p>
-              {periodCount === 1 ? 'The period you entered is' : `None of the ${periodCount} periods you entered is`} on a paid plan. Add the period in which you
-              first paid for Claude and your usage is split at the day it started.
+              {periodCount === 1 ? 'The period you entered is not on a paid plan.' : `None of the ${periodCount} periods you entered is on a paid plan.`} Add the period in
+              which you first paid for Claude, and your usage is split at the day it started.
             </p>
           </EmptyState>
         </CardBody>

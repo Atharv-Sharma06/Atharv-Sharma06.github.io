@@ -61,8 +61,8 @@ export function SubscriptionsPage() {
     const element = opener.current;
     opener.current = null;
     if (!element) return;
-    // One tick later, after the dialog's own focus handling has run.
-    const timer = window.setTimeout(() => (element.isConnected ? element : document.getElementById('main'))?.focus(), 0);
+    // One tick later, after the dialog's own focus handling has run. The view stays where it is.
+    const timer = window.setTimeout(() => (element.isConnected ? element : document.getElementById('main'))?.focus({ preventScroll: true }), 0);
     return () => window.clearTimeout(timer);
   }, [dialogOpen]);
 
@@ -125,7 +125,7 @@ export function SubscriptionsPage() {
           {periodCount === 0 || !timeline.data || !firstSegment ? (
             <EmptyState title="No subscription periods yet" action={addButton}>
               <p>
-                Your imported files do not say which plan you were on, and nothing is assumed, so this page starts empty. Enter when each plan started and ended to get:
+                The files you import do not say which plan you were on, and nothing is assumed, so this page starts empty. Enter when each plan started and ended to get:
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
                 <li>a timeline of your plans, with the tokens, conversations and equivalent API value of each period</li>

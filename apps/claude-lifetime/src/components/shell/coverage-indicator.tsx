@@ -5,8 +5,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverClose } from '@/components/ui/overlay';
 import { cn } from '@/lib/cn';
-import { formatInstant, formatTokens, plural } from '@/lib/format';
-import { useApp } from '@/state/app';
+import { formatDay, formatTokens, plural } from '@/lib/format';
 import { useCoverage } from '@/state/queries';
 
 export const SOURCE_KIND_LABEL: Record<string, string> = {
@@ -21,15 +20,11 @@ export const SOURCE_KIND_LABEL: Record<string, string> = {
 
 /** Always-visible summary of what the numbers on screen are based on. */
 export function CoverageIndicator() {
-  const { settings } = useApp();
   const { data } = useCoverage();
   if (!data) return <div className="h-9 w-40 animate-pulse rounded-[var(--radius-control)] bg-raised" aria-hidden="true" />;
 
   const counted = data.sources.filter((s) => s.includeInTotals);
-  const span =
-    data.earliestRecordAt && data.latestRecordAt
-      ? `${formatInstant(data.earliestRecordAt, settings.timezone)} – ${formatInstant(data.latestRecordAt, settings.timezone)}`
-      : null;
+  const span = data.earliestDay && data.latestDay ? `${formatDay(data.earliestDay)} – ${formatDay(data.latestDay)}` : null;
   const label = !data.hasData ? 'No data yet' : data.hasSyntheticData ? 'Demo data' : plural(counted.length, 'source');
   const estimatedShare = data.exactTokens + data.estimatedTokens > 0 ? data.estimatedTokens / (data.exactTokens + data.estimatedTokens) : 0;
 

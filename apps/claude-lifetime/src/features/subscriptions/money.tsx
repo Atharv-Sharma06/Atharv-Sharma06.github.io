@@ -82,7 +82,7 @@ export function MoneyCard({ spend, value, scenario, hasUsage, periodCount }: Mon
                     <p className="mt-2 max-w-[58ch] text-[13px] text-ink-2">
                       {periodCount === 0
                         ? 'Add your periods with the monthly price you paid, and the payments are added up here.'
-                        : 'None of your periods has a monthly price. Edit a paid period and enter what you paid per month, and the payments are added up here.'}
+                        : 'None of your periods has a monthly price. Enter what you paid per month on the periods you paid for, and the payments are added up here.'}
                     </p>
                   </dd>
                 )}
@@ -127,7 +127,10 @@ export function MoneyCard({ spend, value, scenario, hasUsage, periodCount }: Mon
             </p>
           ) : value ? (
             <>
-              <p className="mt-4 text-[13px] text-ink-2">Your whole recorded history at API list prices</p>
+              <p className="mt-4 text-[13px] text-ink-2">
+                Your whole recorded history at API list prices
+                {scenariosDiffer ? (scenario === 'cached' ? ', with a 5-minute prompt cache assumed for chat usage' : ', without prompt caching for chat usage') : ''}
+              </p>
               <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                 {level === 'unavailable' ? <Unavailable className={FIGURE} /> : <span className={FIGURE}>{formatUsd(leadingUsd(value, scenario), { cents: true })}</span>}
                 <ConfidenceBadge

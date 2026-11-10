@@ -1,6 +1,6 @@
 import type { Granularity } from '@/analytics/base';
 import type { SeriesPoint } from '@/analytics/overview';
-import { addDays, addMonths, daysBetween, formatDay, formatMonth } from './format';
+import { addDays, addMonths, daysBetween, formatDay } from './format';
 
 /**
  * Shaping of time series for charts. The analytics queries only return buckets that
@@ -58,14 +58,23 @@ export function bucketLabel(bucket: string, granularity: Granularity): string {
   }
 }
 
-export function bucketTick(bucket: string, granularity: Granularity): string {
+/**
+ * Axis label of a bucket. When the axis spans more than one calendar year every label
+ * carries its year, because a narrow chart may show only a few of them.
+ */
+export function bucketTick(bucket: string, granularity: Granularity, multiYear = false): string {
   const d = new Date(`${bucket}T00:00:00Z`);
+  const year = `’${bucket.slice(2, 4)}`;
   switch (granularity) {
     case 'day':
     case 'week':
-      return d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' });
-    case 'month':
-      return d.getUTCMonth() === 0 ? formatMonth(bucket) : d.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+      return multiYear
+        ? `${d.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })} ${year}`
+        : d.toLocaleDateString('en-US', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+    case 'month': {
+      const month = d.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+      return multiYear ? `${month} ${year}` : month;
+    }
     case 'year':
       return bucket.slice(0, 4);
   }

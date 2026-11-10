@@ -14,7 +14,7 @@ import { buttonClass } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { EmptyState, ErrorNote, Skeleton } from '@/components/ui/feedback';
 import { cn } from '@/lib/cn';
-import { dayInZone, formatDay, formatDayRange, formatDecimal, formatInt, formatShare, formatSpan, formatTokens, formatUsd, plural } from '@/lib/format';
+import { formatDay, formatDayRange, formatDecimal, formatInt, formatShare, formatSpan, formatTokens, formatUsd, plural } from '@/lib/format';
 import { autoGranularity, pivot, spanOf } from '@/lib/series';
 import { useCountUp } from '@/lib/use-count-up';
 import { rangeKey, useApp, useData } from '@/state/app';
@@ -106,14 +106,12 @@ function Hero({
   basis,
   scoped,
   rangeLabel,
-  timezone,
   className,
 }: {
   overview: Overview;
   basis: 'processed' | 'new';
   scoped: boolean;
   rangeLabel: string;
-  timezone: string;
   className?: string;
 }) {
   const t = overview.tokens;
@@ -153,9 +151,9 @@ function Hero({
       </div>
       <div className="min-w-0 border-line md:border-l md:pl-8">
         <Composition tokens={t} basis={basis} />
-        {overview.firstUsageAt && overview.lastUsageAt ? (
+        {overview.firstDay && overview.lastDay ? (
           <p className="mt-5 text-[13px] text-ink-2">
-            Records from {formatDay(dayInZone(overview.firstUsageAt, timezone))} to {formatDay(dayInZone(overview.lastUsageAt, timezone))}:{' '}
+            Records from {formatDay(overview.firstDay)} to {formatDay(overview.lastDay)}:{' '}
             {plural(overview.activeDays, 'active day')}
             {overview.requests > 0 ? `, ${formatInt(overview.requests)} model requests` : ''}.
           </p>
@@ -170,13 +168,11 @@ function SubscriptionSide({
   side,
   data,
   scoped,
-  timezone,
 }: {
   label: string;
   side: 'before' | 'after';
   data: BeforeAfter;
   scoped: boolean;
-  timezone: string;
 }) {
   if (!data.split) {
     return (
@@ -222,7 +218,7 @@ function SubscriptionSide({
         <div className="flex justify-between gap-3">
           <dt>Records</dt>
           <dd className="tabular text-right text-ink">
-            {stats.firstAt && stats.lastAt ? `${formatDay(dayInZone(stats.firstAt, timezone))} – ${formatDay(dayInZone(stats.lastAt, timezone))}` : '–'}
+            {stats.firstDay && stats.lastDay ? `${formatDay(stats.firstDay)} – ${formatDay(stats.lastDay)}` : '–'}
           </dd>
         </div>
         <div className="flex justify-between gap-3">
@@ -288,8 +284,8 @@ export function OverviewPage() {
   const beforeAfter = useData(['before-after', rangeKey(app), settings.assumedModelKey], (a) => getBeforeAfter(a.db, a.filter, valueOptions));
   const value = useData(['api-value', rangeKey(app), settings.assumedModelKey], (a) => getApiValue(a.db, a.filter, valueOptions));
 
-  const firstDay = resolved.from ?? (overview.data?.firstUsageAt ? dayInZone(overview.data.firstUsageAt, settings.timezone) : null);
-  const lastDay = resolved.to ?? (overview.data?.lastUsageAt ? dayInZone(overview.data.lastUsageAt, settings.timezone) : null);
+  const firstDay = resolved.from ?? overview.data?.firstDay ?? null;
+  const lastDay = resolved.to ?? overview.data?.lastDay ?? null;
   const granularity = autoGranularity(spanOf(firstDay, lastDay));
   const series = useData(['series', 'confidence', granularity, rangeKey(app)], (a) => getTimeSeries(a.db, a.filter, granularity, 'confidence'));
 
@@ -330,7 +326,7 @@ export function OverviewPage() {
       ) : (
         <div className={cn('space-y-4 transition-opacity', overview.isPlaceholderData && 'opacity-70')}>
           <div className="grid gap-4 lg:grid-cols-3">
-            <Hero overview={overview.data} basis={settings.basis} scoped={scoped} rangeLabel={rangeLabel} timezone={settings.timezone} className="lg:col-span-2" />
+            <Hero overview={overview.data} basis={settings.basis} scoped={scoped} rangeLabel={rangeLabel} className="lg:col-span-2" />
             <MetricCard
               label="Total conversations"
               value={formatInt(overview.data.conversations.total)}
@@ -367,10 +363,10 @@ export function OverviewPage() {
                       <dd className="tabular text-ink">{formatDecimal(overview.data.averageConversationLength, 1)}</dd>
                     </div>
                   ) : null}
-                  {overview.data.firstUsageAt ? (
+                  {overview.data.firstDay ? (
                     <div className="flex justify-between gap-3">
                       <dt>Earliest record</dt>
-                      <dd className="tabular text-ink">{formatDay(dayInZone(overview.data.firstUsageAt, settings.timezone))}</dd>
+                      <dd className="tabular text-ink">{formatDay(overview.data.firstDay)}</dd>
                     </div>
                   ) : null}
                 </dl>
@@ -381,8 +377,8 @@ export function OverviewPage() {
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {beforeAfter.data ? (
               <>
-                <SubscriptionSide label="Before subscription" side="before" data={beforeAfter.data} scoped={scoped} timezone={settings.timezone} />
-                <SubscriptionSide label="After subscription" side="after" data={beforeAfter.data} scoped={scoped} timezone={settings.timezone} />
+                <SubscriptionSide label="Before subscription" side="before" data={beforeAfter.data} scoped={scoped} />
+                <SubscriptionSide label="After subscription" side="after" data={beforeAfter.data} scoped={scoped} />
               </>
             ) : (
               <>

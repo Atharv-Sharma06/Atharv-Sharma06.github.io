@@ -254,7 +254,8 @@ async function aggregateRanges(
             count(DISTINCT f.conversation_id)::int AS conversations,
             sum(f.user_message_count + f.assistant_message_count)::bigint AS messages,
             count(DISTINCT ${f.day})::int AS active_days,
-            min(f.occurred_at) AS first_at, max(f.occurred_at) AS last_at
+            min(f.occurred_at) AS first_at, max(f.occurred_at) AS last_at,
+            min(${f.day})::text AS first_day, max(${f.day})::text AS last_day
        FROM ${f.from} ${join(p.add(starts), p.add(ends))}
       WHERE ${f.where} GROUP BY 1`,
     p.values,
@@ -313,6 +314,9 @@ export interface SideStats {
   activeDays: number;
   firstAt: string | null;
   lastAt: string | null;
+  /** First and last local day with usage on this side (see Overview.firstDay). */
+  firstDay: string | null;
+  lastDay: string | null;
   /** Calendar days the side spans: first record to the split, or the split to the last record. */
   spanDays: number;
   value: ValueFigures;
@@ -354,6 +358,8 @@ export async function getBeforeAfter(db: SqlExecutor, filter: AnalyticsFilter, o
       activeDays: toNumber(r?.active_days),
       firstAt,
       lastAt,
+      firstDay: (r?.first_day as string | null) ?? null,
+      lastDay: (r?.last_day as string | null) ?? null,
       spanDays: r ? Math.max(1, Math.ceil(spanMs / DAY_MS)) : 0,
       value: values.get(String(idx)) ?? ZERO_FIGURES,
     };

@@ -69,7 +69,8 @@ export function factsFrom(filter: AnalyticsFilter, p: Params): { from: string; w
   const conditions = [`f.user_id = ${p.add(filter.userId)}`, `s.include_in_totals`, `${tz} IS NOT NULL`];
   if (filter.from) conditions.push(`${day} >= ${p.add(filter.from)}::date`);
   if (filter.to) conditions.push(`${day} <= ${p.add(filter.to)}::date`);
-  if (filter.sourceKinds && filter.sourceKinds.length > 0) conditions.push(`s.kind = ANY(${p.add(filter.sourceKinds)}::source_kind[])`);
+  // Compared as text: the driver can only send a JavaScript array for a built-in array type, not for an enum's.
+  if (filter.sourceKinds && filter.sourceKinds.length > 0) conditions.push(`s.kind::text = ANY(${p.add(filter.sourceKinds)}::text[])`);
   if (filter.conversationId) conditions.push(`f.conversation_id = ${p.add(filter.conversationId)}`);
   return {
     from: `usage_facts f JOIN data_sources s ON s.id = f.source_id`,

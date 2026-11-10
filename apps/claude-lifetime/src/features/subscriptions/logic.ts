@@ -214,7 +214,7 @@ export interface AxisLabel {
  */
 export function placeAxisLabels(width: number, candidates: AxisLabel[], options: { charWidth?: number; spacing?: number } = {}): AxisLabel[] {
   const charWidth = options.charWidth ?? 7;
-  const spacing = options.spacing ?? 14;
+  const spacing = options.spacing ?? 10;
   const taken: Array<[number, number]> = [];
   const placed: AxisLabel[] = [];
   for (const label of candidates) {
@@ -340,22 +340,21 @@ export interface Figure {
 export function sideFigure(mode: CompareMode, side: SideStats | null, inConversations: ConversationUsage | null): Figure | null {
   if (!side || side.spanDays <= 0) return null;
   if (mode === 'total') return { value: side.tokens, exact: side.exact, estimated: side.estimated };
-  if (mode === 'conversation') {
-    if (!inConversations || inConversations.conversations <= 0) return null;
-    const n = inConversations.conversations;
-    return { value: inConversations.tokens / n, exact: inConversations.exact / n, estimated: inConversations.estimated / n };
-  }
-  const unitDays = MODE_DAYS[mode] ?? 1;
-  const rate = (tokens: number) => (tokens / side.spanDays) * unitDays;
-  return { value: rate(side.tokens), exact: rate(side.exact), estimated: rate(side.estimated) };
+
+  const parts = mode === 'conversation' ? inConversations : side;
+  if (!parts) return null;
+  const share = (tokens: number) =>
+    mode === 'conversation' ? perConversation(tokens, inConversations?.conversations ?? 0) : ratePer(tokens, side.spanDays, MODE_DAYS[mode] ?? 1);
+  const value = share(parts.tokens);
+  return value === null ? null : { value, exact: share(parts.exact) ?? 0, estimated: share(parts.estimated) ?? 0 };
 }
 
 /** One side is at least this many times as long as the other: their totals are not comparable. */
-export const LENGTH_FACTOR = 2;
+const LENGTH_FACTOR = 2;
 /** A side shorter than this is too short for a steady average, and no ratio is shown. */
-export const MIN_RATE_DAYS = 14;
+const MIN_RATE_DAYS = 14;
 /** "Mostly metered": more than this share of a side's tokens come from sources that count them. */
-export const MOSTLY_METERED = 0.5;
+const MOSTLY_METERED = 0.5;
 
 export type Side = 'before' | 'after';
 

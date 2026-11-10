@@ -141,13 +141,17 @@ export function SeriesChart({
   const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
   const patternId = (i: number) => `hatch-${uid}-${i}`;
   const fillOf = (s: ChartSeries, i: number) => (s.estimated ? `url(#${patternId(i)})` : s.color);
-  const dense = rows.length > 70;
+  // Few bars get a gap and a hairline in the surface colour between stacked segments; many bars get
+  // thinner gaps, and a great many are drawn edge to edge so they read as one shape.
+  const sparse = rows.length <= 60;
+  const dense = rows.length > 160;
   const showBrush = zoomable && rows.length > 12;
+  const multiYear = rows.length > 1 && rows[0].bucket.slice(0, 4) !== rows[rows.length - 1].bucket.slice(0, 4);
 
   return (
     <div role="img" aria-label={ariaLabel} style={{ height: height + (showBrush ? 44 : 0) }} className="w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={rows} margin={{ top: 8, right: 4, bottom: 0, left: 0 }} barCategoryGap={dense ? 0 : '18%'} accessibilityLayer={false}>
+        <ComposedChart data={rows} margin={{ top: 8, right: 4, bottom: 0, left: 0 }} barCategoryGap={dense ? 0 : sparse ? '18%' : '12%'} accessibilityLayer={false}>
           <defs>
             {series.map((s, i) =>
               s.estimated ? (
@@ -161,7 +165,7 @@ export function SeriesChart({
           <CartesianGrid vertical={false} stroke="var(--color-line)" />
           <XAxis
             dataKey="bucket"
-            tickFormatter={(b: string) => bucketTick(b, granularity)}
+            tickFormatter={(b: string) => bucketTick(b, granularity, multiYear)}
             tick={{ fill: 'var(--color-ink-3)', fontSize: 12 }}
             tickLine={false}
             axisLine={{ stroke: 'var(--color-line-strong)' }}
@@ -205,8 +209,8 @@ export function SeriesChart({
                   fill={fillOf(s, i)}
                   maxBarSize={24}
                   isAnimationActive={false}
-                  stroke={dense ? undefined : 'var(--color-surface)'}
-                  strokeWidth={dense ? 0 : 1}
+                  stroke={sparse ? 'var(--color-surface)' : undefined}
+                  strokeWidth={sparse ? 1 : 0}
                 />
               ))}
             </BarStack>
@@ -252,7 +256,7 @@ export function SeriesChart({
               travellerWidth={9}
               stroke="var(--color-ink-3)"
               fill="var(--color-page)"
-              tickFormatter={(b: string) => bucketTick(b, granularity)}
+              tickFormatter={(b: string) => bucketTick(b, granularity, multiYear)}
             />
           ) : null}
         </ComposedChart>

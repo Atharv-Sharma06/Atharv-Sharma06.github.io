@@ -8,8 +8,7 @@ import { SOURCE_KIND_LABEL } from '@/components/shell/coverage-indicator';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { LIMITATION_TEXT } from '@/core/limitations';
 import { cn } from '@/lib/cn';
-import { formatDay, formatInstant, formatInt, formatShare, formatTokens, formatUsd, plural } from '@/lib/format';
-import { useApp } from '@/state/app';
+import { formatDay, formatInt, formatShare, formatTokens, formatUsd, plural } from '@/lib/format';
 
 function Group({ icon, tone, title, children }: { icon: typeof CircleCheck; tone: string; title: string; children: ReactNode }) {
   const Icon = icon;
@@ -31,8 +30,6 @@ function Group({ icon, tone, title, children }: { icon: typeof CircleCheck; tone
  * total is not known to any source, so there is no honest denominator for it.
  */
 export function CoveragePanel({ coverage }: { coverage: Coverage }) {
-  const { settings } = useApp();
-  const tz = settings.timezone;
   const counted = coverage.sources.filter((s) => s.includeInTotals);
   const kinds = new Set(counted.map((s) => s.kind));
   const hasExact = coverage.exactTokens > 0;
@@ -56,8 +53,8 @@ export function CoveragePanel({ coverage }: { coverage: Coverage }) {
       />
       <CardBody>
         <dl className="mb-6 grid gap-x-8 gap-y-4 rounded-[var(--radius-control)] border border-line px-4 py-3.5 text-[13px] sm:grid-cols-2 lg:grid-cols-5">
-          <Summary label="Earliest record" value={coverage.earliestRecordAt ? formatInstant(coverage.earliestRecordAt, tz) : '–'} />
-          <Summary label="Latest record" value={coverage.latestRecordAt ? formatInstant(coverage.latestRecordAt, tz) : '–'} />
+          <Summary label="Earliest record" value={formatDay(coverage.earliestDay)} />
+          <Summary label="Latest record" value={formatDay(coverage.latestDay)} />
           <Summary label="Sources counted" value={`${counted.length} of ${coverage.sources.length}`} detail={plural(coverage.importCount, 'import')} />
           <Summary
             label="Exact usage"
@@ -103,7 +100,7 @@ export function CoveragePanel({ coverage }: { coverage: Coverage }) {
                       {s.reportedCostUsd !== null ? <span className="block text-xs text-ink-3">{formatUsd(s.reportedCostUsd)} of billed cost reported</span> : null}
                     </th>
                     <td className="whitespace-nowrap px-3 py-2 text-ink-2">
-                      {s.firstRecordAt ? `${formatInstant(s.firstRecordAt, tz)} – ${formatInstant(s.lastRecordAt, tz)}` : 'No dated records'}
+                      {s.firstDay ? `${formatDay(s.firstDay)} – ${formatDay(s.lastDay)}` : 'No dated records'}
                     </td>
                     <td className="tabular px-3 py-2 text-right text-ink">{s.exactTokens > 0 ? formatTokens(s.exactTokens) : '–'}</td>
                     <td className="tabular px-3 py-2 text-right text-ink">{s.estimatedTokens > 0 ? formatTokens(s.estimatedTokens) : '–'}</td>
