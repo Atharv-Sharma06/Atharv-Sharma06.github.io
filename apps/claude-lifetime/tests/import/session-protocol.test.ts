@@ -440,7 +440,7 @@ describe('with the real import worker', () => {
     expect(locks.held.has(LOCK)).toBe(false);
   });
 
-  it('reads a ZIP of a Claude Code folder, and on the second reading skips the files it knows', async () => {
+  it('reads a ZIP of a Claude Code folder, and adds nothing when the same archive is read again', async () => {
     const day = new Date(2026, 0, 15, 12, 0, 0);
     const transcript = (session: string, responses: number) =>
       jsonl([
@@ -471,12 +471,12 @@ describe('with the real import worker', () => {
     const first = await session.prepare(selection, found, { now: LATER });
     expect(first.parsed).toMatchObject({ fileName: 'claude.zip (2 transcript files)', stats: { filesRead: 2, filesSkippedUnchanged: 0 } });
     await session.commit(first);
-    const synced = await t.db.query<{ path: string }>(`SELECT path FROM synced_files ORDER BY path`);
-    expect(synced.rows.map((r) => r.path)).toEqual(['claude.zip/.claude/projects/-home-alex-demo/s1.jsonl', 'claude.zip/.claude/projects/-home-alex-demo/s2.jsonl']);
+    // Files from an archive are not remembered as synced: the next archive usually has another name.
+    expect((await t.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM synced_files`)).rows[0].n).toBe(0);
     expect((await t.db.query<{ n: number }>(`SELECT COALESCE(sum(request_count), 0)::int AS n FROM usage_records`)).rows[0].n).toBe(5);
 
     const second = await session.prepare(selection, await session.detect(selection), { now: LATER });
-    expect(second.parsed.stats).toMatchObject({ filesRead: 0, filesSkippedUnchanged: 2 });
+    expect(second.parsed.stats).toMatchObject({ filesRead: 2, filesSkippedUnchanged: 0 });
     expect(second.preview.nothingNew).toBe(true);
     await session.discard();
     expect(locks.held.has(LOCK)).toBe(false);

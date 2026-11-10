@@ -118,6 +118,22 @@ test('a ZIP of a Claude Code folder is read without being unpacked first', async
   expect(await lifetimeTokens(page)).toBe(fromArchive);
 });
 
+test('a damaged archive inside a ZIP is named in the message, not reported as a network failure', async ({ page }, testInfo) => {
+  const inner = zipSync({ 'usage.csv': strToU8('date,input_tokens\n2026-01-01,5\n'.repeat(50)) }, { level: 9 });
+  const outer = zipSync({ 'parts/inner.zip': [inner, { level: 9 }] });
+  // The directory says the inner archive unpacks to more than it does, as after damage in transit.
+  const view = new DataView(outer.buffer);
+  for (let p = 0; p + 46 <= outer.length; p++) {
+    if (view.getUint32(p, true) === 0x02014b50) view.setUint32(p + 24, view.getUint32(p + 24, true) + 10, true);
+  }
+  const file = testInfo.outputPath('outer.zip');
+  writeFileSync(file, outer);
+  await chooseFiles(page, file);
+  await expect(page.getByRole('heading', { name: 'This import did not work' })).toBeVisible();
+  await expect(page.getByText('"parts/inner.zip" in the ZIP archive is damaged and could not be unpacked.')).toBeVisible();
+  await expect(page.getByText('Failed to fetch')).toHaveCount(0);
+});
+
 test('an API usage report spread over two pages is imported in one go', async ({ page }) => {
   const pages = [fixture('api-reports/usage-report.daily.page-1.json'), fixture('api-reports/usage-report.daily.page-2.json')];
   // What the two files state together, worked out here from the files themselves.

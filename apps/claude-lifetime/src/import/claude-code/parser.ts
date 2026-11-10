@@ -84,21 +84,31 @@ function cancelIfAborted(ctx: ParseContext): void {
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
 
-function deferralWarnings(deferredResponses: number, deferredPrompts: number): ParseWarning[] {
+/**
+ * What was set aside for later. `fromArchive`: the files come from ZIP archives, which never change, so
+ * importing the same archive again would count a response as far as it had been written when the archive
+ * was made: the advice is to import the folder, or an archive made later.
+ */
+function deferralWarnings(deferredResponses: number, deferredPrompts: number, fromArchive = false): ParseWarning[] {
   const warnings: ParseWarning[] = [];
+  const later = 'To count them in full, import your Claude Code folder, or a ZIP archive made after the session went on; importing this archive again would count only what it holds.';
   if (deferredResponses > 0) {
     warnings.push({
       code: 'in_progress_deferred',
-      message:
-        `${plural(deferredResponses, 'response is', 'responses are')} still being written by Claude Code and ` +
-        `${deferredResponses === 1 ? 'was' : 'were'} left out for now. Import again in a few minutes to add ${deferredResponses === 1 ? 'it' : 'them'}.`,
+      message: fromArchive
+        ? `${plural(deferredResponses, 'response was', 'responses were')} still being written by Claude Code when the archive was made and ` +
+          `${deferredResponses === 1 ? 'was' : 'were'} left out. ${later}`
+        : `${plural(deferredResponses, 'response is', 'responses are')} still being written by Claude Code and ` +
+          `${deferredResponses === 1 ? 'was' : 'were'} left out for now. Import again in a few minutes to add ${deferredResponses === 1 ? 'it' : 'them'}.`,
       count: deferredResponses,
     });
   }
   if (deferredPrompts > 0) {
     warnings.push({
       code: 'prompts_deferred',
-      message: `${plural(deferredPrompts, 'prompt has', 'prompts have')} no recorded answer yet and will be counted together with the answer.`,
+      message: fromArchive
+        ? `${plural(deferredPrompts, 'prompt has', 'prompts have')} no answer in the archive yet and ${deferredPrompts === 1 ? 'was' : 'were'} left out. ${later}`
+        : `${plural(deferredPrompts, 'prompt has', 'prompts have')} no recorded answer yet and will be counted together with the answer.`,
       count: deferredPrompts,
     });
   }
@@ -160,9 +170,9 @@ export const claudeCodeParser: ImportParser = {
         sample: extraction.samples.malformedLine,
       });
     }
+    // A transcript in a ZIP archive does not change: what is missing from it now does not follow later.
+    const fromArchive = files.every((f) => f.archive !== undefined);
     if (c.filesUnreadable > 0) {
-      // A transcript in a ZIP archive does not change; one that cannot be unpacked to the end is damaged.
-      const fromArchive = files.every((f) => f.archive !== undefined);
       warnings.push({
         code: 'unreadable_files',
         message: fromArchive
@@ -186,13 +196,16 @@ export const claudeCodeParser: ImportParser = {
         count: c.rowsWithoutTimestamp,
       });
     }
-    warnings.push(...deferralWarnings(deferral.deferredResponses, deferral.deferredPrompts), ...outcome.warnings);
+    warnings.push(...deferralWarnings(deferral.deferredResponses, deferral.deferredPrompts, fromArchive), ...outcome.warnings);
 
     // A file is remembered as synced only when nothing in it can still change: it has
-    // been quiet for a while and nothing read from it was set aside for later.
+    // been quiet for a while and nothing read from it was set aside for later. Files from
+    // a ZIP archive are not remembered: the archive's name is part of their path, and the
+    // next archive usually has another name, so the rows would only pile up.
+    const inArchives = new Set(files.filter((f) => f.archive !== undefined).map((f) => f.path ?? f.name));
     const syncedFiles: SyncedFileInfo[] = [];
     extraction.files.forEach((f, i) => {
-      if (f.status !== 'read' || f.lastModified === undefined) return;
+      if (f.status !== 'read' || f.lastModified === undefined || inArchives.has(f.path)) return;
       if (options.now - f.lastModified < IN_PROGRESS_WINDOW_MS || deferral.hotFiles.has(i)) return;
       syncedFiles.push({ path: f.path, size: f.size, lastModified: f.lastModified });
     });
@@ -313,7 +326,8 @@ export const claudeCodeLedgerParser: ImportParser = {
     // A ledger is replaced atomically by the collector, so it is never half-written.
     if (deferral.deferredResponses + deferral.deferredPrompts === 0) {
       for (const f of read) {
-        if (f.lastModified !== undefined) syncedFiles.push({ path: f.path ?? f.name, size: f.size, lastModified: f.lastModified });
+        // As for transcripts, files from a ZIP archive are not remembered.
+        if (f.lastModified !== undefined && f.archive === undefined) syncedFiles.push({ path: f.path ?? f.name, size: f.size, lastModified: f.lastModified });
       }
     }
 
@@ -328,7 +342,7 @@ export const claudeCodeLedgerParser: ImportParser = {
       recordsSeen: rowsRead,
       recordsSkipped: deferral.deferredResponses,
       missingFields: outcome.missingFields,
-      warnings: [...deferralWarnings(deferral.deferredResponses, deferral.deferredPrompts), ...outcome.warnings],
+      warnings: [...deferralWarnings(deferral.deferredResponses, deferral.deferredPrompts, files.every((f) => f.archive !== undefined)), ...outcome.warnings],
       requestKeys: outcome.requestKeys,
       duplicateRequests: outcome.duplicateRequests,
       syncedFiles: withUniquePaths(syncedFiles, files.map((f) => f.path ?? f.name)),

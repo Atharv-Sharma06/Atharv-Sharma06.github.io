@@ -1,7 +1,7 @@
-import { strToU8, zipSync, type Zippable } from 'fflate';
+import { strToU8, unzipSync, zipSync, type Zippable } from 'fflate';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ImportError, type ImportFile, type ImportParser } from '@/core/types';
 import { apiUsageReportParser, consoleCsvParser } from '@/import/api-reports';
 import { entryPath, expandArchives, importFileName, isReadableEntry } from '@/import/archive';
@@ -10,6 +10,7 @@ import { claudeExportParser } from '@/import/claude-export';
 import { detectImport } from '@/import/detect';
 import { detectSelection, filesToParse } from '@/import/selection';
 import { assistant, at, jsonl, LATER, usage as tokens, user } from '../fixtures/claude-code/builders';
+import { readZipDirectory } from '@/import/util/zip';
 import { collectingSink, fileOf } from '../helpers/sink';
 
 /**
@@ -144,11 +145,25 @@ describe('opening archives', () => {
       ['outer.zip/parts/inner.zip/deeper.zip', 'outer.zip'],
     ]);
     expect(await text(expanded[0].blob)).toBe('a,b\n3,4\n');
-    // The third level stays an archive; detection says why it was not read.
-    expect(expanded[1].blob).toBeInstanceOf(Blob);
+    // The third level stays an archive, and is not even inflated; detection says why it was not read.
+    expect((expanded[1].blob as unknown as { bytes: { unpacked: boolean } }).bytes.unpacked).toBe(false);
     const problem = await caught(detectImport([expanded[1]]));
     expect(problem).toMatchObject({ code: 'unknown_format' });
     expect(problem?.message).toContain('"deeper.zip" is a ZIP archive that was not opened');
+  });
+
+  it('reads the whole directory of an archive with more than 65,535 entries whose count was written in 16 bits', async () => {
+    const many: Zippable = {};
+    for (let i = 0; i < 70_000; i++) many[`p/s${i}.jsonl`] = [new Uint8Array(0), { level: 0 }];
+    const zip = zipSync(many);
+    const eocd = new DataView(zip.buffer, zip.byteOffset + zip.length - 22, 22);
+    // As fflate (and other tools) write it: the count modulo 65,536, and no ZIP64 record.
+    expect(eocd.getUint16(10, true)).toBe(70_000 % 0x10000);
+    expect(await readZipDirectory(fileOf('many.zip', zip).blob)).toHaveLength(70_000);
+    // A count that does not fit the directory means a damaged archive.
+    const wrong = zip.slice();
+    new DataView(wrong.buffer, wrong.length - 22, 22).setUint16(10, 70_000 % 0x10000 - 1, true);
+    expect(await caught(readZipDirectory(fileOf('wrong.zip', wrong).blob))).toMatchObject({ code: 'zip_corrupt' });
   });
 
   it('looks inside a ZIP whose name does not say it is one, in a small selection', async () => {
@@ -156,17 +171,53 @@ describe('opening archives', () => {
     expect(expanded.map((f) => f.path)).toEqual(['download/a.csv']);
   });
 
-  it('refuses password-protected entries and compression methods it cannot unpack', async () => {
-    const zip = zipSync({ 'a.csv': strToU8('a,b\n'), 'b.csv': strToU8('c,d\n') });
-    const locked = patchCentral(zip, 'b.csv', (v, p) => v.setUint16(p + 8, v.getUint16(p + 8, true) | 1, true));
-    expect(await caught(expandArchives([fileOf('locked.zip', locked)]))).toMatchObject({
-      code: 'zip_encrypted',
-      message: '"b.csv" in "locked.zip" is password-protected. Remove the password from the archive and try again.',
-    });
-    const lzma = patchCentral(zip, 'a.csv', (v, p) => v.setUint16(p + 10, 14, true));
-    expect(await caught(expandArchives([fileOf('lzma.zip', lzma)]))).toMatchObject({ code: 'zip_unsupported_compression' });
+  it('reads an archive inside an archive in place when it is stored, and inflates it whole only when it is compressed', async () => {
+    const inner = zipSync({ 'b.csv': strToU8('a,b\n3,4\n') });
+    const unpacked = vi.spyOn(Response.prototype, 'blob');
+    try {
+      const stored = await expandArchives([zipOf('outer.zip', { 'inner.zip': [inner, { level: 0 }] })]);
+      expect(await text(stored[0].blob)).toBe('a,b\n3,4\n');
+      expect(unpacked).not.toHaveBeenCalled();
+      const deflated = await expandArchives([zipOf('outer.zip', { 'inner.zip': [inner, { level: 9 }] })]);
+      expect(await text(deflated[0].blob)).toBe('a,b\n3,4\n');
+      expect(unpacked).toHaveBeenCalledTimes(1);
+    } finally {
+      unpacked.mockRestore();
+    }
   });
 
+  it('passes on entries with a password or an unknown compression method, which fail with a message that names them when read', async () => {
+    const zip = zipSync({ 'a.csv': strToU8('a,b\n'), 'b.csv': strToU8('c,d\n') });
+    const locked = patchCentral(zip, 'b.csv', (v, p) => v.setUint16(p + 8, v.getUint16(p + 8, true) | 1, true));
+    const [, b] = await expandArchives([fileOf('locked.zip', locked)]);
+    expect(await caught(b.blob.text())).toMatchObject({ code: 'zip_encrypted', message: '"b.csv" is password-protected. Remove the password from the archive and try again.' });
+    expect(await caught(detectSelection([fileOf('locked.zip', locked)]))).toMatchObject({ code: 'zip_encrypted' });
+
+    const lzma = patchCentral(zip, 'a.csv', (v, p) => v.setUint16(p + 10, 14, true));
+    expect(await caught(detectSelection([fileOf('lzma.zip', lzma)]))).toMatchObject({ code: 'zip_unsupported_compression' });
+
+    // A locked archive that lies in a Claude Code folder does not stop the transcripts from being read.
+    const folder = [
+      fileOf('s1.jsonl', S1, { path: '.claude/projects/p/s1.jsonl' }),
+      fileOf('s2.jsonl', S2, { path: '.claude/projects/p/s2.jsonl' }),
+      fileOf('locked.zip', locked, { path: '.claude/backups/locked.zip' }),
+    ];
+    expect(await detectSelection(folder)).toMatchObject({ parser: 'claude-code', fileIndexes: [0, 1], ignoredFiles: 2 });
+  });
+
+  it('leaves a part of a multi-part export that holds no conversations as it is, and says to choose the other part', async () => {
+    const part = zipOf('data-2026-batch-0001.zip', { 'users.json': strToU8('[{"uuid":"u1","email_address":"x@example.com"}]'), 'projects.json': strToU8('[]') });
+    expect(await expandArchives([part])).toEqual([part]);
+    expect(await caught(detectSelection([part]))).toMatchObject({
+      code: 'unknown_format',
+      message:
+        '"data-2026-batch-0001.zip" is a ZIP archive, but not a claude.ai data export: it has no conversations.json (it contains users.json, projects.json). ' +
+        'If your export arrived in several parts, choose the part that contains conversations.json.',
+    });
+    // Chosen together with the part that holds the conversations, it is ignored.
+    const both = [fileOf('claude-export-sample.zip', fixture('claude-export/claude-export-sample.zip')), part];
+    expect(await detectSelection(both)).toMatchObject({ parser: 'claude-export', fileIndexes: [0], ignoredFiles: 1 });
+  });
 });
 
 describe('a file read out of an archive', () => {
@@ -199,11 +250,36 @@ describe('a file read out of an archive', () => {
     expect(await new Response(blob.stream()).text()).toBe(content);
   });
 
+  it('inflates only as far as it is read while the reads move forward, and errors keep their message', async () => {
+    const [entry] = await expandArchives([zipOf('a.zip', { 'big.jsonl': strToU8(content) })]);
+    const bytes = (entry.blob as unknown as { bytes: { unpacked: boolean } }).bytes;
+    let at = 0;
+    let read = '';
+    while (at < real.size) {
+      read += await entry.blob.slice(at, at + 777).text();
+      at += 777;
+    }
+    expect(read).toBe(content);
+    expect(bytes.unpacked).toBe(false);
+    // A read that goes back has the whole entry inflated once.
+    expect(await entry.blob.slice(10, 20).text()).toBe(content.slice(10, 20));
+    expect(bytes.unpacked).toBe(true);
+  });
+
   it('fails with a message that names it when the archive does not hold what its directory says', async () => {
     const zip = zipSync({ 'a.csv': strToU8('date,tokens\n2026-01-01,5\n') });
     const longer = patchCentral(zip, 'a.csv', (v, p) => v.setUint32(p + 24, v.getUint32(p + 24, true) + 10, true));
     const [file] = await expandArchives([fileOf('a.zip', longer)]);
     expect(await caught(file.blob.text())).toMatchObject({ code: 'zip_corrupt', message: '"a.csv" in the ZIP archive is damaged and could not be unpacked.' });
+    expect(await caught(file.blob.slice(5).text())).toMatchObject({ code: 'zip_corrupt' });
+  });
+
+  it('is detected without being inflated whole when its first line is longer than what detection reads first', async () => {
+    const pasted = jsonl([user([{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'A'.repeat(400_000) } }], { ts: at('09:00:00'), session: 's9' })]);
+    const long = pasted + transcript('s9', 2).repeat(200);
+    const files = await expandArchives([zipOf('claude.zip', { 'projects/p/s9.jsonl': strToU8(long), 'projects/p/s1.jsonl': strToU8(S1) })]);
+    expect(await detectImport(files)).toMatchObject({ parser: 'claude-code', fileIndexes: [0, 1] });
+    expect(files.map((f) => (f.blob as unknown as { bytes: { unpacked: boolean } }).bytes.unpacked)).toEqual([false, false]);
   });
 });
 
@@ -271,11 +347,39 @@ describe('detecting and parsing what is in an archive', () => {
     expect(wrapped.out.conversations.length).toBe(direct.out.conversations.length);
   });
 
-  it('says what an archive holds when nothing in it can be read', async () => {
-    expect(await caught(detectSelection([zipOf('pictures.zip', { 'a.png': new Uint8Array([1]), 'b.md': strToU8('#') })]))).toMatchObject({
+  it('says what an archive holds when nothing in it has a name it reads', async () => {
+    expect(await caught(detectSelection([zipOf('mine.zip', { 'usage.txt': strToU8('date,input_tokens\n'), '__MACOSX/._usage.txt': strToU8('x'), 'b.md': strToU8('#') })]))).toMatchObject({
       code: 'unknown_format',
-      message: expect.stringMatching(/^"pictures.zip" is a ZIP archive, but none of the files in it is one this app can read \(it contains a.png, b.md\)\. Claude Lifetime reads: /),
+      message: expect.stringMatching(
+        /^"mine.zip" is a ZIP archive, but none of the files in it has a name this app reads from an archive \(\.jsonl, \.json, \.csv or \.tsv\): it contains usage.txt, b.md\. Unpack the archive and choose the file itself, or give it one of those endings\. Claude Lifetime reads: /,
+      ),
     });
+    expect(await caught(detectSelection([zipOf('empty.zip', { 'folder/': new Uint8Array(0) })]))).toMatchObject({ message: '"empty.zip" is a ZIP archive with no files in it.' });
+  });
+
+  it('reads a claude.ai export whose folder names are written with backslashes', async () => {
+    const sample = unzipSync(fixture('claude-export/claude-export-sample.zip'));
+    const backslashed: Zippable = {};
+    for (const [name, data] of Object.entries(sample)) backslashed[`data-2026-01-01\\${name.split('/').pop()}`] = data;
+    const { detected, out } = await parse(claudeExportParser, [zipOf('my-export.zip', backslashed)]);
+    expect(detected).toMatchObject({ parser: 'claude-export', recognisedAs: 'ZIP archive of a claude.ai data export' });
+    expect(out.conversations.length).toBeGreaterThan(0);
+  });
+
+  it('does not tell you to import the same archive again to count a response that was still being written', async () => {
+    const running = jsonl([
+      user('please do the thing', { ts: at('09:00:00'), session: 's7' }),
+      assistant({ ts: at('09:00:01'), session: 's7', id: 'msg_s7_0', req: 'req_s7_0', usage: tokens(100, 50) }),
+      assistant({ ts: at('09:00:30'), session: 's7', id: 'msg_s7_1', req: 'req_s7_1', stop: null, usage: tokens(100, 3) }),
+    ]);
+    const now = Date.parse(at('09:01:00'));
+    const fromZip = await parse(claudeCodeParser, [zipOf('snap.zip', { 's7.jsonl': strToU8(running) })], { now });
+    expect(fromZip.parsed.warnings.find((w) => w.code === 'in_progress_deferred')?.message).toBe(
+      '1 response was still being written by Claude Code when the archive was made and was left out. To count them in full, import your Claude Code folder, ' +
+        'or a ZIP archive made after the session went on; importing this archive again would count only what it holds.',
+    );
+    const loose = await parse(claudeCodeParser, [fileOf('s7.jsonl', running)], { now });
+    expect(loose.parsed.warnings.find((w) => w.code === 'in_progress_deferred')?.message).toMatch(/Import again in a few minutes/);
   });
 
   it('picks the files to parse by the positions detection returned, and notices a selection that changed', async () => {

@@ -8,12 +8,15 @@ history". Importing the same file again adds nothing.
 Every format below can also be chosen inside a ZIP archive. The app opens the archive in
 the browser and reads the files in it as if they had been unpacked and chosen: `.jsonl`,
 `.json`, `.csv` and `.tsv` files, in any folder of the archive, and ZIP archives inside it
-up to two levels deep. It skips the same folders as for a dropped folder (`tool-results`,
-`mcp-tasks`, `node_modules`, `.git`) and the `__MACOSX` copies macOS adds. Nothing is
-unpacked to disk: a transcript is inflated while it is read. Archives with a password and
-compression methods other than "stored" and "deflate" are refused with a message. A
-claude.ai export stays as it is (see below); any other import is listed under the
-archive's name, for example "claude-backup.zip (12 transcript files)".
+up to two levels deep. Files with other endings are not read from an archive, even when
+the app would read them chosen on their own. It skips the same folders as for a dropped
+folder (`tool-results`, `mcp-tasks`, `node_modules`, `.git`) and the `__MACOSX` copies
+macOS adds. Nothing is unpacked to disk: a transcript is inflated while it is read. A file
+with a password, or packed with a compression method other than "stored" and "deflate",
+is refused with a message when it has to be read. A claude.ai export stays as it is (see
+below), and so does a part of a multi-part export that holds no conversations. Any other
+import is listed under the archive's name, for example "claude-backup.zip (12 transcript
+files)".
 
 ## claude.ai data export
 
@@ -46,8 +49,9 @@ folder. On Windows it is `%USERPROFILE%\.claude`.
 the folder on the import page. Individual `.jsonl` files work too, and so does a ZIP of
 either folder ("Choose a ZIP"), made on another computer for example. File dialogs hide
 dot-folders by default: press Cmd+Shift+. on macOS or Ctrl+H on Linux, or type the path.
-Files read from a ZIP carry the archive's name in their path, so importing the same
-archive again skips the transcripts in it that have not changed.
+Importing the same archive again reads it again and adds nothing: every response is
+recognised by its message id. A response that was still being written when the archive
+was made is left out; import the folder, or a newer archive, to count it.
 
 **Read from it:** for every model response the input, output, cache-read and cache-write
 tokens (5-minute and 1-hour), the model, the service tier, whether inference was kept in
@@ -295,7 +299,7 @@ The message names the file and says what was found. The most common cases:
 |---|---|
 | The archive does not contain a conversations.json file | Choose the ZIP from the export email, or the part named "conversations" if it came in several parts. |
 | The ZIP archive is incomplete | The download was cut short. Download the file again; for a claude.ai export, request a new one, as the link works for a limited time. |
-| … is a ZIP archive, but none of the files in it is one this app can read | The message lists what the archive holds. Choose the file you meant, or an archive that contains it. |
+| … is a ZIP archive, but none of the files in it has a name this app reads from an archive | The message lists what the archive holds. Unpack it and choose the file, or give the file a .jsonl, .json, .csv or .tsv ending. |
 | … in the ZIP archive is damaged and could not be unpacked | Download or make the archive again. |
 | … is password-protected | Make the archive again without a password, or unpack it and choose the files. |
 | No Claude Code transcripts were found | Choose the `.claude` folder or its `projects` folder. |

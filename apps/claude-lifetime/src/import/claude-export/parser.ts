@@ -11,7 +11,7 @@ import {
   type ParseWarning,
   type StagedMessage,
 } from '@/core/types';
-import { importFileName, sameArchive } from '../archive';
+import { entryPath, importFileName, sameArchive } from '../archive';
 import { iterateJsonArray } from '../util/json-array-stream';
 import { looksLikeZip, openZipEntry, readZipDirectory } from '../util/zip';
 import { accountConversation, type AccountBlock, type AccountMessage } from './accounting';
@@ -384,7 +384,8 @@ export function createClaudeExportParser(countTokens: (text: string) => number):
           for (const e of entries) if (!e.isDirectory) seenInArchives.push(e.name);
           for (const e of entries) {
             if (e.isDirectory) continue;
-            const base = e.name.split('/').pop() ?? e.name;
+            // Some Windows tools write backslashes between the folders of a name.
+            const base = entryPath(e.name).split('/').pop() ?? e.name;
             if (/^conversations(?:[-_.]\d+)?\.json$/i.test(base)) {
               parts.push({ label: `${file.name} › ${e.name}`, size: e.uncompressedSize, open: () => openZipEntry(file.blob, e) });
             }

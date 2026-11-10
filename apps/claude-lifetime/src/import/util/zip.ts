@@ -99,10 +99,13 @@ export async function readZipDirectory(blob: Blob): Promise<ZipEntry[]> {
 
   const dir = await bytes(blob, directoryOffset, directoryOffset + directorySize);
   const utf8 = new TextDecoder('utf-8');
+  const damaged = () => new ImportError('The ZIP directory is damaged.', 'zip_corrupt');
   const entries: ZipEntry[] = [];
   let p = 0;
-  for (let n = 0; n < entryCount && p + 46 <= dir.byteLength; n++) {
-    if (dir.getUint32(p, true) !== CENTRAL) throw new ImportError('The ZIP directory is damaged.', 'zip_corrupt');
+  // The directory is read to its end. Its entry count is only a check: some tools write the count of an archive with
+  // more than 65,535 entries in 16 bits and add no ZIP64 record, and the count then says too few.
+  while (p + 46 <= dir.byteLength && dir.getUint32(p, true) === CENTRAL) {
+    if (p + 46 + dir.getUint16(p + 28, true) + dir.getUint16(p + 30, true) + dir.getUint16(p + 32, true) > dir.byteLength) throw damaged();
     const flags = dir.getUint16(p + 8, true);
     const method = dir.getUint16(p + 10, true);
     let lastModified = dosTime(dir.getUint16(p + 14, true), dir.getUint16(p + 12, true));
@@ -144,14 +147,12 @@ export async function readZipDirectory(blob: Blob): Promise<ZipEntry[]> {
     });
     p = extraEnd + commentLength;
   }
+  if (entries.length === 0 ? entryCount !== 0 : entries.length % 0x10000 !== entryCount % 0x10000) throw damaged();
   return entries;
 }
 
-/** A stream of the entry's uncompressed bytes. */
-export async function openZipEntry(blob: Blob, entry: ZipEntry): Promise<ReadableStream<Uint8Array>> {
-  if (entry.encrypted) {
-    throw new ImportError(`"${entry.name}" is password-protected. Remove the password from the archive and try again.`, 'zip_encrypted');
-  }
+/** The entry's data as it is stored in the archive (compressed, unless the method is 0), without copying it. */
+export async function entryData(blob: Blob, entry: ZipEntry): Promise<Blob> {
   const header = await bytes(blob, entry.localHeaderOffset, entry.localHeaderOffset + 30);
   if (header.byteLength < 30 || header.getUint32(0, true) !== LOCAL) {
     throw new ImportError(`The ZIP archive is damaged near "${entry.name}".`, 'zip_corrupt');
@@ -161,12 +162,18 @@ export async function openZipEntry(blob: Blob, entry: ZipEntry): Promise<Readabl
   if (dataEnd > blob.size) {
     throw new ImportError(`The ZIP archive ends in the middle of "${entry.name}". Download the file again, or make the archive again.`, 'zip_truncated');
   }
-  const raw = blob.slice(dataStart, dataEnd).stream() as ReadableStream<Uint8Array>;
-  if (entry.method === 0) return checked(raw, entry);
-  if (entry.method === 8) {
-    return checked(raw.pipeThrough(new DecompressionStream('deflate-raw') as unknown as ReadableWritablePair<Uint8Array, Uint8Array>), entry);
+  return blob.slice(dataStart, dataEnd);
+}
+
+/** A stream of the entry's uncompressed bytes. */
+export async function openZipEntry(blob: Blob, entry: ZipEntry): Promise<ReadableStream<Uint8Array>> {
+  if (entry.encrypted) {
+    throw new ImportError(`"${entry.name}" is password-protected. Remove the password from the archive and try again.`, 'zip_encrypted');
   }
-  throw unsupportedMethod(entry);
+  if (entry.method !== 0 && entry.method !== 8) throw unsupportedMethod(entry);
+  const raw = (await entryData(blob, entry)).stream() as ReadableStream<Uint8Array>;
+  if (entry.method === 0) return checked(raw, entry);
+  return checked(raw.pipeThrough(new DecompressionStream('deflate-raw') as unknown as ReadableWritablePair<Uint8Array, Uint8Array>), entry);
 }
 
 /** Entries this reader cannot unpack, refused when they are opened. */
