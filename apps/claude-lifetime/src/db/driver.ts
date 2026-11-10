@@ -41,6 +41,21 @@ export class DatabaseMovedError extends Error {
   }
 }
 
+/**
+ * The database has had no tab to hold it for too long: the tab that held it went away,
+ * and no other tab got it open (the files of the database engine could not be loaded,
+ * for one, on a device that is offline by then). `reason` is what this tab's own
+ * attempt failed with, when it made one. The message is written for the person.
+ */
+export class DatabaseUnavailableError extends Error {
+  constructor(readonly reason: string | null = null) {
+    super(
+      `The database is not answering. The tab that held it was closed, and no tab has been able to open it since${reason ? ` (${reason})` : ''}. Reload this page.`,
+    );
+    this.name = 'DatabaseUnavailableError';
+  }
+}
+
 /** How often something is read again when the database moved in the middle of reading it. */
 export const REREAD_ATTEMPTS = 4;
 

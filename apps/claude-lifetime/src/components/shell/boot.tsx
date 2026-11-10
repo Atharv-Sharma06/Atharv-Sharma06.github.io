@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ErrorNote, Skeleton, Spinner } from '@/components/ui/feedback';
 import { DatabaseBusyError, type BootPhase } from '@/db/client';
-import { DatabaseMovedError } from '@/db/driver';
+import { DatabaseMovedError, DatabaseUnavailableError } from '@/db/driver';
 import { NewerSchemaError } from '@/db/migrate';
 
 const PHASE_TEXT: Record<BootPhase, string> = {
@@ -100,13 +100,18 @@ function NewerVersionNeeded({ error }: { error: Error }) {
  */
 function HeldByAnotherTab({ error, retry }: { error: Error; retry(): void }) {
   const busy = error instanceof DatabaseBusyError;
+  const unavailable = error instanceof DatabaseUnavailableError;
   return (
     <div className="max-w-[68ch]">
-      <h1 className="text-xl font-medium">{busy ? 'The database did not answer' : 'The database changed hands while this tab was starting'}</h1>
+      <h1 className="text-xl font-medium">
+        {busy || unavailable ? 'The database did not answer' : 'The database changed hands while this tab was starting'}
+      </h1>
       <p className="mt-2 text-ink-2" role="alert">
         {busy
           ? 'The tabs of Claude Lifetime share one database in this browser and take turns at it. This tab waited for its turn and did not get one in time.'
-          : 'The tabs of Claude Lifetime share one database in this browser. The tab that held it was closed or reloaded several times while this one was starting, so this tab stopped trying.'}
+          : unavailable
+            ? `The tabs of Claude Lifetime share one database in this browser. The tab that held it was closed while this one was starting, and no tab has been able to open it since${error.reason ? ` (${error.reason})` : ''}.`
+            : 'The tabs of Claude Lifetime share one database in this browser. The tab that held it was closed or reloaded several times while this one was starting, so this tab stopped trying.'}
       </p>
       {busy && (
         <ul className="mt-4 list-disc space-y-1.5 pl-5 text-ink-2">
@@ -124,7 +129,9 @@ function HeldByAnotherTab({ error, retry }: { error: Error; retry(): void }) {
 
 export function BootError({ error, retry }: { error: Error; retry(): void }) {
   if (error instanceof NewerSchemaError) return <NewerVersionNeeded error={error} />;
-  if (error instanceof DatabaseBusyError || error instanceof DatabaseMovedError) return <HeldByAnotherTab error={error} retry={retry} />;
+  if (error instanceof DatabaseBusyError || error instanceof DatabaseMovedError || error instanceof DatabaseUnavailableError) {
+    return <HeldByAnotherTab error={error} retry={retry} />;
+  }
   return (
     <div className="max-w-[68ch]">
       <h1 className="text-xl font-medium">The local database could not be opened</h1>

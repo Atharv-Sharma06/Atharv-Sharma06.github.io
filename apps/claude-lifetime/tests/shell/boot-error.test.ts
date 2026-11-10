@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BootError, BootProgress } from '@/components/shell/boot';
 import { DatabaseBusyError, SETUP_TIMEOUT_MS } from '@/db/client';
-import { DatabaseMovedError } from '@/db/driver';
+import { DatabaseMovedError, DatabaseUnavailableError } from '@/db/driver';
 import { MigrationError, NewerSchemaError } from '@/db/migrate';
 
 /**
@@ -131,6 +131,20 @@ describe('BootError, for a database that is there but held by another tab', () =
     expect(screen).not.toContain('incognito');
     // The sentence for a change that may not have been saved is not for a start: nothing was being saved.
     expect(screen).not.toContain('Check whether this was saved');
+  });
+});
+
+describe('BootError, for a database that no tab could open after the tab that held it was closed', () => {
+  it('says so, with the reason this tab’s own attempt gave, and offers to try again', () => {
+    const screen = html(new DatabaseUnavailableError('Could not load /claude-lifetime/pglite/0.5.16/pglite.wasm.gz (TypeError: Failed to fetch)'));
+    expect(screen).toContain('The database did not answer');
+    expect(screen).toContain(
+      'The tab that held it was closed while this one was starting, and no tab has been able to open it since (Could not load /claude-lifetime/pglite/0.5.16/pglite.wasm.gz (TypeError: Failed to fetch)).',
+    );
+    expect(screen).toContain('Try again');
+    expect(screen).not.toContain('incognito');
+    // The advice for a database that another tab keeps busy does not apply either.
+    expect(screen).not.toContain('large import or a backup');
   });
 });
 

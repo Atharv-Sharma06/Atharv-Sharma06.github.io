@@ -1,6 +1,6 @@
 import { PGlite, type PGliteInterface } from '@electric-sql/pglite';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DatabaseMovedError, REREAD_ATTEMPTS, rereadIfMoved } from '@/db/driver';
+import { DatabaseMovedError, DatabaseUnavailableError, REREAD_ATTEMPTS, rereadIfMoved } from '@/db/driver';
 import { pgliteDriver } from '@/db/pglite-driver';
 import { after } from '../helpers/browser';
 
@@ -132,6 +132,58 @@ describe('an operation that is under way when the database moves to another tab'
     await page.answer();
     expect(await reading).toEqual({ rows: [{ sql: 'SELECT 1' }], affectedRows: 0 });
     expect(page.listeners.size).toBe(1);
+  });
+});
+
+describe('an operation while no tab holds the database', () => {
+  it('waits for the tab that takes over, but not for good: it fails with the reason this tab’s own attempt gave', async () => {
+    const page = scriptedPage();
+    const db = pgliteDriver(page.pg, {
+      onMove: page.onMove,
+      connectTimeoutMs: 40,
+      whyUnavailable: () => 'Could not load /claude-lifetime/pglite/0.5.16/pglite.wasm.gz (TypeError: Failed to fetch)',
+    });
+    page.disconnect();
+    const reading = watch(db.query('SELECT 1'));
+
+    // Before the fix this waited for as long as the page stayed open, with nothing on screen but a spinner.
+    const result = (await reading.outcome()) as { error: Error };
+    expect(result.error).toBeInstanceOf(DatabaseUnavailableError);
+    expect(result.error.message).toBe(
+      'The database is not answering. The tab that held it was closed, and no tab has been able to open it since (Could not load /claude-lifetime/pglite/0.5.16/pglite.wasm.gz (TypeError: Failed to fetch)). Reload this page.',
+    );
+    expect(page.sent).toEqual([]);
+  });
+
+  it('gives up sooner once this tab’s own attempt to open the database has failed: only another tab could still do it', async () => {
+    const page = scriptedPage();
+    let ownFailure: string | null = null;
+    const db = pgliteDriver(page.pg, { onMove: page.onMove, connectTimeoutMs: 60_000, ownFailureTimeoutMs: 60, whyUnavailable: () => ownFailure });
+    page.disconnect();
+    const reading = watch(db.query('SELECT 1'));
+    await after(20, null);
+    // The operation is waiting already when this tab's worker reports that it could not start.
+    ownFailure = 'Could not load /pglite.wasm.gz (HTTP 503)';
+
+    const result = (await reading.outcome()) as { error: Error };
+    expect(result.error).toBeInstanceOf(DatabaseUnavailableError);
+    expect(result.error.message).toContain('(Could not load /pglite.wasm.gz (HTTP 503))');
+  });
+
+  it('goes ahead when a tab takes over in time, and says nothing of a reason when this tab made no attempt of its own', async () => {
+    const page = scriptedPage();
+    const db = pgliteDriver(page.pg, { onMove: page.onMove, connectTimeoutMs: 150 });
+    const reconnect = page.disconnect();
+    const reading = watch(db.query('SELECT 1'));
+    await after(30, null);
+    reconnect();
+    await after(0, null);
+    await page.answer();
+    expect(await reading.outcome()).toEqual({ value: { rows: [{ sql: 'SELECT 1' }], affectedRows: 0 } });
+
+    expect(new DatabaseUnavailableError().message).toBe(
+      'The database is not answering. The tab that held it was closed, and no tab has been able to open it since. Reload this page.',
+    );
   });
 });
 

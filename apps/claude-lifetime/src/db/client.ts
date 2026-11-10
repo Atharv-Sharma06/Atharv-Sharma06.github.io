@@ -323,11 +323,14 @@ async function connect(name: string, loadDataDir?: Blob): Promise<Handle> {
   // The worker therefore says so itself (see pglite.worker.ts), and that message, an error in the
   // worker or no answer in time ends the attempt here. The worker is stopped so it cannot keep running.
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /** Why this tab's own worker could not open the database, once it has tried and failed. */
+  let startFailure: string | null = null;
   const failure = new Promise<never>((_, reject) => {
     worker.addEventListener('error', (event) => reject(new Error(event.message || 'The database could not be started.')), { once: true });
     worker.addEventListener('message', (event: MessageEvent<unknown>) => {
       const reason = readStartFailure(event.data);
       if (reason === null) return;
+      startFailure = reason;
       reject(new Error(reason));
       // Also for a worker that fails long after this page connected: it was chosen to host the database
       // when the tab that did so closed, and could not open it. Stopping it hands that role to the next tab.
@@ -351,6 +354,7 @@ async function connect(name: string, loadDataDir?: Blob): Promise<Handle> {
       // The database moves when the tab whose worker holds it goes away; PGlite's page class says so with this event.
       onMove: (listener) => pg.onLeaderChange(listener),
       isOver: () => over,
+      whyUnavailable: () => startFailure,
     }),
     stop() {
       over = true;

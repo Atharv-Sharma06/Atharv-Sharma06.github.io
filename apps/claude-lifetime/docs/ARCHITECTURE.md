@@ -61,6 +61,11 @@ the other tabs must not pay for that:
 - **A tab starts while the database is busy.** It waits for its turn, says after a few
   seconds what it is probably waiting for (another tab's import or backup), and after
   two minutes stops with a screen that says so and lets the next tab try.
+- **No tab can open the database after the one that held it went away.** Opening it
+  needs the files of the database engine, which a device that is offline by then cannot
+  load. What a tab then asks of the database waits for a while (twenty seconds once the
+  tab's own attempt has failed, ninety otherwise) and fails with a message that says
+  what happened and to reload the page.
 
 A backup is not the database's own files. PostgreSQL keeps deleted rows in its table
 files until the space is reused, and in its write-ahead log, so those files would give

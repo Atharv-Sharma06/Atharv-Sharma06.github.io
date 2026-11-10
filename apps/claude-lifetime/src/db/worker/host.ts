@@ -68,17 +68,21 @@ type Answer = { type: 'rpc-return'; callId: string; result: unknown } | { type: 
  */
 type Turn = 'query' | 'transaction';
 
-/** Takes the Web Lock `name` and keeps it for as long as this worker lives. Resolves once it is held. */
+/**
+ * Takes the Web Lock `name` and keeps it for as long as this worker lives. Resolves once
+ * it is held, and rejects when the browser refuses the request.
+ */
 function keepLock(name: string): Promise<void> {
-  return new Promise((held) => {
-    void navigator.locks.request(name, () => new Promise<never>(() => held()));
+  return new Promise((held, refused) => {
+    navigator.locks.request(name, () => new Promise<never>(() => held())).catch(refused);
   });
 }
 
 /** Resolves when the Web Lock `name` can be had. For the lock a page holds while it lives, that is when the page is gone. */
 function whenFree(name: string): Promise<void> {
   return new Promise((free) => {
-    void navigator.locks.request(name, async () => free());
+    // A request the browser refuses says nothing about the page, so nothing follows from it.
+    navigator.locks.request(name, async () => free()).catch(() => undefined);
   });
 }
 

@@ -1,5 +1,5 @@
 import type { PGliteInterface, Transaction } from '@electric-sql/pglite';
-import { DatabaseMovedError, type QueryResult, type SqlDriver, type SqlExecutor } from './driver';
+import { DatabaseMovedError, DatabaseUnavailableError, type QueryResult, type SqlDriver, type SqlExecutor } from './driver';
 
 type Queryable = Pick<PGliteInterface, 'query' | 'exec'> | Pick<Transaction, 'query' | 'exec'>;
 
@@ -31,7 +31,21 @@ export interface DriverOptions {
    * that happened cannot go on with its work later, behind whatever the page shows now.
    */
   isOver?: () => boolean;
+  /**
+   * With `onMove`: what this tab's own attempt to open the database failed with, once it
+   * has made one and failed, and how long an operation waits for this tab to be
+   * connected to a worker that holds the database: in general, and once this tab's own
+   * attempt has failed. After a move the wait is normally a second or two.
+   */
+  whyUnavailable?: () => string | null;
+  connectTimeoutMs?: number;
+  ownFailureTimeoutMs?: number;
 }
+
+/** Opening a large database from this device's storage takes a while, and the engine may have to be downloaded again first. */
+const CONNECT_TIMEOUT_MS = 90_000;
+/** Once this tab's own worker has failed, only another tab can open the database, and that one starts at once. */
+const OWN_FAILURE_TIMEOUT_MS = 20_000;
 
 /** Never settles. What waits for it goes no further. */
 const forever = new Promise<never>(() => undefined);
@@ -51,6 +65,8 @@ const forever = new Promise<never>(() => undefined);
  *    worker that held it, and a statement, COMMIT or ROLLBACK that reached the new
  *    worker later would be carried out there outside of it, between the statements of
  *    whatever this tab is doing by then.
+ *  - An operation that finds no worker holding the database waits for one, but not for
+ *    good: when no tab gets the database open, it fails with a DatabaseUnavailableError.
  */
 export function pgliteDriver(pg: PGliteInterface, opts: DriverOptions = {}): SqlDriver {
   const { onMove } = opts;
@@ -60,13 +76,42 @@ export function pgliteDriver(pg: PGliteInterface, opts: DriverOptions = {}): Sql
     if (opts.isOver?.()) throw new Error('This connection to the database has been given up. Reload the page.');
   };
 
+  /** Resolves once this tab is connected to a worker that holds the database. Rejects when none turns up in time. */
+  const connected = () =>
+    new Promise<void>((resolve, reject) => {
+      const limit = opts.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
+      const limitAfterOwnFailure = Math.min(limit, opts.ownFailureTimeoutMs ?? OWN_FAILURE_TIMEOUT_MS);
+      const since = Date.now();
+      // Looked at again and again, because this tab's own attempt may fail while the operation already waits.
+      const watching = setInterval(
+        () => {
+          const reason = opts.whyUnavailable?.() ?? null;
+          const waited = Date.now() - since;
+          if (waited < (reason === null ? limit : limitAfterOwnFailure)) return;
+          clearInterval(watching);
+          reject(new DatabaseUnavailableError(reason));
+        },
+        Math.min(250, Math.ceil(limitAfterOwnFailure / 2)),
+      );
+      pg.waitReady.then(
+        () => {
+          clearInterval(watching);
+          resolve();
+        },
+        (error: unknown) => {
+          clearInterval(watching);
+          reject(error);
+        },
+      );
+    });
+
   /** Settles the way `work` does, or rejects as soon as the database moves while `work` is under way. */
   const unlessMoved = async <T>(work: () => Promise<T>): Promise<T> => {
     refuseWhenOver();
     if (!onMove) return work();
     // While this tab is not connected (the database is just moving), the wait is here, where a further move
     // loses nothing: `work` has not asked the database for anything yet.
-    await pg.waitReady;
+    await connected();
     return new Promise<T>((resolve, reject) => {
       const stopWatching = onMove(() => {
         stopWatching();
