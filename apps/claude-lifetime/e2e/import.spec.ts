@@ -137,7 +137,7 @@ test('the manifest step checks the parts chosen from it, and keeps to the card o
   await page.getByRole('button', { name: 'Choose the downloaded ZIPs' }).click();
   await (await chooser).setFiles(part);
   await expect(page.getByRole('heading', { name: 'This import did not work' })).toBeVisible();
-  await expect(page.getByText("The export's manifest lists 2 conversations parts")).toBeVisible();
+  await expect(page.getByText('The manifest "manifest-two.json" lists 2 conversations parts')).toBeVisible();
 
   // A manifest without a conversations part says so in its heading.
   await page.getByRole('button', { name: 'Choose another file' }).click();

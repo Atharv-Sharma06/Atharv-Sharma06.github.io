@@ -6,7 +6,7 @@ import { previewCsv, type CsvPreview } from './generic/csv';
 import { detectCsvFormat, detectJsonFormat } from './generic/detect';
 import type { ParserKey } from './formats';
 import { entryPath, isExportPart, isReadableEntry } from './archive';
-import { checkParts, ExportManifestFound, newestManifest, readExportManifest, type ExportManifest } from './claude-export/manifest';
+import { checkParts, ExportManifestFound, newestManifest, partsNeeded, readExportManifest, type ExportManifest } from './claude-export/manifest';
 import { looksLikeZip, readZipDirectory } from './util/zip';
 
 /**
@@ -532,20 +532,31 @@ export async function detectImport(files: ImportFile[], options: { manifests?: r
       // open them: its manifest, a conversations part still zipped, or one a browser or archive tool renamed ("conversations 2.json").
       const read = [...conversations];
       const found: ExportManifest[] = [];
-      if (files.length <= MAX_SEPARATE_FILES) {
+      const unreadable: string[] = [];
+      const small = files.length <= MAX_SEPARATE_FILES;
+      if (small) {
         for (let i = 0; i < files.length; i++) {
           if (conversations.includes(i)) continue;
           const path = files[i].path ?? files[i].name;
           const base = path.split('/').pop() ?? path;
           if (!/^manifest.*\.json$/i.test(base) && !/^conversations\b.*\.(json|zip)$/i.test(base)) continue;
-          const kind = await classify(files[i]).catch(() => null);
-          if (kind?.parser === 'claude-export') read.push(i);
-          else if (kind?.parser === null && kind.manifest) found.push(kind.manifest);
+          const kind: Kind = await classify(files[i]).catch((error: unknown) => ({
+            parser: null,
+            problem: error instanceof Error ? error.message : String(error),
+          }));
+          if (kind.parser === 'claude-export') read.push(i);
+          else if (kind.parser === null && kind.manifest) found.push(kind.manifest);
+          else if (kind.parser === null && !kind.exportPart) unreadable.push(kind.problem);
         }
       }
-      read.sort((a, b) => a - b);
-      checkParts([...given, ...found], read.length);
-      return done('claude-export', read, 'unpacked claude.ai data export');
+      // Fewer parts by name than a manifest lists: a part can have another name altogether ("Claude export part 2.zip").
+      // In a small selection every file is then looked at below, which finds such a part or says why the parts are short.
+      const listed = [...given, ...found];
+      if (!small || read.length >= partsNeeded(listed)) {
+        read.sort((a, b) => a - b);
+        checkParts(listed, read.length, unreadable);
+        return done('claude-export', read, 'unpacked claude.ai data export');
+      }
     }
   }
 
@@ -559,7 +570,15 @@ export async function detectImport(files: ImportFile[], options: { manifests?: r
   if (good.length === 0) {
     // A manifest on its own, or with parts that hold no conversations: the page shows what to download. Anything
     // else that was chosen with it and cannot be read (a part saved as an error page, say) is said as well.
-    if (manifests.length > 0) throw new ExportManifestFound(newestManifest(manifests), problems.find((p) => !p.manifest && !p.exportPart)?.problem);
+    if (manifests.length > 0) {
+      // A part without conversations, picked on the manifest step, is said to be one, or the step would come back unchanged.
+      const sidePart = given.length > 0 ? kinds.findIndex((k) => k.parser === null && k.exportPart) : -1;
+      throw new ExportManifestFound(
+        newestManifest(manifests),
+        problems.find((p) => !p.manifest && !p.exportPart)?.problem ??
+          (sidePart >= 0 ? `"${files[sidePart].name}" is a part of the export that holds no conversations.` : undefined),
+      );
+    }
     throw new ImportError(problems[0]?.problem ?? `These files are not in a format this app can read. ${SUPPORTED}`, 'unknown_format');
   }
   // A page of nothing but empty time buckets belongs to the report the other pages are from: a cost report
@@ -577,7 +596,7 @@ export async function detectImport(files: ImportFile[], options: { manifests?: r
   }
   const parser = good[0].k.parser;
   // An export chosen with its manifest: every conversations part it lists must be there (see checkParts).
-  if (parser === 'claude-export') checkParts(manifests, good.length);
+  if (parser === 'claude-export') checkParts(manifests, good.length, problems.filter((p) => !p.manifest && !p.exportPart).map((p) => p.problem));
   if (parser === 'generic-csv' && good.length > 1) {
     throw new ImportError('Import CSV files one at a time: each has its own columns to match.', 'mixed_selection');
   }

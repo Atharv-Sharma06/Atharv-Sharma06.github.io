@@ -104,23 +104,33 @@ export class ExportManifestFound extends ImportError {
   }
 }
 
+/** The most conversations parts any of the manifests lists. */
+export const partsNeeded = (manifests: readonly ExportManifest[]): number => Math.max(0, ...manifests.map((m) => conversationParts(m).length));
+
 /**
  * An export's conversations parts must all be read together, or conversations are missing without a word.
- * `chosen` is how many export files the import would read; with several manifests, the newest one counts.
- * Parts are counted rather than matched by name, since a browser renames a download whose name is taken.
+ * `chosen` is how many export files the import would read. Every manifest counts: with two exports chosen
+ * together, the one with more parts must not go short unnoticed. Parts are counted rather than matched by
+ * name, since a browser renames a download whose name is taken. `unreadable`: what is wrong with chosen
+ * files that could not be read, said when parts are short, since one of them may be the part.
  */
-export function checkParts(manifests: readonly ExportManifest[], chosen: number): void {
-  if (manifests.length === 0) return;
-  const manifest = newestManifest(manifests);
-  if (chosen < conversationParts(manifest).length) throw missingParts(manifest, chosen);
+export function checkParts(manifests: readonly ExportManifest[], chosen: number, unreadable: readonly string[] = []): void {
+  const needed = partsNeeded(manifests);
+  if (chosen >= needed) return;
+  throw missingParts(manifests.find((m) => conversationParts(m).length === needed)!, chosen, unreadable);
 }
 
-/** The error for a selection that holds a manifest and fewer conversations parts than it lists. */
-export function missingParts(manifest: ExportManifest, chosen: number): ImportError {
+/** The error for a selection that holds fewer conversations files than a manifest lists parts. */
+export function missingParts(manifest: ExportManifest, chosen: number, unreadable: readonly string[] = []): ImportError {
   const listed = conversationParts(manifest).map((p) => p.filename);
+  const what = `The manifest "${manifest.fileName}" lists ${listed.length} conversations parts (${listOf(listed)}), but the chosen files hold ${
+    chosen === 0 ? 'no' : `only ${chosen}`
+  } ${chosen === 1 ? 'file' : 'files'} of claude.ai conversations.`;
+  const shown = unreadable.slice(0, 3);
   return new ImportError(
-    `The export's manifest lists ${listed.length} conversations parts (${listOf(listed)}), but only ${chosen} of them ${chosen === 1 ? 'is' : 'are'} among the chosen files. ` +
-      'Choose all of them together, so that no conversations are left out.',
+    shown.length > 0
+      ? `${what} ${shown.join(' ')} Download ${shown.length === 1 ? 'that part' : 'those parts'} again, then choose all the parts together.`
+      : `${what} Choose all of the listed parts together, so that no conversations are left out. To import a different export, use "Choose another file" first.`,
     'missing_export_parts',
   );
 }
