@@ -42,9 +42,19 @@ export async function detectSelection(files: ImportFile[], manifest?: ExportMani
   const expanded = await expandArchives(files);
   const given = manifest ? [manifest] : [];
   const manifests = [...given, ...(await manifestsIn(expanded))];
-  const sideParts = new Set(manifests.flatMap((m) => m.parts.filter((p) => p.category !== 'conversations').map((p) => p.filename.toLowerCase())));
-  const isSidePart = (f: ImportFile) => (f.path ?? f.name).split('/').some((segment) => sideParts.has(segment.toLowerCase()));
-  const kept = expanded.map((file, i) => ({ file, i })).filter(({ file }) => !isSidePart(file));
+  const partsOf = (keep: (category: string) => boolean) =>
+    new Set(manifests.flatMap((m) => m.parts.filter((p) => keep(p.category)).map((p) => p.filename.toLowerCase())));
+  const inParts = (names: Set<string>) => (f: ImportFile) => (f.path ?? f.name).split('/').some((segment) => names.has(segment.toLowerCase()));
+  const sideParts = partsOf((category) => category !== 'conversations');
+  const isSidePart = inParts(sideParts);
+  let kept = expanded.map((file, i) => ({ file, i })).filter(({ file }) => !isSidePart(file));
+  let manifestsForDetection = given;
+  // Chosen on its own, the Claude Code on the web part is read like any other file: the manifest step suggests trying that.
+  const isCloudPart = inParts(partsOf((category) => category === 'claude_code_cloud'));
+  if (kept.length === 0 && expanded.some(isCloudPart)) {
+    kept = expanded.map((file, i) => ({ file, i })).filter(({ file }) => isCloudPart(file));
+    manifestsForDetection = [];
+  }
   if (kept.length === 0) {
     const names = [...new Set(expanded.map((f) => (f.path ?? f.name).split('/').find((s) => sideParts.has(s.toLowerCase())) ?? f.name))];
     throw new ExportManifestFound(
@@ -54,7 +64,7 @@ export async function detectSelection(files: ImportFile[], manifest?: ExportMani
   }
   const found = await detectImport(
     kept.map((k) => k.file),
-    { manifests: given },
+    { manifests: manifestsForDetection },
   );
   const fileIndexes = found.fileIndexes.map((i) => kept[i].i);
   const detected = { ...found, fileIndexes, ignoredFiles: expanded.length - fileIndexes.length };

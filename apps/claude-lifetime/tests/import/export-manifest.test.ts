@@ -233,8 +233,13 @@ describe('a manifest in the selection', () => {
     expect(await detectSelection([real, together])).toMatchObject({ parser: 'claude-export', fileIndexes: [1] });
     // Chosen from the manifest step, a part without conversations says so.
     const manifest = (alone as ExportManifestFound).manifest;
-    const wrong = await caught(detectSelection([cloud], manifest));
-    expect((wrong as ExportManifestFound).problem).toBe('"claude_code_cloud-000.zip" is a part of the export that holds no conversations.');
+    const frames = zipOf('frames-000.zip', { 'frames/f1.json': strToU8('{}') });
+    const wrong = await caught(detectSelection([frames], manifest));
+    expect((wrong as ExportManifestFound).problem).toBe('"frames-000.zip" is a part of the export that holds no conversations.');
+    // The Claude Code on the web part, which the step suggests trying on its own, is read like any other file, also from the step.
+    expect(await detectSelection([cloud], manifest)).toMatchObject({ parser: 'claude-code', fileIndexes: [0, 1] });
+    // With the manifest itself chosen too, the parts it lists besides the conversations stay passed over.
+    expect(await caught(detectSelection([real, cloud, frames]))).toBeInstanceOf(ExportManifestFound);
     // Without a manifest, such a part is looked at like any other file.
     expect(await detectSelection([cloud])).toMatchObject({ parser: 'claude-code' });
   });
