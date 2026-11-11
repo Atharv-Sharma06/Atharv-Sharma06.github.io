@@ -17,7 +17,9 @@ import { ImportSession, toImportFiles, type PreparedImport } from '@/import/sess
 import { cn } from '@/lib/cn';
 import { formatBytes, formatInt, plural } from '@/lib/format';
 import { useApp } from '@/state/app';
+import { ExportManifestFound, type ExportManifest } from '@/import/claude-export/manifest';
 import { ConfidenceForm, CsvMappingForm } from './csv-mapping';
+import { ExportManifestStep } from './export-manifest';
 import { filesFromDrop } from './dropped-files';
 import { ImportPreviewView, Notice } from './preview';
 
@@ -32,6 +34,8 @@ type Stage =
   | { name: 'preview'; prepared: PreparedImport }
   | { name: 'saving'; prepared: PreparedImport }
   | { name: 'done'; prepared: PreparedImport; result: CommitResult }
+  /** A claude.ai export manifest was chosen: it only links to the parts, which are downloaded and chosen next. */
+  | { name: 'manifest'; manifest: ExportManifest }
   /** `unknownOutcome`: the import may have been stored all the same, so the card must not say that nothing was. */
   | { name: 'error'; message: string; code: string; details?: string; unknownOutcome?: boolean };
 
@@ -132,7 +136,7 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
     };
   }, []);
 
-  const busy = stage.name !== 'idle' && stage.name !== 'done' && stage.name !== 'error';
+  const busy = stage.name !== 'idle' && stage.name !== 'done' && stage.name !== 'error' && stage.name !== 'manifest';
 
   // The page blocks its other controls while an import is being prepared or previewed. A saved or failed
   // import is over: with the result still on screen, another import can be started and imports can be deleted.
@@ -150,6 +154,10 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
   }, [stage.name]);
 
   const fail = useCallback((error: unknown, during: 'reading' | 'saving' = 'reading') => {
+    if (error instanceof ExportManifestFound) {
+      setStage({ name: 'manifest', manifest: error.manifest });
+      return;
+    }
     if (error instanceof ImportError && error.code === 'cancelled') {
       returnFocus.current = true;
       setStage({ name: 'idle' });
@@ -326,6 +334,8 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
                 ? 'Saving'
                 : stage.name === 'done'
                   ? 'Saved'
+                  : stage.name === 'manifest'
+                    ? 'Download the conversations first'
                   : stage.unknownOutcome
                     ? 'This import may not have been saved'
                     : 'This import did not work';
@@ -455,6 +465,20 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
               returnFocus.current = true;
               setStage({ name: 'idle' });
             }}
+          />
+        ) : null}
+
+        {stage.name === 'manifest' ? (
+          <ExportManifestStep
+            manifest={stage.manifest}
+            timezone={app.settings.timezone}
+            onChoose={() => {
+              if (!fileInput.current) return;
+              fileInput.current.accept = '.zip,.json,application/zip,application/json';
+              pickOptions.current = {};
+              fileInput.current.click();
+            }}
+            onCancel={() => void reset()}
           />
         ) : null}
 

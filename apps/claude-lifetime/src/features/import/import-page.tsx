@@ -250,8 +250,12 @@ export function ImportPage() {
               Anthropic emails a download link that expires after 24 hours.
             </p>
             <p>
-              Choose the ZIP as downloaded. It holds conversations and dates but no token counts and no model names, so tokens are estimated from the
-              text. Conversations you deleted are not in it.
+              The export arrives as a small manifest file (<Code>manifest-….json</Code>) with links to its parts. Choose the manifest: the app lists the
+              conversations parts to download, and you then choose those ZIPs. An older export is chosen as the ZIP it came as.
+            </p>
+            <p>
+              It holds conversations and dates but no token counts and no model names, so tokens are estimated from the text. Conversations you deleted are
+              not in it.
             </p>
           </Option>
 

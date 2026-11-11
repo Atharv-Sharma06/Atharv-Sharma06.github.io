@@ -212,7 +212,7 @@ describe('opening archives', () => {
       code: 'unknown_format',
       message:
         '"data-2026-batch-0001.zip" is a ZIP archive, but not a claude.ai data export: it has no conversations.json (it contains users.json, projects.json). ' +
-        'If your export arrived in several parts, choose the part that contains conversations.json.',
+        'If your export came as several parts, choose the conversations part (conversations-000.zip, or the part that contains conversations.json).',
     });
     // Chosen together with the part that holds the conversations, it is ignored.
     const both = [fileOf('claude-export-sample.zip', fixture('claude-export/claude-export-sample.zip')), part];

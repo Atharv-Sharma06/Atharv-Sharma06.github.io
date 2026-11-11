@@ -6,6 +6,7 @@ import { previewCsv, type CsvPreview } from './generic/csv';
 import { detectCsvFormat, detectJsonFormat } from './generic/detect';
 import type { ParserKey } from './formats';
 import { entryPath, isExportPart, isReadableEntry } from './archive';
+import { conversationParts, ExportManifestFound, missingParts, readExportManifest, type ExportManifest } from './claude-export/manifest';
 import { looksLikeZip, readZipDirectory } from './util/zip';
 
 /**
@@ -51,7 +52,7 @@ const MAX_SEPARATE_FILES = 200;
 const SAMPLE_FILES = 20;
 
 const SUPPORTED =
-  'Claude Lifetime reads: the claude.ai data export (ZIP or conversations.json), Claude Code transcripts (.jsonl files or the whole .claude folder), ' +
+  'Claude Lifetime reads: the claude.ai data export (its conversations ZIP, or conversations.json), Claude Code transcripts (.jsonl files or the whole .claude folder), ' +
   'Anthropic API usage and cost reports (JSON), Claude Console CSV exports, and usage tables as CSV or JSON. Any of them can also be in a ZIP archive.';
 
 type Encoding = 'utf-8' | 'utf-16le' | 'utf-16be';
@@ -172,7 +173,8 @@ type Kind =
        */
       undecided?: true;
     }
-  | { parser: null; problem: string };
+  /** `manifest`: the file is the manifest of a claude.ai export, which lists the parts to download. */
+  | { parser: null; problem: string; manifest?: ExportManifest };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -231,7 +233,7 @@ async function classify(file: ImportFile): Promise<Kind> {
         parser: null,
         problem:
           `"${file.name}" is a ZIP archive, but not a claude.ai data export: it has no conversations.json (it contains ${listed}). ` +
-          'If your export arrived in several parts, choose the part that contains conversations.json.',
+          'If your export came as several parts, choose the conversations part (conversations-000.zip, or the part that contains conversations.json).',
       };
     }
     // Any other archive was opened before detection (see archive.ts), unless it lies too deep inside other archives,
@@ -338,6 +340,8 @@ async function classify(file: ImportFile): Promise<Kind> {
           problem: `"${file.name}" is an error response from the Anthropic API, not a report: ${apiError}. Run the request again and save a successful response.`,
         };
       }
+      const manifest = readExportManifest(value, file.name);
+      if (manifest !== null) return { parser: null, problem: new ExportManifestFound(manifest).message, manifest };
       const kind = await fromValue(value, 'JSON file');
       if (kind) return kind;
       if (isObject(value) && Array.isArray(value.conversations) && value.conversations.some(looksLikeConversation)) {
@@ -509,7 +513,10 @@ export async function detectImport(files: ImportFile[]): Promise<Detected> {
   const problems = kinds.filter((k): k is Extract<Kind, { parser: null }> => k.parser === null);
   const good = kinds.map((k, i) => ({ k, i })).filter((e): e is { k: Extract<Kind, { parser: ParserKey }>; i: number } => e.k.parser !== null);
 
+  const manifests = problems.flatMap((p) => (p.manifest ? [p.manifest] : []));
   if (good.length === 0) {
+    // A manifest on its own, or with parts that hold no conversations: the page shows what to download.
+    if (manifests.length > 0) throw new ExportManifestFound(manifests[0]);
     throw new ImportError(problems[0]?.problem ?? `These files are not in a format this app can read. ${SUPPORTED}`, 'unknown_format');
   }
   // A page of nothing but empty time buckets belongs to the report the other pages are from: a cost report
@@ -526,6 +533,11 @@ export async function detectImport(files: ImportFile[]): Promise<Detected> {
     );
   }
   const parser = good[0].k.parser;
+  // An export chosen with its manifest: every conversations part it lists must be there, or conversations would be missing
+  // without a word. Parts are counted rather than matched by name, since a browser renames a download whose name is taken.
+  if (parser === 'claude-export') {
+    for (const manifest of manifests) if (good.length < conversationParts(manifest).length) throw missingParts(manifest, good.length);
+  }
   if (parser === 'generic-csv' && good.length > 1) {
     throw new ImportError('Import CSV files one at a time: each has its own columns to match.', 'mixed_selection');
   }

@@ -25,9 +25,18 @@ files)".
 the account's address; it expires 24 hours after it is created and may work only once.
 Members of Team and Enterprise organizations can export only if an owner allows it.
 
-**Choose:** the ZIP exactly as downloaded, or the `conversations.json` inside it. All
-known packagings are recognised: the classic ZIP, the `data-…-batch-0000.zip` form, and
-the multi-part form where one part is named `conversations-000.zip`.
+**Choose:** since November 2026 the export arrives as a small manifest file,
+`manifest-….json`, that links to one ZIP per category (`conversations-000.zip`,
+`light_metadata-000.zip`, projects, memories, feedback). The links work only in a
+browser signed in to claude.ai, so the app does not download them itself. Choose the
+manifest: the app lists the conversations parts with their download links. Download
+them, then choose the downloaded `conversations-…zip` files, all of them together. The
+other parts hold no usage; choosing them as well does no harm, and when the manifest is
+chosen with the parts, a missing conversations part is reported instead of silently
+leaving conversations out.
+
+An older export, the ZIP exactly as downloaded or the `conversations.json` inside it,
+is read as before: the classic ZIP and the `data-…-batch-0000.zip` form.
 
 **Read from it:** per conversation the id, title and dates; per message the id, sender,
 time, text, thinking, tool calls and results, and the extracted text of attachments. The
@@ -299,6 +308,8 @@ The message names the file and says what was found. The most common cases:
 
 | Message | What to do |
 |---|---|
+| … is the manifest of a claude.ai data export | The page lists the conversations parts with their download links. Download them while signed in to claude.ai and choose them. |
+| The export's manifest lists … conversations parts, but only … | Choose every `conversations-…zip` together. |
 | The archive does not contain a conversations.json file | Choose the ZIP from the export email, or the part named "conversations" if it came in several parts. |
 | The ZIP archive is incomplete | The download was cut short. Download the file again; for a claude.ai export, request a new one, as the link works for a limited time. |
 | … is a ZIP archive, but none of the files in it has a name this app reads from an archive | The message lists what the archive holds. Unpack it and choose the file, or give the file a .jsonl, .json, .csv or .tsv ending. |
