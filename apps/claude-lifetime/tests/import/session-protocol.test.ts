@@ -2,6 +2,7 @@ import { strToU8, zipSync } from 'fflate';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ParsedImport } from '@/core/types';
 import type { SqlDriver } from '@/db/driver';
+import { ExportManifestFound } from '@/import/claude-export/manifest';
 import type { Detected } from '@/import/detect';
 import { ImportSession } from '@/import/session';
 import { resetStaging, type StagedBatch } from '@/import/staging';
@@ -480,6 +481,32 @@ describe('with the real import worker', () => {
     expect(second.preview.nothingNew).toBe(true);
     await session.discard();
     expect(locks.held.has(LOCK)).toBe(false);
+  });
+
+  it('brings a claude.ai export manifest from the worker with its parts, for the page to show', async () => {
+    const manifest = fileOf(
+      'manifest-x.json',
+      JSON.stringify({
+        created_at: '2026-11-11T18:02:14Z',
+        total_files: 2,
+        data_files: [
+          { batch_index: 0, category: 'conversations', part: 1, filename: 'conversations-000.zip', export_url: 'https://claude.ai/export/x/download/a' },
+          { batch_index: 1, category: 'projects', part: 1, filename: 'projects-000.zip', export_url: 'https://claude.ai/export/x/download/b' },
+        ],
+      }),
+    );
+    const error = await open()
+      .detect([manifest])
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ExportManifestFound);
+    expect((error as ExportManifestFound).manifest).toEqual({
+      fileName: 'manifest-x.json',
+      createdAt: '2026-11-11T18:02:14Z',
+      parts: [
+        { category: 'conversations', filename: 'conversations-000.zip', url: 'https://claude.ai/export/x/download/a' },
+        { category: 'projects', filename: 'projects-000.zip', url: 'https://claude.ai/export/x/download/b' },
+      ],
+    });
   });
 
   it('leaves nothing of a cancelled import for the one that follows it at once', async () => {

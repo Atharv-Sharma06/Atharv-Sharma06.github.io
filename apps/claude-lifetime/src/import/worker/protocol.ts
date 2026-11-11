@@ -1,4 +1,5 @@
-import type { ImportFile, ImportProgress, ParsedImport } from '@/core/types';
+import { ImportError, type ImportFile, type ImportProgress, type ParsedImport } from '@/core/types';
+import { ExportManifestFound, type ExportManifest } from '../claude-export/manifest';
 import type { Detected } from '../detect';
 import type { ParserKey } from '../formats';
 import type { StagedBatch } from '../staging';
@@ -25,6 +26,13 @@ export interface WorkerError {
   message: string;
   code: string;
   details?: string;
+  /** For code `export_manifest`: the manifest that was chosen, so the page can show its parts. */
+  manifest?: ExportManifest;
+}
+
+/** The error a WorkerError stands for, on the page's side of the worker. */
+export function errorFrom(error: WorkerError): ImportError {
+  return error.manifest ? new ExportManifestFound(error.manifest) : new ImportError(error.message, error.code, error.details);
 }
 
 export type FromWorker =

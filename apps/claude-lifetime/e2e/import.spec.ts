@@ -74,6 +74,38 @@ test('a claude.ai export is previewed, saved as estimated usage, and never count
   expect(await lifetimeTokens(page)).toBe(total);
 });
 
+test('a claude.ai export that arrives as a manifest shows what to download, then reads the conversations part', async ({ page }, testInfo) => {
+  const manifest = testInfo.outputPath('manifest-00000000-0000-4000-8000-000000000000-1794420044-abcdef12-2026-11-11-18-02-14.json');
+  const parts = [
+    { category: 'conversations', filename: 'conversations-000.zip' },
+    { category: 'light_metadata', filename: 'light_metadata-000.zip' },
+    { category: 'projects', filename: 'projects-000.zip' },
+  ];
+  writeFileSync(
+    manifest,
+    JSON.stringify({
+      created_at: '2026-11-11T18:02:14Z',
+      total_files: parts.length,
+      data_files: parts.map((p, i) => ({ batch_index: i, part: 1, ...p, export_url: `https://claude.ai/export/test/download/${i}` })),
+    }),
+  );
+  await chooseFiles(page, manifest);
+  await expect(page.getByRole('heading', { name: 'Download the conversations first' })).toBeVisible();
+  const link = page.getByRole('link', { name: 'Download conversations-000.zip' });
+  await expect(link).toHaveAttribute('href', 'https://claude.ai/export/test/download/0');
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(page.getByText('The other parts (account details and projects) hold no usage and are not needed.')).toBeVisible();
+
+  // The person downloads the part from claude.ai (not part of this test) and chooses it.
+  const conversations = testInfo.outputPath('conversations-000.zip');
+  writeFileSync(conversations, zipSync({ 'conversations.json': readFileSync(fixture('claude-export/conversations.json')) }));
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Choose the downloaded ZIP' }).click();
+  await (await chooser).setFiles(conversations);
+  await expect(page.getByRole('heading', { name: 'Review before saving' })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText('Recognised as claude.ai data export')).toBeVisible();
+});
+
 test('Claude Code transcripts are imported as exact usage', async ({ page }) => {
   await importFiles(page, TRANSCRIPTS);
   await page.getByRole('link', { name: 'Open the overview' }).click();

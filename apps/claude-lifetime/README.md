@@ -80,7 +80,7 @@ what is duplicated and what the file cannot tell, and saves only when you confir
 
 | Source | How to get it | Figures |
 |---|---|---|
-| claude.ai data export | On claude.ai or in Claude Desktop: Settings, Privacy, "Export data". A download link arrives by email and expires after 24 hours. Choose the ZIP as downloaded. | Estimated |
+| claude.ai data export | On claude.ai or in Claude Desktop: Settings, Privacy, "Export data". The export arrives as a manifest file that links to its parts and expires after 24 hours. Choose the manifest: the app lists the conversations parts to download, and you then choose those ZIPs. An older single-ZIP export is chosen as downloaded. | Estimated |
 | Claude Code sessions | Choose your Claude Code folder (`~/.claude`, or the `projects` folder inside it), or a ZIP of it. | Exact |
 | Claude Code ledger | Run the collector script (see below) and import the file it writes. | Exact |
 | API usage and cost | Claude Console: export the Usage and Cost pages as CSV. With an organization admin key: save the JSON of the Admin API usage and cost report endpoints. | Exact |

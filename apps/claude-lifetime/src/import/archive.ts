@@ -28,8 +28,14 @@ const MAX_DEPTH = 2;
 const SNIFF_ALL_UP_TO = 200;
 
 const EXPORT_FILE = /^conversations(?:[-_.]\d+)?\.json$/i;
-/** The other files of a claude.ai export. A part of an export that holds only these is not opened (see isExportPart). */
-const EXPORT_SIDE_FILE = /^(?:users|projects|memories)(?:[-_.]\d+)?\.json$/i;
+/**
+ * The other files of a claude.ai export: users.json, projects.json and memories.json of the single-ZIP
+ * export, and the parts a manifest lists besides the conversations (users.json and login_history.json,
+ * projects/<uuid>.json, memories/<account>.json, reflections/<account>.json). A part of an export that
+ * holds only these is not opened (see isExportPart).
+ */
+const EXPORT_SIDE_FILE = /^(?:users|projects|memories|login_history)(?:[-_.]\d+)?\.json$/i;
+const EXPORT_SIDE_FOLDER = /^(?:[^/]+\/)?(?:projects|memories|reflections)\/[^/]+\.json$/i;
 
 /**
  * An entry's name as a path: forward slashes, no drive letter or leading slash, and no "." or ".."
@@ -55,10 +61,11 @@ export function isReadableEntry(path: string): boolean {
 /**
  * Whether the readable files of an archive (by their paths) are only the side files of a claude.ai
  * export: a part of an export that arrived in several, without its conversations. It is left a ZIP,
- * so that detection can say to choose the part with the conversations.
+ * so that detection can say to choose the part with the conversations, and so that a projects part
+ * with hundreds of files does not count as hundreds of files.
  */
 export function isExportPart(readable: readonly string[]): boolean {
-  return readable.length > 0 && readable.every((path) => EXPORT_SIDE_FILE.test(path.split('/').pop() ?? ''));
+  return readable.length > 0 && readable.every((path) => EXPORT_SIDE_FILE.test(path.split('/').pop() ?? '') || EXPORT_SIDE_FOLDER.test(path));
 }
 
 /** A stream that is opened on its first read. */

@@ -6,7 +6,7 @@ import { commitImport, importGeneration, loadKnownRequestKeys, previewImport, ty
 import type { Detected } from './detect';
 import { acquireImportLock } from './lock';
 import { resetStaging, StagingWriter, type StagedBatch } from './staging';
-import type { FromWorker, ParseContextMessage, ToWorker } from './worker/protocol';
+import { errorFrom, type FromWorker, type ParseContextMessage, type ToWorker } from './worker/protocol';
 
 /**
  * One import, from the files the user picked to the committed records:
@@ -134,7 +134,7 @@ export class ImportSession {
             resolve(m.detected);
           } else if (m.type === 'error') {
             settled();
-            reject(new ImportError(m.error.message, m.error.code, m.error.details));
+            reject(errorFrom(m.error));
           }
         },
         abandon: (reason) => {
@@ -283,7 +283,7 @@ export class ImportSession {
               resolve(m.parsed);
             });
           } else if (m.type === 'error') {
-            fail(new ImportError(m.error.message, m.error.code, m.error.details));
+            fail(errorFrom(m.error));
           }
         },
         abandon: fail,
