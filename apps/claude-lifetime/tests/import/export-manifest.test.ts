@@ -224,6 +224,46 @@ describe('a manifest in the selection', () => {
     });
   });
 
+  it('keeps to the parts when conversations are missing from an unpacked or renamed export', async () => {
+    const real = (conversations: number) =>
+      fileOf(
+        'manifest-x.json',
+        JSON.stringify({
+          created_at: '2026-11-11T18:02:14.424124+00:00',
+          total_files: 6 + conversations,
+          data_files: [
+            ...['light_metadata', 'projects', 'design_chats', 'frames', 'artifact_data', 'claude_code_cloud'].map((category, i) => entry(i, category, `${category}-000.zip`)),
+            ...Array.from({ length: conversations }, (_, i) => entry(6 + i, 'conversations', `conversations-00${i}.zip`)),
+          ],
+        }),
+        { path: 'export/manifest-x.json' },
+      );
+    const at = (path: string, content: string | Uint8Array) => fileOf(path.split('/').pop()!, content, { path });
+    const plain = /but the chosen files hold only 1 file of claude\.ai conversations\. Choose all of the listed parts together/;
+    // Each part unpacked into a folder of its name, as Safari does: the other parts' files are passed over, even chat-like ones.
+    const unpacked = [
+      real(2),
+      at('export/conversations-000/conversations.json', conversationsJson),
+      at('export/light_metadata-000/users.json', '[{"uuid":"u1","email_address":"a@example.com"}]'),
+      at('export/light_metadata-000/login_history.json', '[{"created_at":"2026-11-01T10:00:00Z"}]'),
+      at('export/projects-000/projects/p0.json', '{"uuid":"p0","name":"P","created_at":"2026-01-01T00:00:00Z"}'),
+      at('export/design_chats-000/design_chats/d1.json', conversationsJson),
+      at('export/artifact_data-000/artifact_data/a1/data.csv', 'name,value\na,1\n'),
+      at('export/README.md', '# my export, with notes'),
+    ];
+    expect((await caught(detectSelection(unpacked)))?.message).toMatch(plain);
+    // The same with both conversations parts reads exactly those two.
+    const complete = [...unpacked.slice(0, 2), at('export/conversations-001/conversations.json', conversationsJson), ...unpacked.slice(2)];
+    complete[0] = real(2);
+    expect(await detectSelection(complete)).toMatchObject({ parser: 'claude-export', fileIndexes: [1, 2] });
+    // A side part the browser renamed, and a stray CSV, are no part of the message either.
+    const renamed = [real(2), at('export/conversations.json', conversationsJson), zipOf('frames-000 (1).zip', { 'frames/f1.json': strToU8('{}') }), at('notes.csv', 'a,b\n1,2\n')];
+    expect((await caught(detectSelection(renamed)))?.message).toMatch(plain);
+    // A part cut off while downloading is named.
+    const cut = fileOf('conversations-001.zip', zipSync({ 'conversations.json': conversationsJson }).subarray(0, 300));
+    expect((await caught(detectSelection([real(2), at('export/conversations.json', conversationsJson), cut])))?.message).toContain('"conversations-001.zip" could not be read:');
+  });
+
   it('says that a part picked on the manifest step holds no conversations, also when the browser renamed it', async () => {
     const manifest = readExportManifest(JSON.parse(await fullManifest(1).blob.text()), MANIFEST_NAME)!;
     const [metadata] = otherParts();

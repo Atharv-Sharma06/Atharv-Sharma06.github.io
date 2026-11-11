@@ -42,9 +42,14 @@ export async function detectSelection(files: ImportFile[], manifest?: ExportMani
   const expanded = await expandArchives(files);
   const given = manifest ? [manifest] : [];
   const manifests = [...given, ...(await manifestsIn(expanded))];
-  const partsOf = (keep: (category: string) => boolean) =>
-    new Set(manifests.flatMap((m) => m.parts.filter((p) => keep(p.category)).map((p) => p.filename.toLowerCase())));
-  const inParts = (names: Set<string>) => (f: ImportFile) => (f.path ?? f.name).split('/').some((segment) => names.has(segment.toLowerCase()));
+  // A part is known by its name, also unpacked into a folder of that name, or renamed by the browser ("frames-000 (1).zip").
+  const stem = (name: string) =>
+    name
+      .toLowerCase()
+      .replace(/\.zip$/, '')
+      .replace(/(?: \(\d+\)| \d+)$/, '');
+  const partsOf = (keep: (category: string) => boolean) => new Set(manifests.flatMap((m) => m.parts.filter((p) => keep(p.category)).map((p) => stem(p.filename))));
+  const inParts = (names: Set<string>) => (f: ImportFile) => (f.path ?? f.name).split('/').some((segment) => names.has(stem(segment)));
   const sideParts = partsOf((category) => category !== 'conversations');
   const isSidePart = inParts(sideParts);
   let kept = expanded.map((file, i) => ({ file, i })).filter(({ file }) => !isSidePart(file));
@@ -56,7 +61,7 @@ export async function detectSelection(files: ImportFile[], manifest?: ExportMani
     manifestsForDetection = [];
   }
   if (kept.length === 0) {
-    const names = [...new Set(expanded.map((f) => (f.path ?? f.name).split('/').find((s) => sideParts.has(s.toLowerCase())) ?? f.name))];
+    const names = [...new Set(expanded.map((f) => (f.path ?? f.name).split('/').find((s) => sideParts.has(stem(s))) ?? f.name))];
     throw new ExportManifestFound(
       newestManifest(manifests),
       `${names.length === 1 ? `"${names[0]}" is a part` : `${names.map((n) => `"${n}"`).join(', ')} are parts`} of the export that ${names.length === 1 ? 'holds' : 'hold'} no conversations.`,

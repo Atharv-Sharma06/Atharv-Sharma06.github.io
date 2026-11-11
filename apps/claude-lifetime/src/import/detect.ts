@@ -55,6 +55,12 @@ const SUPPORTED =
   'Claude Lifetime reads: the claude.ai data export (its conversations ZIP, or conversations.json), Claude Code transcripts (.jsonl files or the whole .claude folder), ' +
   'Anthropic API usage and cost reports (JSON), Claude Console CSV exports, and usage tables as CSV or JSON. Any of them can also be in a ZIP archive.';
 
+const baseName = (file: ImportFile) => (file.path ?? file.name).split('/').pop() ?? file.name;
+/** Whether a file could be a conversations part of an export: one named so, or any ZIP archive (a part the browser renamed). */
+const couldBePart = (file: ImportFile) => /^conversations\b|\.zip$/i.test(baseName(file));
+/** A problem as part of a longer message: without the list of what the app reads. */
+const shortProblem = (problem: string) => problem.replace(SUPPORTED, '').trim();
+
 /** Endings of files that are not data, whatever their first line looks like. */
 const NOT_DATA = new Set(
   (
@@ -533,30 +539,28 @@ export async function detectImport(files: ImportFile[], options: { manifests?: r
       const read = [...conversations];
       const found: ExportManifest[] = [];
       const unreadable: string[] = [];
-      const small = files.length <= MAX_SEPARATE_FILES;
-      if (small) {
-        for (let i = 0; i < files.length; i++) {
-          if (conversations.includes(i)) continue;
-          const path = files[i].path ?? files[i].name;
-          const base = path.split('/').pop() ?? path;
-          if (!/^manifest.*\.json$/i.test(base) && !/^conversations\b.*\.(json|zip)$/i.test(base)) continue;
-          const kind: Kind = await classify(files[i]).catch((error: unknown) => ({
-            parser: null,
-            problem: error instanceof Error ? error.message : String(error),
-          }));
-          if (kind.parser === 'claude-export') read.push(i);
-          else if (kind.parser === null && kind.manifest) found.push(kind.manifest);
-          else if (kind.parser === null && !kind.exportPart) unreadable.push(kind.problem);
+      const looked = new Set(conversations);
+      const lookAt = async (i: number) => {
+        looked.add(i);
+        const kind: Kind = await classify(files[i]).catch((error: unknown) => ({
+          parser: null,
+          problem: `"${files[i].name}" could not be read: ${error instanceof Error ? error.message : String(error)}`,
+        }));
+        if (kind.parser === 'claude-export') read.push(i);
+        else if (kind.parser === null && kind.manifest) found.push(kind.manifest);
+        else if (kind.parser === null && !kind.exportPart && couldBePart(files[i])) unreadable.push(shortProblem(kind.problem));
+      };
+      if (files.length <= MAX_SEPARATE_FILES) {
+        for (let i = 0; i < files.length; i++) if (!looked.has(i) && /^(?:manifest.*\.json|conversations\b.*\.(?:json|zip))$/i.test(baseName(files[i]))) await lookAt(i);
+        // Fewer parts by name than a manifest lists: a part can have a name of its own ("Claude export part 2.zip"). The other
+        // ZIP archives are looked at as well. Nothing else in the folder counts or changes the outcome.
+        if (read.length < partsNeeded([...given, ...found])) {
+          for (let i = 0; i < files.length; i++) if (!looked.has(i) && /\.zip$/i.test(baseName(files[i]))) await lookAt(i);
         }
       }
-      // Fewer parts by name than a manifest lists: a part can have another name altogether ("Claude export part 2.zip").
-      // In a small selection every file is then looked at below, which finds such a part or says why the parts are short.
-      const listed = [...given, ...found];
-      if (!small || read.length >= partsNeeded(listed)) {
-        read.sort((a, b) => a - b);
-        checkParts(listed, read.length, unreadable);
-        return done('claude-export', read, 'unpacked claude.ai data export');
-      }
+      read.sort((a, b) => a - b);
+      checkParts([...given, ...found], read.length, unreadable);
+      return done('claude-export', read, 'unpacked claude.ai data export');
     }
   }
 
@@ -596,7 +600,11 @@ export async function detectImport(files: ImportFile[], options: { manifests?: r
   }
   const parser = good[0].k.parser;
   // An export chosen with its manifest: every conversations part it lists must be there (see checkParts).
-  if (parser === 'claude-export') checkParts(manifests, good.length, problems.filter((p) => !p.manifest && !p.exportPart).map((p) => p.problem));
+  if (parser === 'claude-export') {
+    // Only what could be a conversations part is said to be wrong: not the export's other files, or a README lying next to it.
+    const unreadable = kinds.flatMap((k, i) => (k.parser === null && !k.manifest && !k.exportPart && couldBePart(files[i]) ? [shortProblem(k.problem)] : []));
+    checkParts(manifests, good.length, unreadable);
+  }
   if (parser === 'generic-csv' && good.length > 1) {
     throw new ImportError('Import CSV files one at a time: each has its own columns to match.', 'mixed_selection');
   }
