@@ -81,11 +81,14 @@ what is duplicated and what the file cannot tell, and saves only when you confir
 | Source | How to get it | Figures |
 |---|---|---|
 | claude.ai data export | On claude.ai or in Claude Desktop: Settings, Privacy, "Export data". A download link arrives by email and expires after 24 hours. Choose the ZIP as downloaded. | Estimated |
-| Claude Code sessions | Choose your Claude Code folder (`~/.claude`, or the `projects` folder inside it). | Exact |
+| Claude Code sessions | Choose your Claude Code folder (`~/.claude`, or the `projects` folder inside it), or a ZIP of it. | Exact |
 | Claude Code ledger | Run the collector script (see below) and import the file it writes. | Exact |
 | API usage and cost | Claude Console: export the Usage and Cost pages as CSV. With an organization admin key: save the JSON of the Admin API usage and cost report endpoints. | Exact |
 | CSV or JSON table | Any table with a date and token counts; you map the columns. | As you declare |
 | Manual entry | "Add usage by hand" on the import page. | As you declare |
+
+Any of these files can also be chosen inside a ZIP archive: the app opens it in the
+browser and reads the files in it, without unpacking anything to disk.
 
 File formats, the CSV/JSON schema and every error message are described in
 [docs/IMPORT-FORMATS.md](docs/IMPORT-FORMATS.md).

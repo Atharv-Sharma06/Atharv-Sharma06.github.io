@@ -166,7 +166,12 @@ files ─▶ detect ─▶ parser (worker) ─▶ staging tables ─▶ preview 
 ```
 
 1. **Detect** (`src/import/detect.ts`) looks at the beginning of each file, not at its
-   name, and picks a parser or explains why none fits.
+   name, and picks a parser or explains why none fits. Before that, the worker opens the
+   ZIP archives in the selection (`src/import/archive.ts`, `src/import/selection.ts`):
+   the files inside one take its place, as blobs that inflate their entry on demand. A
+   claude.ai export stays a ZIP. Detection returns positions in this opened-up list, and
+   the parse request carries the page's selection with those positions, so the worker
+   opens the archives again in the same way and reads the same files.
 2. A **parser** turns its input into the small set of normalised records defined in
    `src/core/types.ts` and hands them to a sink. Parsers stream: the claude.ai export is
    read conversation by conversation from the ZIP, transcripts line by line.

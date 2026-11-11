@@ -64,6 +64,7 @@ body {
   background-position: 0 0, 97px 61px, 211px 143px, 0 0;
   background-repeat: repeat, repeat, repeat, no-repeat;
   font-family: var(--px);
+  font-variant-ligatures: none; /* Pixelify Sans draws its fi/fl ligatures like an "A" ("Ancial") */
   font-size: 16px;
   line-height: 1.75;
   text-transform: none;
@@ -296,6 +297,7 @@ hr { border: 0; height: 2px; background: var(--dash); margin: 22px 0; }
 .sec-sub h3 { font-size: 8px; font-family: var(--px-d); font-size: 8px; line-height: 16px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--gold); }
 .commits .e-meta { font-family: var(--px); font-size: 14px; text-transform: none; letter-spacing: 0; color: var(--green); }
 .commits .e-desc { color: var(--fg); }
+.commits .e-desc a:hover, .commits .e-desc a:focus-visible { color: var(--gold); }
 
 .state {
   display: inline-block;

@@ -145,7 +145,7 @@ export class ImportSession {
     });
   }
 
-  /** Parses the detected files into the staging tables and returns the preview. */
+  /** Parses the detected files into the staging tables and returns the preview. `files` is the selection given to `detect`. */
   async prepare(
     files: ImportFile[],
     detected: Detected,
@@ -206,9 +206,8 @@ export class ImportSession {
         context.knownFiles = rows.map((r) => [r.path, Number(r.size), new Date(r.last_modified).getTime()]);
       }
 
-      const chosen = detected.fileIndexes.map((i) => files[i]);
       const writer = new StagingWriter(this.db);
-      const parsed = await this.parse(run, detected, chosen, context, transfer, writer, onProgress);
+      const parsed = await this.parse(run, detected, files, context, transfer, writer, onProgress);
       proceed();
       await writer.finish();
       proceed();
@@ -233,7 +232,8 @@ export class ImportSession {
     return new Promise<ParsedImport>((resolve, reject) => {
       const id = this.nextId++;
       const worker = this.ensureWorker();
-      this.send({ type: 'parse', id, parser: detected.parser, files, context }, transfer);
+      // The whole selection goes, as it was detected: the worker opens its ZIP archives again and picks the files by position.
+      this.send({ type: 'parse', id, parser: detected.parser, files, fileIndexes: detected.fileIndexes, context }, transfer);
 
       // Batches are written strictly in order; an acknowledgement lets the worker send the next one.
       let writing: Promise<void> = Promise.resolve();

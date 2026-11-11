@@ -1,6 +1,7 @@
 import { resolveModel } from '@/core/models';
 import { Sha256 } from '@/core/sha256';
 import { ImportError, type ImportFile, type ImportSink, type ParseContext, type ParseWarning } from '@/core/types';
+import { importFileName, sameArchive } from '../archive';
 
 /**
  * Plumbing shared by the usage-report, cost-report, CSV and JSON importers:
@@ -91,7 +92,7 @@ export function requireFiles(files: ImportFile[]): void {
 
 export function describeFiles(files: ImportFile[]): { fileName: string; fileSize: number } {
   return {
-    fileName: files.length === 1 ? files[0].name : `${files.length} files`,
+    fileName: importFileName(files, sameArchive(files)),
     fileSize: files.reduce((sum, f) => sum + f.size, 0),
   };
 }

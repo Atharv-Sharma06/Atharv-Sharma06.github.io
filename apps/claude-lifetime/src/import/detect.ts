@@ -5,6 +5,7 @@ import { looksLikeLedger } from './claude-code/ledger';
 import { previewCsv, type CsvPreview } from './generic/csv';
 import { detectCsvFormat, detectJsonFormat } from './generic/detect';
 import type { ParserKey } from './formats';
+import { entryPath, isExportPart, isReadableEntry } from './archive';
 import { looksLikeZip, readZipDirectory } from './util/zip';
 
 /**
@@ -29,6 +30,11 @@ export interface Detected {
   ignoredFiles: number;
   /** For a CSV of the user's own making: header, sample rows and the proposed column mapping. */
   csv?: CsvPreview;
+  /**
+   * The name of the first file to be read, for the user. Set by the import worker, whose positions
+   * count the files inside ZIP archives (see selection.ts), so the page cannot look the name up itself.
+   */
+  leadName?: string;
 }
 
 const HEAD_BYTES = 256 * 1024;
@@ -46,7 +52,7 @@ const SAMPLE_FILES = 20;
 
 const SUPPORTED =
   'Claude Lifetime reads: the claude.ai data export (ZIP or conversations.json), Claude Code transcripts (.jsonl files or the whole .claude folder), ' +
-  'Anthropic API usage and cost reports (JSON), Claude Console CSV exports, and usage tables as CSV or JSON.';
+  'Anthropic API usage and cost reports (JSON), Claude Console CSV exports, and usage tables as CSV or JSON. Any of them can also be in a ZIP archive.';
 
 type Encoding = 'utf-8' | 'utf-16le' | 'utf-16be';
 
@@ -211,24 +217,37 @@ async function classify(file: ImportFile): Promise<Kind> {
 
   if (looksLikeZip(head.bytes)) {
     const entries = await readZipDirectory(file.blob);
-    const names = entries.filter((e) => !e.isDirectory).map((e) => e.name);
+    // Names as paths with forward slashes: some Windows tools write backslashes.
+    const names = entries.filter((e) => !e.isDirectory).map((e) => entryPath(e.name));
     const base = (n: string) => n.split('/').pop() ?? n;
     if (names.some((n) => /^conversations(?:[-_.]\d+)?\.(json|zip)$/i.test(base(n)))) {
       return { parser: 'claude-export', recognisedAs: 'ZIP archive of a claude.ai data export' };
     }
-    if (names.some((n) => /\.jsonl$/i.test(n) && /(^|\/)projects\//.test(n))) {
+    const readable = names.filter(isReadableEntry);
+    const shown = names.filter((n) => !/(^|\/)(__MACOSX\/|\._)/i.test(n));
+    const listed = shown.slice(0, 6).join(', ') + (shown.length > 6 ? ', …' : '');
+    if (isExportPart(readable)) {
       return {
         parser: null,
-        problem: `"${file.name}" is a ZIP archive of Claude Code files. Unpack it and choose the unpacked folder, so the transcripts can be read one by one.`,
+        problem:
+          `"${file.name}" is a ZIP archive, but not a claude.ai data export: it has no conversations.json (it contains ${listed}). ` +
+          'If your export arrived in several parts, choose the part that contains conversations.json.',
       };
     }
-    const listed = names.slice(0, 6).join(', ');
+    // Any other archive was opened before detection (see archive.ts), unless it lies too deep inside other archives,
+    // or it is one of a large selection and its name does not say it is an archive.
+    if (readable.length > 0) {
+      return {
+        parser: null,
+        problem: `"${file.name}" is a ZIP archive that was not opened, because it lies too deep inside other archives or its name does not end in .zip. Unpack it and choose the files inside it.`,
+      };
+    }
+    if (shown.length === 0) return { parser: null, problem: `"${file.name}" is a ZIP archive with no files in it.` };
     return {
       parser: null,
       problem:
-        `"${file.name}" is a ZIP archive, but not a claude.ai data export: it has no conversations.json` +
-        (listed ? ` (it contains ${listed}${names.length > 6 ? ', …' : ''}).` : '.') +
-        ' If your export arrived in several parts, choose the part that contains conversations.json.',
+        `"${file.name}" is a ZIP archive, but none of the files in it has a name this app reads from an archive (.jsonl, .json, .csv or .tsv): ` +
+        `it contains ${listed}. Unpack the archive and choose the file itself, or give it one of those endings. ${SUPPORTED}`,
     };
   }
 
@@ -475,7 +494,8 @@ export async function detectImport(files: ImportFile[]): Promise<Detected> {
         // The Claude Code parser reads the .jsonl files and nothing else. Whatever else was selected is reported as ignored.
         const read = jsonl.filter((i) => !somethingElse.has(i));
         const count = `${read.length.toLocaleString('en-US')} Claude Code transcript ${read.length === 1 ? 'file' : 'files'}`;
-        const fromFolder = read.some((i) => (files[i].path ?? '').includes('/'));
+        // Files from a ZIP archive have the archive's name in their path; the archive is named separately (see selection.ts).
+        const fromFolder = read.some((i) => files[i].archive === undefined && (files[i].path ?? '').includes('/'));
         return done('claude-code', read, fromFolder ? `folder with ${count}` : count);
       }
     } else if (conversations.length > 0) {

@@ -9,6 +9,7 @@ import {
   type ParseWarning,
   type SyncedFileInfo,
 } from '@/core/types';
+import { importFileName, sameArchive } from '../archive';
 import { aggregateUsage } from './aggregate';
 import { deferInProgress, extractTranscripts, IN_PROGRESS_WINDOW_MS, isTranscriptRow } from './extract';
 import { emptyLedger, LEDGER_FORMAT, LedgerError, ledgerRecords, looksLikeLedger, mergeIntoLedger, parseLedger } from './ledger';
@@ -83,26 +84,39 @@ function cancelIfAborted(ctx: ParseContext): void {
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
 
-function deferralWarnings(deferredResponses: number, deferredPrompts: number): ParseWarning[] {
+/**
+ * What was set aside for later. `fromArchive`: the files come from ZIP archives, which never change, so
+ * importing the same archive again would count a response as far as it had been written when the archive
+ * was made: the advice is to import the folder, or an archive made later.
+ */
+function deferralWarnings(deferredResponses: number, deferredPrompts: number, fromArchive = false): ParseWarning[] {
   const warnings: ParseWarning[] = [];
+  const later = 'To count them in full, import your Claude Code folder, or a ZIP archive made after the session went on; importing this archive again would count only what it holds.';
   if (deferredResponses > 0) {
     warnings.push({
       code: 'in_progress_deferred',
-      message:
-        `${plural(deferredResponses, 'response is', 'responses are')} still being written by Claude Code and ` +
-        `${deferredResponses === 1 ? 'was' : 'were'} left out for now. Import again in a few minutes to add ${deferredResponses === 1 ? 'it' : 'them'}.`,
+      message: fromArchive
+        ? `${plural(deferredResponses, 'response was', 'responses were')} still being written by Claude Code when the archive was made and ` +
+          `${deferredResponses === 1 ? 'was' : 'were'} left out. ${later}`
+        : `${plural(deferredResponses, 'response is', 'responses are')} still being written by Claude Code and ` +
+          `${deferredResponses === 1 ? 'was' : 'were'} left out for now. Import again in a few minutes to add ${deferredResponses === 1 ? 'it' : 'them'}.`,
       count: deferredResponses,
     });
   }
   if (deferredPrompts > 0) {
     warnings.push({
       code: 'prompts_deferred',
-      message: `${plural(deferredPrompts, 'prompt has', 'prompts have')} no recorded answer yet and will be counted together with the answer.`,
+      message: fromArchive
+        ? `${plural(deferredPrompts, 'prompt has', 'prompts have')} no answer in the archive yet and ${deferredPrompts === 1 ? 'was' : 'were'} left out. ${later}`
+        : `${plural(deferredPrompts, 'prompt has', 'prompts have')} no recorded answer yet and will be counted together with the answer.`,
       count: deferredPrompts,
     });
   }
   return warnings;
 }
+
+/** The sample of an unreadable file, as extract.ts writes it. */
+const brokenSample = (f: { name: string; error?: string } | undefined) => (f === undefined ? undefined : `${f.name}: ${f.error ?? ''}`);
 
 export const claudeCodeParser: ImportParser = {
   async parse(files: ImportFile[], sink: ImportSink, ctx: ParseContext): Promise<ParsedImport> {
@@ -127,6 +141,19 @@ export const claudeCodeParser: ImportParser = {
         `${files.length} file(s) given, none of them a .jsonl transcript`,
       );
     }
+    // Files in a ZIP archive that have a password or a compression method this app cannot unpack. Their
+    // contents were never seen, so when nothing else had usage, that is what to say rather than that there is none.
+    const locked = extraction.files.filter((f) => f.status === 'unreadable' && (f.errorCode === 'zip_encrypted' || f.errorCode === 'zip_unsupported_compression'));
+    if (c.usageRows === 0 && c.filesSkippedUnchanged === 0 && locked.length > 0) {
+      const first = locked[0];
+      const others = locked.length - 1;
+      throw new ImportError(
+        (first.error ?? `"${first.name}" could not be unpacked.`) +
+          (others > 0 ? ` ${plural(others, 'other transcript', 'other transcripts')} in the selection could not be unpacked either.` : ''),
+        first.errorCode ?? 'zip_encrypted',
+      );
+    }
+
     // Files that are skipped as unchanged had usage when they were imported, so an
     // incremental sync that finds nothing new is not an error.
     if (c.usageRows === 0 && c.filesSkippedUnchanged === 0) {
@@ -159,12 +186,28 @@ export const claudeCodeParser: ImportParser = {
         sample: extraction.samples.malformedLine,
       });
     }
-    if (c.filesUnreadable > 0) {
+    // A transcript in a ZIP archive does not change: what is missing from it now does not follow later.
+    const fromArchive = files.every((f) => f.archive !== undefined);
+    const broken = c.filesUnreadable - locked.length;
+    if (broken > 0) {
       warnings.push({
         code: 'unreadable_files',
-        message: `${plural(c.filesUnreadable, 'file', 'files')} could not be read to the end (often because Claude Code was writing to it). What was read is counted; the rest follows with the next import.`,
-        count: c.filesUnreadable,
-        sample: extraction.samples.unreadableFile,
+        message: fromArchive
+          ? `${plural(broken, 'file', 'files')} in the ZIP archive could not be unpacked to the end, because the archive is damaged. What was read is counted; make the archive again to read the rest.`
+          : `${plural(broken, 'file', 'files')} could not be read to the end (often because Claude Code was writing to it). What was read is counted; the rest follows with the next import.`,
+        count: broken,
+        sample: locked.length === 0 ? extraction.samples.unreadableFile : brokenSample(extraction.files.find((f) => f.status === 'unreadable' && !locked.includes(f))),
+      });
+    }
+    if (locked.length > 0) {
+      warnings.push({
+        code: 'locked_files',
+        message:
+          `${plural(locked.length, 'transcript', 'transcripts')} in the ZIP archive ${locked.length === 1 ? 'has' : 'have'} a password or ` +
+          `${locked.length === 1 ? 'was' : 'were'} packed with a compression method this app cannot unpack, and ${locked.length === 1 ? 'was' : 'were'} skipped. ` +
+          'Make the archive again without a password and with ordinary compression, or choose the folder itself, to read them.',
+        count: locked.length,
+        sample: locked[0].error,
       });
     }
     if (c.usageRowsWithoutCounts > 0) {
@@ -181,13 +224,16 @@ export const claudeCodeParser: ImportParser = {
         count: c.rowsWithoutTimestamp,
       });
     }
-    warnings.push(...deferralWarnings(deferral.deferredResponses, deferral.deferredPrompts), ...outcome.warnings);
+    warnings.push(...deferralWarnings(deferral.deferredResponses, deferral.deferredPrompts, fromArchive), ...outcome.warnings);
 
     // A file is remembered as synced only when nothing in it can still change: it has
-    // been quiet for a while and nothing read from it was set aside for later.
+    // been quiet for a while and nothing read from it was set aside for later. Files from
+    // a ZIP archive are not remembered: the archive's name is part of their path, and the
+    // next archive usually has another name, so the rows would only pile up.
+    const inArchives = new Set(files.filter((f) => f.archive !== undefined).map((f) => f.path ?? f.name));
     const syncedFiles: SyncedFileInfo[] = [];
     extraction.files.forEach((f, i) => {
-      if (f.status !== 'read' || f.lastModified === undefined) return;
+      if (f.status !== 'read' || f.lastModified === undefined || inArchives.has(f.path)) return;
       if (options.now - f.lastModified < IN_PROGRESS_WINDOW_MS || deferral.hotFiles.has(i)) return;
       syncedFiles.push({ path: f.path, size: f.size, lastModified: f.lastModified });
     });
@@ -199,7 +245,7 @@ export const claudeCodeParser: ImportParser = {
       formatLabel: 'Claude Code session transcripts',
       parserVersion: CLAUDE_CODE_PARSER_VERSION,
       source: { kind: 'claude_code', label: options.sourceLabel, externalRef: options.sourceRef },
-      fileName: read.length === 1 ? read[0].name : `${read.length} transcript files`,
+      fileName: importFileName(read, sameArchive(files), 'transcript files'),
       fileSize: c.bytesRead,
       contentHash: null,
       recordsSeen: c.usageRows,
@@ -308,7 +354,8 @@ export const claudeCodeLedgerParser: ImportParser = {
     // A ledger is replaced atomically by the collector, so it is never half-written.
     if (deferral.deferredResponses + deferral.deferredPrompts === 0) {
       for (const f of read) {
-        if (f.lastModified !== undefined) syncedFiles.push({ path: f.path ?? f.name, size: f.size, lastModified: f.lastModified });
+        // As for transcripts, files from a ZIP archive are not remembered.
+        if (f.lastModified !== undefined && f.archive === undefined) syncedFiles.push({ path: f.path ?? f.name, size: f.size, lastModified: f.lastModified });
       }
     }
 
@@ -317,13 +364,13 @@ export const claudeCodeLedgerParser: ImportParser = {
       formatLabel: 'Claude Code usage ledger (collector)',
       parserVersion: CLAUDE_CODE_PARSER_VERSION,
       source: { kind: 'claude_code', label: options.sourceLabel, externalRef: options.sourceRef },
-      fileName: read.length === 1 ? read[0].name : `${read.length} ledger files`,
+      fileName: importFileName(read, sameArchive(files), 'ledger files'),
       fileSize: bytesRead,
       contentHash,
       recordsSeen: rowsRead,
       recordsSkipped: deferral.deferredResponses,
       missingFields: outcome.missingFields,
-      warnings: [...deferralWarnings(deferral.deferredResponses, deferral.deferredPrompts), ...outcome.warnings],
+      warnings: [...deferralWarnings(deferral.deferredResponses, deferral.deferredPrompts, files.every((f) => f.archive !== undefined)), ...outcome.warnings],
       requestKeys: outcome.requestKeys,
       duplicateRequests: outcome.duplicateRequests,
       syncedFiles: withUniquePaths(syncedFiles, files.map((f) => f.path ?? f.name)),

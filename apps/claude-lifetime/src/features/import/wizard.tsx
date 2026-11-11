@@ -37,7 +37,9 @@ type Stage =
 
 /** What to do about an error, by its code. The message itself already says what went wrong. */
 export const NEXT_STEP: Record<string, string> = {
-  zip_truncated: 'Request a new export on claude.ai and download it again; the link in the email works only for a short time.',
+  zip_truncated:
+    'Download the archive again, or make it again. For a claude.ai export, request a new one on claude.ai: the link in the email works only for a short time.',
+  zip_corrupt: 'Download the archive again, or make it again. Unpacking it and choosing the files inside also works when the archive tool can read it.',
   truncated_file: 'Request a new export on claude.ai and download it again; the link in the email works only for a short time.',
   range_conflict:
     'A report from the usage and cost report endpoints that runs from midnight to midnight (UTC) always fits. Exports that leave out hours without usage can be refused although they cover the day: delete the earlier import of that day first, then import this file.',
@@ -79,8 +81,8 @@ export function failureStage(error: unknown, during: 'reading' | 'saving'): Extr
 export interface WizardHandle {
   /** Starts an import with files picked elsewhere on the page. */
   start(files: ImportFile[], options?: Record<string, unknown>): void;
-  /** Opens the file picker. */
-  chooseFiles(accept?: string): void;
+  /** Opens the file picker. `options` go with the import of whatever is chosen, as for `start`. */
+  chooseFiles(accept?: string, options?: Record<string, unknown>): void;
   busy: boolean;
 }
 
@@ -101,6 +103,8 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
   const fileInput = useRef<HTMLInputElement>(null);
   const chooseButton = useRef<HTMLButtonElement>(null);
   const pendingOptions = useRef<Record<string, unknown>>({});
+  /** The options of the source card whose button opened the file picker. */
+  const pickOptions = useRef<Record<string, unknown>>({});
   const heading = useRef<HTMLHeadingElement>(null);
   /** True once the page was left. Work that was still under way then must not start an import. */
   const gone = useRef(false);
@@ -197,9 +201,10 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
     ref,
     () => ({
       start: (files, options) => void start(files, options),
-      chooseFiles: (accept) => {
+      chooseFiles: (accept, options) => {
         if (!fileInput.current) return;
         fileInput.current.accept = accept ?? '';
+        pickOptions.current = options ?? {};
         fileInput.current.click();
       },
       busy,
@@ -228,10 +233,11 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
     }
   };
 
-  /** Opens the file picker without a file type filter left over from one of the source cards. */
+  /** Opens the file picker without a file type filter or options left over from one of the source cards. */
   const chooseAnyFiles = () => {
     if (!fileInput.current) return;
     fileInput.current.accept = '';
+    pickOptions.current = {};
     fileInput.current.click();
   };
 
@@ -262,7 +268,7 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
       onChange={(e) => {
         const files = toImportFiles(Array.from(e.target.files ?? []));
         e.target.value = '';
-        if (files.length > 0) void start(files);
+        if (files.length > 0) void start(files, pickOptions.current);
       }}
     />
   );
@@ -292,8 +298,8 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
         <div>
           <p className="text-[15px] font-medium text-ink">Drop a file or folder here</p>
           <p className="mx-auto mt-1 max-w-[56ch] text-[13px] text-ink-2">
-            The format is recognised from the contents. You see what would be added, and what is missing, before anything is saved. Files are read on
-            this device and are not uploaded.
+            The format is recognised from the contents, also inside ZIP archives. You see what would be added, and what is missing, before anything
+            is saved. Files are read on this device and are not uploaded.
           </p>
         </div>
         <Button ref={chooseButton} variant="primary" onClick={chooseAnyFiles}>
@@ -366,7 +372,7 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
 
         {stage.name === 'mapping' && stage.detected.csv ? (
           <CsvMappingForm
-            fileName={stage.files[stage.detected.fileIndexes[0]]?.name ?? 'The file'}
+            fileName={stage.detected.leadName ?? 'The file'}
             csv={stage.detected.csv}
             onCancel={reset}
             onSubmit={(options, remember) => {
@@ -378,7 +384,7 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
 
         {stage.name === 'confidence' ? (
           <ConfidenceForm
-            fileName={stage.files[stage.detected.fileIndexes[0]]?.name ?? 'The file'}
+            fileName={stage.detected.leadName ?? 'The file'}
             fileCount={stage.detected.fileIndexes.length}
             onCancel={reset}
             onSubmit={(answer) => void run(stage.files, stage.detected, { ...pendingOptions.current, ...answer })}

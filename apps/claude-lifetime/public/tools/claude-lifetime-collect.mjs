@@ -344,6 +344,8 @@ var TranscriptReader = class {
         } catch (err) {
           report.status = "unreadable";
           report.error = err instanceof Error ? err.message : String(err);
+          const code = err?.code;
+          if (typeof code === "string") report.errorCode = code;
           this.counters.filesUnreadable++;
           this.samples.unreadableFile ??= `${info.base}: ${report.error}`;
           lines = null;
