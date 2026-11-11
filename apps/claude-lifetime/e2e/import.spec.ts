@@ -94,7 +94,7 @@ test('a claude.ai export that arrives as a manifest shows what to download, then
   const link = page.getByRole('link', { name: 'Download conversations-000.zip' });
   await expect(link).toHaveAttribute('href', 'https://claude.ai/export/test/download/0');
   await expect(link).toHaveAttribute('target', '_blank');
-  await expect(page.getByText('The other parts (account details and projects) hold no usage and are not needed.')).toBeVisible();
+  await expect(page.getByText('The app reads the conversations. The other parts (account details and projects) are not needed for them')).toBeVisible();
 
   // The person downloads the part from claude.ai (not part of this test) and chooses it.
   const conversations = testInfo.outputPath('conversations-000.zip');

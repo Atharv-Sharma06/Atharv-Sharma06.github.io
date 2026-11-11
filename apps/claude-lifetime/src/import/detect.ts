@@ -55,6 +55,16 @@ const SUPPORTED =
   'Claude Lifetime reads: the claude.ai data export (its conversations ZIP, or conversations.json), Claude Code transcripts (.jsonl files or the whole .claude folder), ' +
   'Anthropic API usage and cost reports (JSON), Claude Console CSV exports, and usage tables as CSV or JSON. Any of them can also be in a ZIP archive.';
 
+/** Endings of files that are not data, whatever their first line looks like. */
+const NOT_DATA = new Set(
+  (
+    'js mjs cjs jsx ts mts cts tsx py rb go rs java kt swift c cc cpp h hpp cs php sh bash zsh ps1 sql css scss vue svelte ' +
+    'md markdown html htm xml yml yaml toml ini pdf doc docx rtf pages key ppt pptx ' +
+    'png jpg jpeg gif webp svg heic ico mp3 mp4 mov wav'
+  ).split(' '),
+);
+const SPREADSHEET = new Set(['xlsx', 'xlsm', 'xls', 'ods', 'numbers']);
+
 type Encoding = 'utf-8' | 'utf-16le' | 'utf-16be';
 
 async function readHead(blob: Blob, bytes = HEAD_BYTES): Promise<{ bytes: Uint8Array; text: string; utf8: boolean; encoding: Encoding }> {
@@ -206,8 +216,13 @@ function fromJsonFormat(format: ReturnType<typeof detectJsonFormat>, what: strin
  */
 async function classify(file: ImportFile): Promise<Kind> {
   if (file.size === 0) return { parser: null, problem: `"${file.name}" is empty.` };
-  const head = await readHead(file.blob);
   const name = file.name.toLowerCase();
+  // A spreadsheet, source code, a document or a picture is named for what it is. Its first line can have commas, and a
+  // workbook or a document is a ZIP archive: neither makes it a table or an export.
+  const ending = /\.([a-z0-9]+)$/.exec(name)?.[1] ?? '';
+  if (SPREADSHEET.has(ending)) return { parser: null, problem: `"${file.name}" is a spreadsheet workbook. Save it as CSV and choose the CSV file. ${SUPPORTED}` };
+  if (NOT_DATA.has(ending)) return { parser: null, problem: `"${file.name}" is a .${ending} file, not a data file this app reads. ${SUPPORTED}` };
+  const head = await readHead(file.blob);
 
   /** What a parsed value is. `value` is the part of the file that was looked at: its first page, its first line, or all of it. */
   const fromValue = async (value: unknown, what: string): Promise<Kind | null> => {
@@ -364,9 +379,10 @@ async function classify(file: ImportFile): Promise<Kind> {
     return { parser: null, problem: `"${file.name}" is a JSON document, but not one of the formats this app reads. ${SUPPORTED}` };
   }
 
-  // Anything else is treated as delimited text when its first line has separators.
+  // Anything else is treated as delimited text when its first line has separators, unless it starts like code or markup.
   const firstLine = text.split(/\r?\n/, 1)[0];
-  if (/\.(csv|tsv|txt)$/.test(name) || /[,;\t]/.test(firstLine)) {
+  const looksLikeCode = /^(?:\/\/|\/\*|#!|<[?!a-z])/i.test(firstLine);
+  if (/\.(csv|tsv|txt)$/.test(name) || (!looksLikeCode && /[,;\t]/.test(firstLine))) {
     const csv = await previewCsv(file.blob);
     const format = detectCsvFormat(csv.header);
     if (format === 'anthropic/console-usage-csv') return { parser: 'console-csv', recognisedAs: 'usage export from the Claude Console' };

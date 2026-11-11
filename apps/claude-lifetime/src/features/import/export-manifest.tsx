@@ -6,12 +6,16 @@ import { conversationParts, type ExportManifest } from '@/import/claude-export/m
 import { formatInstant } from '@/lib/format';
 import { Notice } from './preview';
 
-/** What the other categories of an export hold, for the sentence that says they are not needed. */
+/** What the other categories of an export hold, as far as their names say, for the sentence about them. */
 const CATEGORY: Record<string, string> = {
   light_metadata: 'account details',
   projects: 'projects',
   memories: 'memories',
   feedback: 'feedback',
+  design_chats: 'design chats',
+  frames: 'frames',
+  artifact_data: 'artifact data',
+  claude_code_cloud: 'Claude Code on the web',
 };
 
 /**
@@ -36,6 +40,7 @@ export function ExportManifestStep({
   const conversations = conversationParts(manifest);
   const one = conversations.length === 1;
   const others = [...new Set(manifest.parts.filter((p) => p.category !== 'conversations').map((p) => CATEGORY[p.category] ?? p.category.replace(/_/g, ' ')))];
+  const cloud = manifest.parts.some((p) => p.category === 'claude_code_cloud');
   const made = manifest.createdAt && !Number.isNaN(Date.parse(manifest.createdAt)) ? formatInstant(manifest.createdAt, timezone, 'datetime') : null;
 
   return (
@@ -97,8 +102,9 @@ export function ExportManifestStep({
           </ol>
           {others.length > 0 ? (
             <p className="text-[13px] [overflow-wrap:anywhere]">
-              The other parts ({new Intl.ListFormat('en', { type: 'conjunction' }).format(others)}) hold no usage and are not needed. Choosing them
-              together with the conversations does no harm.
+              The app reads the conversations. The other parts ({new Intl.ListFormat('en', { type: 'conjunction' }).format(others)}) are not needed
+              for them; when they are chosen as well, they are passed over.
+              {cloud ? ' The Claude Code on the web part may hold your Claude Code sessions from the web: choose it on its own afterwards to see whether the app can read them.' : ''}
             </p>
           ) : null}
         </>

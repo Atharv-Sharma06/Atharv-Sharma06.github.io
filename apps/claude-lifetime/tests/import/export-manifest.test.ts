@@ -198,6 +198,47 @@ describe('a manifest in the selection', () => {
     expect(await caught(detectSelection([older, newer, conversationsPart()]))).toMatchObject({ code: 'missing_export_parts' });
   });
 
+  it('passes over the parts other than the conversations, which may look like something the app reads', async () => {
+    // The export as it arrived in November 2026: eight parts, numbered from 0, the conversations last.
+    const real = fileOf(
+      'manifest-real.json',
+      JSON.stringify({
+        instructions: 'Download each file using the export_url. Each link expires 24 hours after it is created.',
+        created_at: '2026-11-11T18:02:14.424124+00:00',
+        total_files: 8,
+        data_files: ['light_metadata', 'projects', 'memories', 'design_chats', 'frames', 'artifact_data', 'claude_code_cloud', 'conversations'].map((category, i) => ({
+          batch_index: i,
+          export_url: `https://claude.ai/export/00000000-0000-4000-8000-000000000000/download/${i}`,
+          category,
+          part: 0,
+          filename: `${category}-000.zip`,
+        })),
+        version: '1.0',
+      }),
+    );
+    const alone = await caught(detectSelection([real]));
+    expect((alone as ExportManifestFound).manifest.parts.map((p) => p.category)).toEqual([
+      'light_metadata', 'projects', 'memories', 'design_chats', 'frames', 'artifact_data', 'claude_code_cloud', 'conversations',
+    ]);
+    expect(alone?.message).toMatch(/Download the conversations part it lists \(conversations-000.zip\)/);
+
+    // Parts whose contents are not described anywhere: one holds what reads as Claude Code sessions, one what reads as chats.
+    const session = JSON.stringify({ type: 'user', sessionId: 's1', timestamp: '2026-11-01T10:00:00Z', message: { role: 'user', content: 'hi' } });
+    const cloud = zipOf('claude_code_cloud-000.zip', { 'sessions/s1.jsonl': strToU8(`${session}\n`), 'sessions/s2.jsonl': strToU8(`${session}\n`) });
+    const design = zipOf('design_chats-000.zip', { 'design_chats/d1.json': conversationsJson });
+    const parts = [conversationsPart(), cloud, design, zipOf('frames-000.zip', { 'frames/f1.json': strToU8('{}') })];
+    expect(await detectSelection([real, ...parts])).toMatchObject({ parser: 'claude-export', fileIndexes: [1], recognisedAs: 'ZIP archive of a claude.ai data export' });
+    // Also when the parts were zipped together first.
+    const together = fileOf('parts.zip', zipSync({ 'conversations-000.zip': zipSync({ 'conversations.json': conversationsJson }), 'claude_code_cloud-000.zip': zipSync({ 's1.jsonl': strToU8(`${session}\n`) }) }));
+    expect(await detectSelection([real, together])).toMatchObject({ parser: 'claude-export', fileIndexes: [1] });
+    // Chosen from the manifest step, a part without conversations says so.
+    const manifest = (alone as ExportManifestFound).manifest;
+    const wrong = await caught(detectSelection([cloud], manifest));
+    expect((wrong as ExportManifestFound).problem).toBe('"claude_code_cloud-000.zip" is a part of the export that holds no conversations.');
+    // Without a manifest, such a part is looked at like any other file.
+    expect(await detectSelection([cloud])).toMatchObject({ parser: 'claude-code' });
+  });
+
   it('says that a part of the export without conversations is not the one to choose', async () => {
     const [metadata] = otherParts();
     expect(await caught(detectSelection([metadata]))).toMatchObject({

@@ -26,14 +26,17 @@ the account's address; it expires 24 hours after it is created and may work only
 Members of Team and Enterprise organizations can export only if an owner allows it.
 
 **Choose:** since November 2026 the export arrives as a small manifest file,
-`manifest-….json`, that links to one ZIP per category (`conversations-000.zip`,
-`light_metadata-000.zip`, projects, memories, feedback). The links work only in a
-browser signed in to claude.ai, so the app does not download them itself. Choose the
-manifest: the app lists the conversations parts with their download links. Download
-them, then choose the downloaded `conversations-…zip` files, all of them together. The
-other parts hold no usage; choosing them as well does no harm, and when the manifest is
-chosen with the parts, a missing conversations part is reported instead of silently
-leaving conversations out.
+`manifest-….json`, that links to one ZIP per category: `conversations-000.zip`, and
+parts for account details (`light_metadata`), projects, memories, design chats, frames,
+artifact data and Claude Code on the web (`claude_code_cloud`). The links work only in a
+browser signed in to claude.ai, may stop working once used, and expire after 24 hours, so
+the app does not download them itself. Choose the manifest: the app lists the
+conversations parts with their download links. Download them, then choose the downloaded
+`conversations-…zip` files, all of them together. The app reads only the conversations:
+when the manifest is known (chosen with the parts, or chosen first), the other parts are
+passed over, and a missing conversations part is reported instead of silently leaving
+conversations out. What the other parts hold is not documented; a `claude_code_cloud`
+part can be chosen on its own to see whether it holds Claude Code sessions the app reads.
 
 An older export, the ZIP exactly as downloaded or the `conversations.json` inside it,
 is read as before: the classic ZIP and the `data-…-batch-0000.zip` form.
