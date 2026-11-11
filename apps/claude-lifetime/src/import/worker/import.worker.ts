@@ -95,7 +95,7 @@ class BatchingSink implements ImportSink {
 }
 
 function describe(error: unknown): WorkerError {
-  if (error instanceof ExportManifestFound) return { message: error.message, code: error.code, manifest: error.manifest };
+  if (error instanceof ExportManifestFound) return { message: error.message, code: error.code, manifest: error.manifest, details: error.problem };
   if (error instanceof ImportError) return { message: error.message, code: error.code, details: error.details };
   const message = error instanceof Error ? error.message : String(error);
   return { message: `The file could not be read: ${message}`, code: 'unexpected' };
@@ -111,7 +111,7 @@ self.onmessage = async (event: MessageEvent<ToWorker>) => {
   }
   try {
     if (message.type === 'detect') {
-      post({ type: 'detected', id: message.id, detected: await detectSelection(message.files) });
+      post({ type: 'detected', id: message.id, detected: await detectSelection(message.files, message.manifest) });
       return;
     }
     const sink = new BatchingSink(message.id);

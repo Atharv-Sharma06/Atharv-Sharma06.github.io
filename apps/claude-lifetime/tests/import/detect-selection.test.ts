@@ -588,3 +588,19 @@ function fixtureExport(): string {
     },
   ]);
 }
+
+describe('files that are not data, whatever their first line looks like', () => {
+  it('refuses source code, documents and spreadsheets instead of offering to match their columns', async () => {
+    expect(await outcome([fileOf('claude-sessions-catalog.test.mjs', "// The helper's work, as launchd starts it, against a local fake server\nimport x from 'y';\n")])).toMatchObject({
+      error: 'unknown_format',
+      message: expect.stringMatching(/^"claude-sessions-catalog.test.mjs" is a \.mjs file, not a data file this app reads\. /),
+    });
+    expect(await outcome([fileOf('usage.xlsx', 'PK\u0003\u0004 not really, but named so')])).toMatchObject({
+      message: expect.stringMatching(/^"usage.xlsx" is a spreadsheet workbook\. Save it as CSV and choose the CSV file\./),
+    });
+    // Without a telling name, a first line that starts like code is not taken for a header either.
+    expect(await outcome([fileOf('notes', '// a, b, c\nmore\n')])).toMatchObject({ error: 'unknown_format' });
+    // A CSV is still a CSV.
+    expect(await outcome([fileOf('usage', 'date,input_tokens\n2026-01-01,5\n')])).toMatchObject({ parser: 'generic-csv' });
+  });
+});

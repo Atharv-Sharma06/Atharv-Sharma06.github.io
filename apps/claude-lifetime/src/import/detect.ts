@@ -6,7 +6,7 @@ import { previewCsv, type CsvPreview } from './generic/csv';
 import { detectCsvFormat, detectJsonFormat } from './generic/detect';
 import type { ParserKey } from './formats';
 import { entryPath, isExportPart, isReadableEntry } from './archive';
-import { conversationParts, ExportManifestFound, missingParts, readExportManifest, type ExportManifest } from './claude-export/manifest';
+import { checkParts, ExportManifestFound, newestManifest, partsNeeded, readExportManifest, type ExportManifest } from './claude-export/manifest';
 import { looksLikeZip, readZipDirectory } from './util/zip';
 
 /**
@@ -54,6 +54,22 @@ const SAMPLE_FILES = 20;
 const SUPPORTED =
   'Claude Lifetime reads: the claude.ai data export (its conversations ZIP, or conversations.json), Claude Code transcripts (.jsonl files or the whole .claude folder), ' +
   'Anthropic API usage and cost reports (JSON), Claude Console CSV exports, and usage tables as CSV or JSON. Any of them can also be in a ZIP archive.';
+
+const baseName = (file: ImportFile) => (file.path ?? file.name).split('/').pop() ?? file.name;
+/** Whether a file could be a conversations part of an export: one named so, or any ZIP archive (a part the browser renamed). */
+const couldBePart = (file: ImportFile) => /^conversations\b|\.zip$/i.test(baseName(file));
+/** A problem as part of a longer message: without the list of what the app reads. */
+const shortProblem = (problem: string) => problem.replace(SUPPORTED, '').trim();
+
+/** Endings of files that are not data, whatever their first line looks like. */
+const NOT_DATA = new Set(
+  (
+    'js mjs cjs jsx ts mts cts tsx py rb go rs java kt swift c cc cpp h hpp cs php sh bash zsh ps1 sql css scss vue svelte ' +
+    'md markdown html htm xml yml yaml toml ini pdf doc docx rtf pages key ppt pptx ' +
+    'png jpg jpeg gif webp svg heic ico mp3 mp4 mov wav'
+  ).split(' '),
+);
+const SPREADSHEET = new Set(['xlsx', 'xlsm', 'xls', 'ods', 'numbers']);
 
 type Encoding = 'utf-8' | 'utf-16le' | 'utf-16be';
 
@@ -173,8 +189,11 @@ type Kind =
        */
       undecided?: true;
     }
-  /** `manifest`: the file is the manifest of a claude.ai export, which lists the parts to download. */
-  | { parser: null; problem: string; manifest?: ExportManifest };
+  /**
+   * `manifest`: the file is the manifest of a claude.ai export, which lists the parts to download.
+   * `exportPart`: the file is a part of such an export that holds no conversations, expected next to them.
+   */
+  | { parser: null; problem: string; manifest?: ExportManifest; exportPart?: true };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -203,8 +222,13 @@ function fromJsonFormat(format: ReturnType<typeof detectJsonFormat>, what: strin
  */
 async function classify(file: ImportFile): Promise<Kind> {
   if (file.size === 0) return { parser: null, problem: `"${file.name}" is empty.` };
-  const head = await readHead(file.blob);
   const name = file.name.toLowerCase();
+  // A spreadsheet, source code, a document or a picture is named for what it is. Its first line can have commas, and a
+  // workbook or a document is a ZIP archive: neither makes it a table or an export.
+  const ending = /\.([a-z0-9]+)$/.exec(name)?.[1] ?? '';
+  if (SPREADSHEET.has(ending)) return { parser: null, problem: `"${file.name}" is a spreadsheet workbook. Save it as CSV and choose the CSV file. ${SUPPORTED}` };
+  if (NOT_DATA.has(ending)) return { parser: null, problem: `"${file.name}" is a .${ending} file, not a data file this app reads. ${SUPPORTED}` };
+  const head = await readHead(file.blob);
 
   /** What a parsed value is. `value` is the part of the file that was looked at: its first page, its first line, or all of it. */
   const fromValue = async (value: unknown, what: string): Promise<Kind | null> => {
@@ -231,6 +255,7 @@ async function classify(file: ImportFile): Promise<Kind> {
     if (isExportPart(readable)) {
       return {
         parser: null,
+        exportPart: true,
         problem:
           `"${file.name}" is a ZIP archive, but not a claude.ai data export: it has no conversations.json (it contains ${listed}). ` +
           'If your export came as several parts, choose the conversations part (conversations-000.zip, or the part that contains conversations.json).',
@@ -360,9 +385,10 @@ async function classify(file: ImportFile): Promise<Kind> {
     return { parser: null, problem: `"${file.name}" is a JSON document, but not one of the formats this app reads. ${SUPPORTED}` };
   }
 
-  // Anything else is treated as delimited text when its first line has separators.
+  // Anything else is treated as delimited text when its first line has separators, unless it starts like code or markup.
   const firstLine = text.split(/\r?\n/, 1)[0];
-  if (/\.(csv|tsv|txt)$/.test(name) || /[,;\t]/.test(firstLine)) {
+  const looksLikeCode = /^(?:\/\/|\/\*|#!|<[?!a-z])/i.test(firstLine);
+  if (/\.(csv|tsv|txt)$/.test(name) || (!looksLikeCode && /[,;\t]/.test(firstLine))) {
     const csv = await previewCsv(file.blob);
     const format = detectCsvFormat(csv.header);
     if (format === 'anthropic/console-usage-csv') return { parser: 'console-csv', recognisedAs: 'usage export from the Claude Console' };
@@ -444,8 +470,13 @@ function tooManyFiles(count: number, parser: ParserKey): ImportError {
   );
 }
 
-export async function detectImport(files: ImportFile[]): Promise<Detected> {
+/**
+ * `manifests`: claude.ai export manifests that go with the selection although they are not in it: the
+ * import page passes the one whose parts the person was asked to download (see features/import/export-manifest.tsx).
+ */
+export async function detectImport(files: ImportFile[], options: { manifests?: readonly ExportManifest[] } = {}): Promise<Detected> {
   if (files.length === 0) throw new ImportError('No file was selected.', 'no_files');
+  const given = options.manifests ?? [];
 
   const done = (parser: ParserKey, fileIndexes: number[], recognisedAs: string, csv?: CsvPreview): Detected => ({
     parser,
@@ -503,7 +534,33 @@ export async function detectImport(files: ImportFile[]): Promise<Detected> {
         return done('claude-code', read, fromFolder ? `folder with ${count}` : count);
       }
     } else if (conversations.length > 0) {
-      return done('claude-export', conversations, 'unpacked claude.ai data export');
+      // Other parts of the same export that do not have the plain name are looked for too, in a selection small enough to
+      // open them: its manifest, a conversations part still zipped, or one a browser or archive tool renamed ("conversations 2.json").
+      const read = [...conversations];
+      const found: ExportManifest[] = [];
+      const unreadable: string[] = [];
+      const looked = new Set(conversations);
+      const lookAt = async (i: number) => {
+        looked.add(i);
+        const kind: Kind = await classify(files[i]).catch((error: unknown) => ({
+          parser: null,
+          problem: `"${files[i].name}" could not be read: ${error instanceof Error ? error.message : String(error)}`,
+        }));
+        if (kind.parser === 'claude-export') read.push(i);
+        else if (kind.parser === null && kind.manifest) found.push(kind.manifest);
+        else if (kind.parser === null && !kind.exportPart && couldBePart(files[i])) unreadable.push(shortProblem(kind.problem));
+      };
+      if (files.length <= MAX_SEPARATE_FILES) {
+        for (let i = 0; i < files.length; i++) if (!looked.has(i) && /^(?:manifest.*\.json|conversations\b.*\.(?:json|zip))$/i.test(baseName(files[i]))) await lookAt(i);
+        // Fewer parts by name than a manifest lists: a part can have a name of its own ("Claude export part 2.zip"). The other
+        // ZIP archives are looked at as well. Nothing else in the folder counts or changes the outcome.
+        if (read.length < partsNeeded([...given, ...found])) {
+          for (let i = 0; i < files.length; i++) if (!looked.has(i) && /\.zip$/i.test(baseName(files[i]))) await lookAt(i);
+        }
+      }
+      read.sort((a, b) => a - b);
+      checkParts([...given, ...found], read.length, unreadable);
+      return done('claude-export', read, 'unpacked claude.ai data export');
     }
   }
 
@@ -513,10 +570,19 @@ export async function detectImport(files: ImportFile[]): Promise<Detected> {
   const problems = kinds.filter((k): k is Extract<Kind, { parser: null }> => k.parser === null);
   const good = kinds.map((k, i) => ({ k, i })).filter((e): e is { k: Extract<Kind, { parser: ParserKey }>; i: number } => e.k.parser !== null);
 
-  const manifests = problems.flatMap((p) => (p.manifest ? [p.manifest] : []));
+  const manifests = [...given, ...problems.flatMap((p) => (p.manifest ? [p.manifest] : []))];
   if (good.length === 0) {
-    // A manifest on its own, or with parts that hold no conversations: the page shows what to download.
-    if (manifests.length > 0) throw new ExportManifestFound(manifests[0]);
+    // A manifest on its own, or with parts that hold no conversations: the page shows what to download. Anything
+    // else that was chosen with it and cannot be read (a part saved as an error page, say) is said as well.
+    if (manifests.length > 0) {
+      // A part without conversations, picked on the manifest step, is said to be one, or the step would come back unchanged.
+      const sidePart = given.length > 0 ? kinds.findIndex((k) => k.parser === null && k.exportPart) : -1;
+      throw new ExportManifestFound(
+        newestManifest(manifests),
+        problems.find((p) => !p.manifest && !p.exportPart)?.problem ??
+          (sidePart >= 0 ? `"${files[sidePart].name}" is a part of the export that holds no conversations.` : undefined),
+      );
+    }
     throw new ImportError(problems[0]?.problem ?? `These files are not in a format this app can read. ${SUPPORTED}`, 'unknown_format');
   }
   // A page of nothing but empty time buckets belongs to the report the other pages are from: a cost report
@@ -533,10 +599,11 @@ export async function detectImport(files: ImportFile[]): Promise<Detected> {
     );
   }
   const parser = good[0].k.parser;
-  // An export chosen with its manifest: every conversations part it lists must be there, or conversations would be missing
-  // without a word. Parts are counted rather than matched by name, since a browser renames a download whose name is taken.
+  // An export chosen with its manifest: every conversations part it lists must be there (see checkParts).
   if (parser === 'claude-export') {
-    for (const manifest of manifests) if (good.length < conversationParts(manifest).length) throw missingParts(manifest, good.length);
+    // Only what could be a conversations part is said to be wrong: not the export's other files, or a README lying next to it.
+    const unreadable = kinds.flatMap((k, i) => (k.parser === null && !k.manifest && !k.exportPart && couldBePart(files[i]) ? [shortProblem(k.problem)] : []));
+    checkParts(manifests, good.length, unreadable);
   }
   if (parser === 'generic-csv' && good.length > 1) {
     throw new ImportError('Import CSV files one at a time: each has its own columns to match.', 'mixed_selection');

@@ -94,7 +94,7 @@ test('a claude.ai export that arrives as a manifest shows what to download, then
   const link = page.getByRole('link', { name: 'Download conversations-000.zip' });
   await expect(link).toHaveAttribute('href', 'https://claude.ai/export/test/download/0');
   await expect(link).toHaveAttribute('target', '_blank');
-  await expect(page.getByText('The other parts (account details and projects) hold no usage and are not needed.')).toBeVisible();
+  await expect(page.getByText('The app reads the conversations. The other parts (account details and projects) are not needed for them')).toBeVisible();
 
   // The person downloads the part from claude.ai (not part of this test) and chooses it.
   const conversations = testInfo.outputPath('conversations-000.zip');
@@ -104,6 +104,45 @@ test('a claude.ai export that arrives as a manifest shows what to download, then
   await (await chooser).setFiles(conversations);
   await expect(page.getByRole('heading', { name: 'Review before saving' })).toBeVisible({ timeout: 60_000 });
   await expect(page.getByText('Recognised as claude.ai data export')).toBeVisible();
+});
+
+test('the manifest step checks the parts chosen from it, and keeps to the card on a narrow screen', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  const long = `conversations-000-${'x'.repeat(120)}.zip`;
+  const write = (name: string, files: Array<{ category: string; filename: string; export_url?: string }>) => {
+    const path = testInfo.outputPath(name);
+    writeFileSync(path, JSON.stringify({ created_at: '2026-11-11T18:02:14Z', total_files: files.length, data_files: files.map((f, i) => ({ batch_index: i, part: 1, ...f })) }));
+    return path;
+  };
+  const manifest = write('manifest-two.json', [
+    { category: 'conversations', filename: long, export_url: 'https://claude.ai/export/test/download/0' },
+    { category: 'conversations', filename: 'conversations-001.zip', export_url: 'http://claude.ai.example.com/download/1' },
+  ]);
+  await chooseFiles(page, manifest);
+  await expect(page.getByRole('heading', { name: 'Download the conversations first' })).toBeVisible();
+  // A link that does not lead to claude.ai is not shown, and the manifest is not pointed to for it.
+  await expect(page.getByText('its link in the manifest does not lead to claude.ai, so it is not shown.')).toBeVisible();
+  await expect(page.getByRole('link', { name: /conversations-001/ })).toHaveCount(0);
+  // A long part name wraps inside the card instead of widening the page.
+  const link = page.getByRole('link', { name: /Download conversations-000-x+/ });
+  const card = page.locator('section, div').filter({ has: link }).filter({ has: page.getByRole('heading', { name: 'Download the conversations first' }) }).last();
+  const [linkBox, cardBox] = [await link.boundingBox(), await card.boundingBox()];
+  expect(linkBox!.x + linkBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+
+  // Only one of the two parts is chosen from the step: that is said, rather than half the history imported.
+  const part = testInfo.outputPath('conversations-000.zip');
+  writeFileSync(part, zipSync({ 'conversations.json': readFileSync(fixture('claude-export/conversations.json')) }));
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Choose the downloaded ZIPs' }).click();
+  await (await chooser).setFiles(part);
+  await expect(page.getByRole('heading', { name: 'This import did not work' })).toBeVisible();
+  await expect(page.getByText('The manifest "manifest-two.json" lists 2 conversations parts')).toBeVisible();
+
+  // A manifest without a conversations part says so in its heading.
+  await page.getByRole('button', { name: 'Choose another file' }).click();
+  await chooseFiles(page, write('manifest-none.json', [{ category: 'light_metadata', filename: 'light_metadata-000.zip', export_url: 'https://claude.ai/export/t/1' }]));
+  await expect(page.getByRole('heading', { name: 'This export holds no conversations' })).toBeVisible();
 });
 
 test('Claude Code transcripts are imported as exact usage', async ({ page }) => {

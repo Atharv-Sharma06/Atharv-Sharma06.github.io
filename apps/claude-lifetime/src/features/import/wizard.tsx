@@ -17,7 +17,7 @@ import { ImportSession, toImportFiles, type PreparedImport } from '@/import/sess
 import { cn } from '@/lib/cn';
 import { formatBytes, formatInt, plural } from '@/lib/format';
 import { useApp } from '@/state/app';
-import { ExportManifestFound, type ExportManifest } from '@/import/claude-export/manifest';
+import { conversationParts, ExportManifestFound, type ExportManifest } from '@/import/claude-export/manifest';
 import { ConfidenceForm, CsvMappingForm } from './csv-mapping';
 import { ExportManifestStep } from './export-manifest';
 import { filesFromDrop } from './dropped-files';
@@ -34,8 +34,11 @@ type Stage =
   | { name: 'preview'; prepared: PreparedImport }
   | { name: 'saving'; prepared: PreparedImport }
   | { name: 'done'; prepared: PreparedImport; result: CommitResult }
-  /** A claude.ai export manifest was chosen: it only links to the parts, which are downloaded and chosen next. */
-  | { name: 'manifest'; manifest: ExportManifest }
+  /**
+   * A claude.ai export manifest was chosen: it only links to the parts, which are downloaded and chosen next.
+   * `problem`: what is wrong with another file that was chosen with it.
+   */
+  | { name: 'manifest'; manifest: ExportManifest; problem?: string }
   /** `unknownOutcome`: the import may have been stored all the same, so the card must not say that nothing was. */
   | { name: 'error'; message: string; code: string; details?: string; unknownOutcome?: boolean };
 
@@ -109,6 +112,8 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
   const pendingOptions = useRef<Record<string, unknown>>({});
   /** The options of the source card whose button opened the file picker. */
   const pickOptions = useRef<Record<string, unknown>>({});
+  /** The export manifest whose parts the file picker was opened for: detection checks that none is left out. */
+  const pickManifest = useRef<ExportManifest | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   /** True once the page was left. Work that was still under way then must not start an import. */
   const gone = useRef(false);
@@ -155,7 +160,7 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
 
   const fail = useCallback((error: unknown, during: 'reading' | 'saving' = 'reading') => {
     if (error instanceof ExportManifestFound) {
-      setStage({ name: 'manifest', manifest: error.manifest });
+      setStage({ name: 'manifest', manifest: error.manifest, problem: error.problem });
       return;
     }
     if (error instanceof ImportError && error.code === 'cancelled') {
@@ -182,7 +187,7 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
   );
 
   const start = useCallback(
-    async (files: ImportFile[], options: Record<string, unknown> = {}) => {
+    async (files: ImportFile[], options: Record<string, unknown> = {}, manifest?: ExportManifest) => {
       if (gone.current) return;
       if (files.length === 0) {
         setStage({ name: 'error', message: 'Nothing readable was selected. If you chose a folder, it contains no files this app can import.', code: 'no_files' });
@@ -192,7 +197,7 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
       rememberChoices.current = null;
       setStage({ name: 'detecting', what: describeSelection(files) });
       try {
-        const detected = await getSession().detect(files);
+        const detected = await getSession().detect(files, manifest);
         // A file of the user's own making is read only after they have said what it cannot say itself.
         const question = questionBeforeReading(detected.parser, options);
         if (question === 'mapping') setStage({ name: 'mapping', files, detected });
@@ -213,6 +218,7 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
         if (!fileInput.current) return;
         fileInput.current.accept = accept ?? '';
         pickOptions.current = options ?? {};
+        pickManifest.current = null;
         fileInput.current.click();
       },
       busy,
@@ -246,6 +252,7 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
     if (!fileInput.current) return;
     fileInput.current.accept = '';
     pickOptions.current = {};
+    pickManifest.current = null;
     fileInput.current.click();
   };
 
@@ -276,7 +283,9 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
       onChange={(e) => {
         const files = toImportFiles(Array.from(e.target.files ?? []));
         e.target.value = '';
-        if (files.length > 0) void start(files, pickOptions.current);
+        const manifest = pickManifest.current ?? undefined;
+        pickManifest.current = null;
+        if (files.length > 0) void start(files, pickOptions.current, manifest);
       }}
     />
   );
@@ -335,7 +344,9 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
                 : stage.name === 'done'
                   ? 'Saved'
                   : stage.name === 'manifest'
-                    ? 'Download the conversations first'
+                    ? conversationParts(stage.manifest).length > 0
+                      ? 'Download the conversations first'
+                      : 'This export holds no conversations'
                   : stage.unknownOutcome
                     ? 'This import may not have been saved'
                     : 'This import did not work';
@@ -471,11 +482,14 @@ export const ImportWizard = forwardRef<WizardHandle, { onStageChange?: (idle: bo
         {stage.name === 'manifest' ? (
           <ExportManifestStep
             manifest={stage.manifest}
+            problem={stage.problem}
             timezone={app.settings.timezone}
             onChoose={() => {
               if (!fileInput.current) return;
               fileInput.current.accept = '.zip,.json,application/zip,application/json';
               pickOptions.current = {};
+              // What is chosen next is checked against this manifest, so that a part left out is noticed.
+              pickManifest.current = stage.manifest;
               fileInput.current.click();
             }}
             onCancel={() => void reset()}
