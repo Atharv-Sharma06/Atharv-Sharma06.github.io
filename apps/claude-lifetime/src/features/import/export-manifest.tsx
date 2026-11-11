@@ -21,11 +21,14 @@ const CATEGORY: Record<string, string> = {
  */
 export function ExportManifestStep({
   manifest,
+  problem,
   timezone,
   onChoose,
   onCancel,
 }: {
   manifest: ExportManifest;
+  /** What is wrong with another file that was chosen with the manifest. */
+  problem?: string;
   timezone: string;
   onChoose: () => void;
   onCancel: () => void;
@@ -42,6 +45,12 @@ export function ExportManifestStep({
         the export and where to download them, but holds none of your conversations itself.
       </p>
 
+      {problem ? (
+        <Notice tone="warning">
+          <span className="[overflow-wrap:anywhere]">A file chosen with it could not be used: {problem}</span>
+        </Notice>
+      ) : null}
+
       {conversations.length === 0 ? (
         <Notice tone="warning">This export lists no conversations part, so there is nothing in it for the app to read. Request a new export on claude.ai.</Notice>
       ) : (
@@ -55,15 +64,24 @@ export function ExportManifestStep({
               </p>
               <ul className="mt-2 flex flex-wrap gap-2">
                 {conversations.map((part, i) => (
-                  <li key={`${part.filename}-${i}`}>
+                  <li key={`${part.filename}-${i}`} className="min-w-0 max-w-full">
                     {part.url ? (
-                      <a href={part.url} target="_blank" rel="noopener noreferrer" className={buttonClass('secondary')}>
-                        <Download className="size-4" aria-hidden="true" />
-                        Download {part.filename}
+                      <a
+                        href={part.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={buttonClass('secondary', 'md', 'h-auto min-h-9 max-w-full whitespace-normal py-1.5 text-left')}
+                      >
+                        <Download className="size-4 shrink-0" aria-hidden="true" />
+                        <span className="min-w-0 [overflow-wrap:anywhere]">Download {part.filename}</span>
                       </a>
                     ) : (
-                      <span className="text-[13px]">
-                        {part.filename} <span className="text-ink-3">(its link is in the manifest file)</span>
+                      // No link to show. A link that leads elsewhere than claude.ai is not one to follow, so the manifest is not pointed to.
+                      <span className="text-[13px] [overflow-wrap:anywhere]">
+                        <span className="text-ink">{part.filename}</span>:{' '}
+                        {part.linkRejected
+                          ? 'its link in the manifest does not lead to claude.ai, so it is not shown. Do not open it; request a new export on claude.ai instead.'
+                          : 'the manifest gives no download link for it. Request a new export on claude.ai.'}
                       </span>
                     )}
                   </li>
@@ -78,7 +96,7 @@ export function ExportManifestStep({
             </li>
           </ol>
           {others.length > 0 ? (
-            <p className="text-[13px]">
+            <p className="text-[13px] [overflow-wrap:anywhere]">
               The other parts ({new Intl.ListFormat('en', { type: 'conjunction' }).format(others)}) hold no usage and are not needed. Choosing them
               together with the conversations does no harm.
             </p>

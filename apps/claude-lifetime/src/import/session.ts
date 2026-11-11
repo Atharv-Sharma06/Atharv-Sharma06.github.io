@@ -3,6 +3,7 @@
 import { ImportError, type ImportFile, type ImportProgress, type ParsedImport } from '@/core/types';
 import type { SqlDriver } from '@/db/driver';
 import { commitImport, importGeneration, loadKnownRequestKeys, previewImport, type CommitResult, type ImportPreview } from './commit';
+import type { ExportManifest } from './claude-export/manifest';
 import type { Detected } from './detect';
 import { acquireImportLock } from './lock';
 import { resetStaging, StagingWriter, type StagedBatch } from './staging';
@@ -120,12 +121,15 @@ export class ImportSession {
     return result;
   }
 
-  /** Looks at the files and says what they are. Reads only as much as that takes. */
-  detect(files: ImportFile[]): Promise<Detected> {
+  /**
+   * Looks at the files and says what they are. Reads only as much as that takes. `manifest`: the claude.ai
+   * export manifest whose parts the files are meant to be; detection then checks that none is missing.
+   */
+  detect(files: ImportFile[], manifest?: ExportManifest): Promise<Detected> {
     return new Promise<Detected>((resolve, reject) => {
       const id = this.nextId++;
       // The answer cannot arrive before this function returns, so the request is registered after it was sent without error.
-      this.send({ type: 'detect', id, files });
+      this.send({ type: 'detect', id, files, manifest });
       const settled = () => this.pending.delete(id);
       this.pending.set(id, {
         receive: (m) => {

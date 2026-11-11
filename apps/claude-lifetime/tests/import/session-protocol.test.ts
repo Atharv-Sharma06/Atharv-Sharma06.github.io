@@ -503,10 +503,20 @@ describe('with the real import worker', () => {
       fileName: 'manifest-x.json',
       createdAt: '2026-11-11T18:02:14Z',
       parts: [
-        { category: 'conversations', filename: 'conversations-000.zip', url: 'https://claude.ai/export/x/download/a' },
-        { category: 'projects', filename: 'projects-000.zip', url: 'https://claude.ai/export/x/download/b' },
+        { category: 'conversations', filename: 'conversations-000.zip', url: 'https://claude.ai/export/x/download/a', linkRejected: false },
+        { category: 'projects', filename: 'projects-000.zip', url: 'https://claude.ai/export/x/download/b', linkRejected: false },
       ],
     });
+  });
+
+  it('checks the files chosen from the manifest step against the manifest the page passes along', async () => {
+    const manifest = {
+      fileName: 'manifest-x.json',
+      createdAt: '2026-11-11T18:02:14Z',
+      parts: ['conversations-000.zip', 'conversations-001.zip'].map((filename) => ({ category: 'conversations', filename, url: null, linkRejected: false })),
+    };
+    const part = fileOf('conversations-000.zip', zipSync({ 'conversations.json': strToU8('[{"uuid":"c1","name":"x","created_at":"2026-01-01T00:00:00Z","chat_messages":[]}]') }));
+    await expect(open().detect([part], manifest)).rejects.toMatchObject({ code: 'missing_export_parts' });
   });
 
   it('leaves nothing of a cancelled import for the one that follows it at once', async () => {

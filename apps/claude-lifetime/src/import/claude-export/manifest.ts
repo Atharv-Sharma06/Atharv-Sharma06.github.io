@@ -19,6 +19,8 @@ export interface ExportManifestPart {
   filename: string;
   /** The part's download link: only an https link to claude.ai is kept, anything else is null. */
   url: string | null;
+  /** The manifest gives a link for the part, but not one to claude.ai. It is neither shown nor to be opened. */
+  linkRejected: boolean;
 }
 
 export interface ExportManifest {
@@ -62,7 +64,10 @@ export function readExportManifest(value: unknown, fileName: string): ExportMani
   const parts = (entries as Record<string, unknown>[])
     .map((e, i) => ({ e, i }))
     .sort((a, b) => order(a.e) - order(b.e) || a.i - b.i)
-    .map(({ e }) => ({ category: e.category as string, filename: partName(e.filename as string), url: claudeLink(e.export_url) }));
+    .map(({ e }) => {
+      const url = claudeLink(e.export_url);
+      return { category: e.category as string, filename: partName(e.filename as string), url, linkRejected: url === null && e.export_url !== undefined && e.export_url !== null };
+    });
   return { fileName, createdAt: typeof value.created_at === 'string' ? value.created_at : null, parts };
 }
 
@@ -71,12 +76,22 @@ export const conversationParts = (manifest: ExportManifest): ExportManifestPart[
 
 const listOf = (names: string[]) => new Intl.ListFormat('en', { type: 'conjunction' }).format(names);
 
+/** Of several manifests, the one of the newest export: an older one's links have likely expired. */
+export function newestManifest(manifests: readonly ExportManifest[]): ExportManifest {
+  const time = (m: ExportManifest) => (m.createdAt === null ? Number.NEGATIVE_INFINITY : Date.parse(m.createdAt) || Number.NEGATIVE_INFINITY);
+  return manifests.reduce((best, m) => (time(m) > time(best) ? m : best));
+}
+
 /**
  * Detection found a manifest and nothing to import with it. Not a failure as such: the import page
- * shows the parts to download (see features/import/export-manifest.tsx).
+ * shows the parts to download (see features/import/export-manifest.tsx). `problem`: what is wrong
+ * with another file that was chosen with it (a part that could not be read, for example).
  */
 export class ExportManifestFound extends ImportError {
-  constructor(readonly manifest: ExportManifest) {
+  constructor(
+    readonly manifest: ExportManifest,
+    readonly problem?: string,
+  ) {
     const conversations = conversationParts(manifest).map((p) => p.filename);
     super(
       `"${manifest.fileName}" is the manifest of a claude.ai data export: it lists the parts of the export and holds none of your conversations. ` +
@@ -87,6 +102,17 @@ export class ExportManifestFound extends ImportError {
     );
     this.name = 'ExportManifestFound';
   }
+}
+
+/**
+ * An export's conversations parts must all be read together, or conversations are missing without a word.
+ * `chosen` is how many export files the import would read; with several manifests, the newest one counts.
+ * Parts are counted rather than matched by name, since a browser renames a download whose name is taken.
+ */
+export function checkParts(manifests: readonly ExportManifest[], chosen: number): void {
+  if (manifests.length === 0) return;
+  const manifest = newestManifest(manifests);
+  if (chosen < conversationParts(manifest).length) throw missingParts(manifest, chosen);
 }
 
 /** The error for a selection that holds a manifest and fewer conversations parts than it lists. */

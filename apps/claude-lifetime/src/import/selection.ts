@@ -1,5 +1,6 @@
 import { ImportError, type ImportFile } from '@/core/types';
 import { expandArchives } from './archive';
+import type { ExportManifest } from './claude-export/manifest';
 import { detectImport, type Detected } from './detect';
 
 /**
@@ -9,10 +10,13 @@ import { detectImport, type Detected } from './detect';
  * up the same way, so those positions name the same files.
  */
 
-/** What the files to be read are, as `detectImport` says, with the archives they come from named. */
-export async function detectSelection(files: ImportFile[]): Promise<Detected> {
+/**
+ * What the files to be read are, as `detectImport` says, with the archives they come from named.
+ * `manifest`: a claude.ai export manifest whose parts the files are meant to be.
+ */
+export async function detectSelection(files: ImportFile[], manifest?: ExportManifest): Promise<Detected> {
   const expanded = await expandArchives(files);
-  const detected = await detectImport(expanded);
+  const detected = await detectImport(expanded, { manifests: manifest ? [manifest] : [] });
   const chosen = detected.fileIndexes.map((i) => expanded[i]);
   const archives = new Set(chosen.flatMap((f) => (f.archive === undefined ? [] : [f.archive])));
   let recognisedAs = detected.recognisedAs;

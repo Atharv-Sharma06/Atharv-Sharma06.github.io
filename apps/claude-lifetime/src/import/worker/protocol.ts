@@ -17,7 +17,8 @@ export interface ParseContextMessage {
 }
 
 export type ToWorker =
-  | { type: 'detect'; id: number; files: ImportFile[] }
+  /** `manifest`: the export manifest whose parts these files are meant to be (see detectImport). */
+  | { type: 'detect'; id: number; files: ImportFile[]; manifest?: ExportManifest }
   /** `files` is the selection as it was detected; `fileIndexes` are the positions detection returned (see selection.ts). */
   | { type: 'parse'; id: number; parser: ParserKey; files: ImportFile[]; fileIndexes: number[]; context: ParseContextMessage }
   | { type: 'ack'; id: number };
@@ -26,13 +27,13 @@ export interface WorkerError {
   message: string;
   code: string;
   details?: string;
-  /** For code `export_manifest`: the manifest that was chosen, so the page can show its parts. */
+  /** For code `export_manifest`: the manifest that was chosen, so the page can show its parts. `details` is then the problem of another file chosen with it. */
   manifest?: ExportManifest;
 }
 
 /** The error a WorkerError stands for, on the page's side of the worker. */
 export function errorFrom(error: WorkerError): ImportError {
-  return error.manifest ? new ExportManifestFound(error.manifest) : new ImportError(error.message, error.code, error.details);
+  return error.manifest ? new ExportManifestFound(error.manifest, error.details) : new ImportError(error.message, error.code, error.details);
 }
 
 export type FromWorker =

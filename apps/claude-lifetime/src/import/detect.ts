@@ -6,7 +6,7 @@ import { previewCsv, type CsvPreview } from './generic/csv';
 import { detectCsvFormat, detectJsonFormat } from './generic/detect';
 import type { ParserKey } from './formats';
 import { entryPath, isExportPart, isReadableEntry } from './archive';
-import { conversationParts, ExportManifestFound, missingParts, readExportManifest, type ExportManifest } from './claude-export/manifest';
+import { checkParts, ExportManifestFound, newestManifest, readExportManifest, type ExportManifest } from './claude-export/manifest';
 import { looksLikeZip, readZipDirectory } from './util/zip';
 
 /**
@@ -173,8 +173,11 @@ type Kind =
        */
       undecided?: true;
     }
-  /** `manifest`: the file is the manifest of a claude.ai export, which lists the parts to download. */
-  | { parser: null; problem: string; manifest?: ExportManifest };
+  /**
+   * `manifest`: the file is the manifest of a claude.ai export, which lists the parts to download.
+   * `exportPart`: the file is a part of such an export that holds no conversations, expected next to them.
+   */
+  | { parser: null; problem: string; manifest?: ExportManifest; exportPart?: true };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -231,6 +234,7 @@ async function classify(file: ImportFile): Promise<Kind> {
     if (isExportPart(readable)) {
       return {
         parser: null,
+        exportPart: true,
         problem:
           `"${file.name}" is a ZIP archive, but not a claude.ai data export: it has no conversations.json (it contains ${listed}). ` +
           'If your export came as several parts, choose the conversations part (conversations-000.zip, or the part that contains conversations.json).',
@@ -444,8 +448,13 @@ function tooManyFiles(count: number, parser: ParserKey): ImportError {
   );
 }
 
-export async function detectImport(files: ImportFile[]): Promise<Detected> {
+/**
+ * `manifests`: claude.ai export manifests that go with the selection although they are not in it: the
+ * import page passes the one whose parts the person was asked to download (see features/import/export-manifest.tsx).
+ */
+export async function detectImport(files: ImportFile[], options: { manifests?: readonly ExportManifest[] } = {}): Promise<Detected> {
   if (files.length === 0) throw new ImportError('No file was selected.', 'no_files');
+  const given = options.manifests ?? [];
 
   const done = (parser: ParserKey, fileIndexes: number[], recognisedAs: string, csv?: CsvPreview): Detected => ({
     parser,
@@ -503,7 +512,24 @@ export async function detectImport(files: ImportFile[]): Promise<Detected> {
         return done('claude-code', read, fromFolder ? `folder with ${count}` : count);
       }
     } else if (conversations.length > 0) {
-      return done('claude-export', conversations, 'unpacked claude.ai data export');
+      // Other parts of the same export that do not have the plain name are looked for too, in a selection small enough to
+      // open them: its manifest, a conversations part still zipped, or one a browser or archive tool renamed ("conversations 2.json").
+      const read = [...conversations];
+      const found: ExportManifest[] = [];
+      if (files.length <= MAX_SEPARATE_FILES) {
+        for (let i = 0; i < files.length; i++) {
+          if (conversations.includes(i)) continue;
+          const path = files[i].path ?? files[i].name;
+          const base = path.split('/').pop() ?? path;
+          if (!/^manifest.*\.json$/i.test(base) && !/^conversations\b.*\.(json|zip)$/i.test(base)) continue;
+          const kind = await classify(files[i]).catch(() => null);
+          if (kind?.parser === 'claude-export') read.push(i);
+          else if (kind?.parser === null && kind.manifest) found.push(kind.manifest);
+        }
+      }
+      read.sort((a, b) => a - b);
+      checkParts([...given, ...found], read.length);
+      return done('claude-export', read, 'unpacked claude.ai data export');
     }
   }
 
@@ -513,10 +539,11 @@ export async function detectImport(files: ImportFile[]): Promise<Detected> {
   const problems = kinds.filter((k): k is Extract<Kind, { parser: null }> => k.parser === null);
   const good = kinds.map((k, i) => ({ k, i })).filter((e): e is { k: Extract<Kind, { parser: ParserKey }>; i: number } => e.k.parser !== null);
 
-  const manifests = problems.flatMap((p) => (p.manifest ? [p.manifest] : []));
+  const manifests = [...given, ...problems.flatMap((p) => (p.manifest ? [p.manifest] : []))];
   if (good.length === 0) {
-    // A manifest on its own, or with parts that hold no conversations: the page shows what to download.
-    if (manifests.length > 0) throw new ExportManifestFound(manifests[0]);
+    // A manifest on its own, or with parts that hold no conversations: the page shows what to download. Anything
+    // else that was chosen with it and cannot be read (a part saved as an error page, say) is said as well.
+    if (manifests.length > 0) throw new ExportManifestFound(newestManifest(manifests), problems.find((p) => !p.manifest && !p.exportPart)?.problem);
     throw new ImportError(problems[0]?.problem ?? `These files are not in a format this app can read. ${SUPPORTED}`, 'unknown_format');
   }
   // A page of nothing but empty time buckets belongs to the report the other pages are from: a cost report
@@ -533,11 +560,8 @@ export async function detectImport(files: ImportFile[]): Promise<Detected> {
     );
   }
   const parser = good[0].k.parser;
-  // An export chosen with its manifest: every conversations part it lists must be there, or conversations would be missing
-  // without a word. Parts are counted rather than matched by name, since a browser renames a download whose name is taken.
-  if (parser === 'claude-export') {
-    for (const manifest of manifests) if (good.length < conversationParts(manifest).length) throw missingParts(manifest, good.length);
-  }
+  // An export chosen with its manifest: every conversations part it lists must be there (see checkParts).
+  if (parser === 'claude-export') checkParts(manifests, good.length);
   if (parser === 'generic-csv' && good.length > 1) {
     throw new ImportError('Import CSV files one at a time: each has its own columns to match.', 'mixed_selection');
   }
