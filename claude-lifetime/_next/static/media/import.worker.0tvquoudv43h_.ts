@@ -3,6 +3,7 @@ import { ImportError, type ImportParser, type ImportProgress, type ImportSink } 
 import { apiCostReportParser, apiUsageReportParser, consoleCsvParser } from '../api-reports';
 import { claudeCodeLedgerParser, claudeCodeParser } from '../claude-code';
 import { claudeExportParser } from '../claude-export';
+import { ExportManifestFound } from '../claude-export/manifest';
 import type { ParserKey } from '../formats';
 import { genericCsvParser, genericJsonParser } from '../generic';
 import { detectSelection, filesToParse } from '../selection';
@@ -94,6 +95,7 @@ class BatchingSink implements ImportSink {
 }
 
 function describe(error: unknown): WorkerError {
+  if (error instanceof ExportManifestFound) return { message: error.message, code: error.code, manifest: error.manifest };
   if (error instanceof ImportError) return { message: error.message, code: error.code, details: error.details };
   const message = error instanceof Error ? error.message : String(error);
   return { message: `The file could not be read: ${message}`, code: 'unexpected' };
