@@ -25,7 +25,8 @@ export function ProjectsSection() {
         Project
       </FadeIn>
 
-      <div ref={stackRef} className="mx-auto max-w-6xl">
+      {/* Room below the stack for the last card's offset, so that it ends inside the section. */}
+      <div ref={stackRef} className="mx-auto max-w-6xl" style={{ paddingBottom: `${(PROJECTS.length - 1) * 28}px` }}>
         {PROJECTS.map((project, index) => (
           <ProjectCard
             key={project.number}
@@ -78,23 +79,30 @@ function ProjectCard({ project, index, progress, range, targetScale }: ProjectCa
 
         <div className="mt-4 flex gap-3 sm:mt-6 sm:gap-4 md:mt-8">
           <div className="flex w-[40%] flex-col gap-3 sm:gap-4">
+            {/* The brief's heights, capped by the screen's height as well, so that a pinned card fits on a laptop screen. */}
             <img
               src={project.column1[0]}
               alt={`${project.name}, view 1`}
               loading="lazy"
               className={`w-full object-cover ${IMAGE_RADIUS}`}
-              style={{ height: 'clamp(130px, 16vw, 230px)' }}
+              style={{ height: 'min(clamp(130px, 16vw, 230px), 20vh)', minHeight: '130px' }}
             />
             <img
               src={project.column1[1]}
               alt={`${project.name}, view 2`}
               loading="lazy"
               className={`w-full object-cover ${IMAGE_RADIUS}`}
-              style={{ height: 'clamp(160px, 22vw, 340px)' }}
+              style={{ height: 'min(clamp(160px, 22vw, 340px), 30vh)', minHeight: '160px' }}
             />
           </div>
-          <div className="w-[60%]">
-            <img src={project.column2} alt={`${project.name}, view 3`} loading="lazy" className={`h-full w-full object-cover ${IMAGE_RADIUS}`} />
+          {/* The tall image fills the height the left column sets; its own proportions do not stretch the card. */}
+          <div className="relative w-[60%]">
+            <img
+              src={project.column2}
+              alt={`${project.name}, view 3`}
+              loading="lazy"
+              className={`absolute inset-0 h-full w-full object-cover ${IMAGE_RADIUS}`}
+            />
           </div>
         </div>
       </motion.article>

@@ -29,7 +29,8 @@ export function Magnet({
   const [offset, setOffset] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
-    if (disabled) {
+    // Also still with reduced motion asked for in the system settings.
+    if (disabled || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       setActive(false);
       setOffset({ x: 0, y: 0 });
       return;

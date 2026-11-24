@@ -1,6 +1,8 @@
 import { useEffect, useRef, type RefObject } from 'react';
 import { MARQUEE_IMAGES } from '../data';
 
+const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 const ROW_1 = MARQUEE_IMAGES.slice(0, 11);
 const ROW_2 = MARQUEE_IMAGES.slice(11);
 /** Each row is repeated three times, so there is always more of it on either side while it moves. */
@@ -19,7 +21,8 @@ export function MarqueeSection() {
       const section = sectionRef.current;
       if (!section) return;
       const sectionTop = section.getBoundingClientRect().top + window.scrollY;
-      const offset = (window.scrollY - sectionTop + window.innerHeight) * 0.3;
+      // With reduced motion asked for, the rows stay where they start.
+      const offset = prefersReducedMotion() ? 0 : (window.scrollY - sectionTop + window.innerHeight) * 0.3;
       // Written straight to the elements: re-rendering 63 images on every scroll event would be wasted work.
       if (row1Ref.current) row1Ref.current.style.transform = `translateX(${offset - 200}px)`;
       if (row2Ref.current) row2Ref.current.style.transform = `translateX(${-(offset - 200)}px)`;

@@ -13,7 +13,8 @@ const NAV_LINKS = [
 export function HeroSection() {
   return (
     <section className="relative flex h-screen flex-col" style={{ overflowX: 'clip' }}>
-      <FadeIn as="nav" delay={0} y={-20} className="flex justify-between px-6 pt-6 md:px-10 md:pt-8">
+      {/* Above the portrait, which can reach up this far and is pulled towards the cursor. */}
+      <FadeIn as="nav" delay={0} y={-20} className="relative z-20 flex justify-between px-6 pt-6 md:px-10 md:pt-8">
         {NAV_LINKS.map((link) => (
           <a
             key={link.label}
