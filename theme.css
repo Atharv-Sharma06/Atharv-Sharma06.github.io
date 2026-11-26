@@ -427,7 +427,8 @@ html.js:not(.js-ok) .intro .hero-name { animation: reveal-fallback 0s 2.5s forwa
 @keyframes row-in { from { opacity: 0; transform: translateY(24px); } }
 
 /* ── Responsive ───────────────────────────────────────────── */
-@media (min-width: 961px) and (max-width: 1100px) {
+/* from just past the menu breakpoint, so zoomed windows between 960 and 961px are covered too */
+@media (min-width: 960.02px) and (max-width: 1100px) {
   .nav { gap: 16px; }
   .nav a { font-size: 13px; letter-spacing: 0.06em; }
 }
