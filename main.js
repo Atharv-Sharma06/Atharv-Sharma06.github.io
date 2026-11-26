@@ -14,6 +14,8 @@ const GH_USER = 'Atharv-Sharma06';
 const fellBack = !reduceMotion && getComputedStyle($('.intro-step')).opacity === '1';
 // Tells the CSS fallbacks that JS is alive and in control of reveals.
 html.classList.add('js-ok');
+// Taking over a page the fallback already showed: apply the final state without fading anything back in.
+if (fellBack) html.classList.add('no-fade');
 
 function seeded(seed) {
   return function () {
@@ -88,12 +90,13 @@ function playIntro() {
   introTimers = [];
   if (reduceMotion) { endIntro(); return; }
   // Snap back to the hidden state (no fade out), then fade each part in on its own beat.
-  hero.classList.add('intro', 'intro-reset');
+  html.classList.add('no-fade');
+  hero.classList.add('intro');
   heroName.classList.remove('shown');
   introSteps.forEach(s => s.classList.remove('shown'));
   avatar.classList.remove('in');
   void hero.offsetWidth;
-  hero.classList.remove('intro-reset');
+  html.classList.remove('no-fade');
   const at = (ms, fn) => introTimers.push(setTimeout(fn, ms));
   at(150, () => heroName.classList.add('shown'));
   introSteps.forEach((s, i) => at(350 + i * 120, () => s.classList.add('shown')));
@@ -101,7 +104,29 @@ function playIntro() {
   at(350 + introSteps.length * 120 + 800, endIntro);
 }
 
-if (fellBack) {
+// The CSS sizes the name for Kanit. While another face is showing (the font is late or blocked), shrink it until each
+// line fits, so it neither runs off the column nor wraps and then jumps when Kanit arrives. The name is one line above
+// 520px and a word per line below.
+const typeEl = $('.type', heroName);
+const twoLineMQ = matchMedia('(max-width: 520px)');
+function fitName() {
+  heroName.style.fontSize = '';
+  const cs = getComputedStyle(hero);
+  const room = hero.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const probe = el('span', { 'aria-hidden': 'true', style: 'position:absolute;left:0;top:0;visibility:hidden;white-space:nowrap' });
+  heroName.append(probe);
+  const lines = twoLineMQ.matches ? typeEl.textContent.split(' ') : [typeEl.textContent];
+  const widest = Math.max(...lines.map(t => { probe.textContent = t; return probe.getBoundingClientRect().width; }));
+  probe.remove();
+  if (widest > room) heroName.style.fontSize = `${(parseFloat(getComputedStyle(heroName).fontSize) * room / widest * 0.99).toFixed(1)}px`;
+}
+let fitRaf = 0;
+const refit = () => { if (!fitRaf) fitRaf = requestAnimationFrame(() => { fitRaf = 0; fitName(); }); };
+fitName();
+window.addEventListener('resize', refit);
+if (document.fonts) { document.fonts.addEventListener('loadingdone', refit); document.fonts.ready.then(refit); }
+
+if (fellBack || reduceMotion) {
   endIntro();
 } else {
   // Wait (briefly) for the display weight, so the name doesn't fade in as a fallback face and then swap.
@@ -133,12 +158,31 @@ $('#replay').addEventListener('click', () => {
   if (reduceMotion || !matchMedia('(hover: hover) and (pointer: fine)').matches) return;
   const PAD = 150;    // how far outside the avatar the pull reaches
   const STRENGTH = 5; // the avatar moves 1/STRENGTH of the way to the pointer
-  const MAX = 40;     // never far enough to cover the bio beside it
+  const MAX = 40;     // the furthest it moves, where there is room
+  const GAP = 8;      // and it always stops this far short of its neighbours
+  const sprite = $('.sprite', avatar);
+  const bio = $('.profile-text', hero);
+  const links = $('.hero-links', hero);
+  const toggles = $('#toggles');
   let raf = 0;
   let last = null;
+  let cur = { x: 0, y: 0 };
   const set = (x, y) => {
+    cur = { x, y };
     avatar.style.setProperty('--mx', `${x.toFixed(1)}px`);
     avatar.style.setProperty('--my', `${y.toFixed(1)}px`);
+  };
+  // How far the sprite can move each way, from where it rests, without touching the bio, the links above,
+  // the toggles below or the edge of the column.
+  const room = () => {
+    const s = sprite.getBoundingClientRect();
+    const rest = { l: s.left - cur.x, r: s.right - cur.x, t: s.top - cur.y, b: s.bottom - cur.y };
+    const b = bio.getBoundingClientRect();
+    const up = links.getBoundingClientRect().bottom;
+    const down = Math.min(toggles.getBoundingClientRect().top, b.top > rest.b ? b.top : Infinity);
+    const side = b.left > rest.r ? b.left : Infinity;
+    const lim = v => clamp(v - GAP, 0, MAX);
+    return { l: lim(rest.l - hero.getBoundingClientRect().left), r: lim(side - rest.r), u: lim(rest.t - up), d: lim(down - rest.b) };
   };
   const update = () => {
     raf = 0;
@@ -148,8 +192,9 @@ $('#replay').addEventListener('click', () => {
     const dy = last.y - (r.top + r.height / 2);
     const near = Math.abs(dx) < r.width / 2 + PAD && Math.abs(dy) < r.height / 2 + PAD;
     avatar.classList.toggle('pulled', near);
-    if (near) set(clamp(dx / STRENGTH, -MAX, MAX), clamp(dy / STRENGTH, -MAX, MAX));
-    else set(0, 0);
+    if (!near) { set(0, 0); return; }
+    const k = room();
+    set(clamp(dx / STRENGTH, -k.l, k.r), clamp(dy / STRENGTH, -k.u, k.d));
   };
   const schedule = () => { if (!raf) raf = requestAnimationFrame(update); };
   window.addEventListener('pointermove', e => {
@@ -171,6 +216,8 @@ const io = new IntersectionObserver(entries => {
 }, { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
 if (fellBack) $$('.rv, [data-scramble]').forEach(n => n.classList.add('in'));
 $$('.rv, [data-scramble]').forEach(n => io.observe(n));
+// Everything the fallback showed now has its final state; later reveals fade as usual.
+if (fellBack) { void html.offsetWidth; html.classList.remove('no-fade'); }
 
 /* ── The stack: two rows of tiles that slide, in opposite directions, with the scroll ── */
 (function marquee() {
@@ -194,6 +241,8 @@ $$('.rv, [data-scramble]').forEach(n => io.observe(n));
   update();
   window.addEventListener('scroll', schedule, { passive: true });
   window.addEventListener('resize', schedule);
+  // Sections opening and closing (and fonts arriving) move the marquee without any scroll, so follow the page's height too.
+  if ('ResizeObserver' in window) new ResizeObserver(schedule).observe(document.body);
 })();
 
 /* ── Project previews (generated, illustrative) ───────────── */

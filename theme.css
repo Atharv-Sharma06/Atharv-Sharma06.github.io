@@ -149,6 +149,7 @@ b, strong { font-weight: 500; }
   letter-spacing: -0.025em;
   text-transform: uppercase;
   text-wrap: balance;
+  min-height: 0;
   margin-bottom: clamp(20px, 3vw, 36px);
   padding-bottom: 0.04em; /* keeps descending strokes inside the clipped gradient */
 }
@@ -169,11 +170,12 @@ b, strong { font-weight: 500; }
 }
 .hero-links a:not(.btn-contact):hover, .hero-links a:not(.btn-contact):focus-visible { background: rgba(215, 226, 234, 0.1); border-color: var(--fg); color: var(--fg); }
 .hero-links .btn-contact { padding: 13px 30px; font-size: 13px; }
+.hero-links .btn-contact:hover, .hero-links .btn-contact:focus-visible { color: #fff; }
 
 .profile { gap: clamp(20px, 4vw, 56px); margin-top: 40px; }
 .hero-bio { font-size: clamp(15px, 1.35vw, 19px); font-weight: 300; line-height: 1.7; color: var(--fg); }
 .status { gap: 10px; margin-top: 18px; padding: 8px 16px; border: 1px solid var(--line-2); border-radius: 999px; font-size: 13px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg); }
-.blink-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px #b600a8; animation: glow 2.4s ease-in-out 3; }
+.blink-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px #b600a8; animation: glow 2.4s ease-in-out 2; }
 @keyframes glow { 50% { opacity: 0.3; } }
 
 /* the avatar floats on a gradient glow, and leans towards the mouse (main.js sets --mx/--my) */
@@ -199,7 +201,7 @@ b, strong { font-weight: 500; }
 .js .avatar .sprite { clip-path: none; opacity: 0; scale: 0.94; }
 .js .avatar.in .sprite { opacity: 1; scale: 1; transition: opacity 0.9s var(--ease), scale 0.9s var(--ease), translate 0.6s ease-in-out; }
 .js .avatar.in.pulled .sprite { transition: opacity 0.9s var(--ease), scale 0.9s var(--ease), translate 0.3s ease-out; }
-.avatar.in .sprite { animation: float 3.2s ease-in-out 2; }
+.avatar.in .sprite { animation: float 3.2s ease-in-out 1; }
 .avatar:hover .sprite { animation: float 3.2s ease-in-out infinite; }
 @keyframes float { 50% { transform: translateY(-8px); } }
 .avatar-shadow { width: 120px; height: 12px; margin-top: 6px; border-radius: 50%; background: radial-gradient(closest-side, rgba(215, 226, 234, 0.16), transparent); }
@@ -231,14 +233,13 @@ b, strong { font-weight: 500; }
 .js .intro .intro-step { opacity: 0; clip-path: none; transform: translateY(20px); }
 .js .intro-step { transition: opacity 0.7s var(--ease), transform 0.7s var(--ease); }
 .js .intro .intro-step.shown { opacity: 1; clip-path: none; transform: none; }
-/* a replay snaps back to hidden before fading in again */
-.js .intro-reset .hero-name, .js .intro-reset .intro-step, .js .intro-reset .sprite { transition: none !important; }
 html.js:not(.js-ok) .intro .hero-name { animation: reveal-fallback 0s 2.5s forwards; }
 
 /* headings and .rv blocks fade up as they come into view */
-.js .rv, .js [data-scramble] { opacity: 0; transform: translateY(30px); transition: opacity 0.7s var(--ease), transform 0.7s var(--ease); }
-.js .rv.in, .js [data-scramble].in { opacity: 1; transform: none; }
-html.js:not(.js-ok) [data-scramble] { animation: reveal-fallback 0s 2.5s forwards; }
+.js .rv, .js [data-scramble] { transition: opacity 0.7s var(--ease), transform 0.7s var(--ease); }
+.js .rv:not(.in), .js-ok [data-scramble]:not(.in) { opacity: 0; transform: translateY(30px); }
+/* reveals that must not fade: a late main.js taking over a page the fallback already showed, or a replay snapping back */
+.no-fade .hero-name, .no-fade .intro-step, .no-fade .sprite, .no-fade .rv, .no-fade [data-scramble] { transition: none !important; }
 
 /* ── The book: one open section at a time ─────────────────── */
 .book { padding-top: 24px; padding-bottom: 32px; }
@@ -300,15 +301,15 @@ html.js:not(.js-ok) [data-scramble] { animation: reveal-fallback 0s 2.5s forward
 .e-cite a:hover, .e-cite a:focus-visible, .e-row-link:hover, .e-row-link:focus-visible { color: var(--fg); opacity: 0.7; }
 
 /* projects: each one a rounded card */
-#projects > .entries { display: grid; gap: 14px; }
-#projects > .entries > .entry {
+#projects > .entries:not(.commits) { display: grid; gap: 14px; }
+#projects > .entries:not(.commits) > .entry {
   padding: clamp(20px, 3vw, 32px) clamp(20px, 3.4vw, 40px);
   border: 2px solid var(--line-2);
   border-radius: clamp(28px, 4vw, 44px);
   background: var(--bg);
   transition: border-color 0.2s, background-color 0.2s;
 }
-#projects > .entries > .entry:hover { border-color: var(--fg); background: rgba(215, 226, 234, 0.025); }
+#projects > .entries:not(.commits) > .entry:hover { border-color: var(--fg); background: rgba(215, 226, 234, 0.025); }
 
 .sec-sub { margin-top: 44px; padding-top: 24px; border-top: 1px solid var(--line); }
 .sec-sub h3 { font-size: 13px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-3); }
@@ -347,7 +348,7 @@ html.js:not(.js-ok) [data-scramble] { animation: reveal-fallback 0s 2.5s forward
 .term-out, .term-in { font-family: var(--px-mono); font-size: 14px; }
 .term-out { padding: 18px 26px 4px; line-height: 1.85; }
 .term-out a { color: var(--fg); }
-.term-in { margin: 8px 26px 0; border-bottom: 1px solid var(--line-2); }
+.term-in { margin: 8px 26px 0; border-bottom: 2px solid var(--line-2); }
 .term-in:focus-within { border-bottom-color: var(--fg); }
 .term-in input { caret-color: #e46cff; }
 .term-go { color: var(--fg-2); font-size: 18px; }
@@ -487,18 +488,19 @@ html.js:not(.js-ok) [data-scramble] { animation: reveal-fallback 0s 2.5s forward
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .js .hero-name, .js [data-scramble], .js .avatar .sprite { opacity: 1; transform: none; scale: 1; translate: none; }
+  .js .intro .hero-name, .js .intro .intro-step, .js .rv:not(.in), .js-ok [data-scramble]:not(.in), .js .avatar .sprite { opacity: 1; transform: none; scale: 1; translate: none; }
   .modal-win, .modal-backdrop { animation: none; }
 }
 
 @media print {
-  :root { --fg: #000; --fg-2: #222; --fg-3: #555; --green: #6a1b8a; --gold: #8a4a00; --coral: #a33a17; }
+  :root { --bg: #fff; --panel: #fff; --panel-2: #fff; --fg: #000; --fg-2: #222; --fg-3: #555; --green: #6a1b8a; --gold: #8a4a00; --coral: #a33a17; }
   body { background: #fff; }
   .hero-name, .sec-head h2, .brand, .card-title, .gold, .card-tag { background: none; -webkit-text-fill-color: currentColor; color: #000; }
   .js [data-scramble], .js .hero-name { opacity: 1 !important; transform: none !important; }
   .entry { break-inside: avoid; }
   .sec-head, .sec-sub { break-after: avoid; }
-  #projects > .entries > .entry, .term { border-color: #000; }
+  #projects > .entries:not(.commits) > .entry, .term { border-color: #000; background: none; }
+  .btn-solid, .btn-contact, .tg[aria-expanded="true"] { background: none; color: #000; -webkit-text-fill-color: #000; box-shadow: none; outline: 0; border: 2px solid #000; }
   #skills { padding: 0; border-radius: 0; }
   .state.gold { background: none; color: #000; -webkit-text-fill-color: #000; border-color: currentColor; }
   .header { position: static; }
