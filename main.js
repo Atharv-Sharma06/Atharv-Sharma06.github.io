@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────
-   Atharv Sharma — portfolio (8-bit edition)
+   Atharv Sharma — portfolio
    ───────────────────────────────────────────────────────────── */
 
 const $  = (s, r = document) => r.querySelector(s);
@@ -12,8 +12,12 @@ const GH_USER = 'Atharv-Sharma06';
 
 // If main.js arrives late, the CSS fallback may already have revealed the page; don't hide it again.
 const fellBack = !reduceMotion && getComputedStyle($('.intro-step')).opacity === '1';
+// The inline timer may already have unfolded the sections (headings showing) before the hero's own fallback fired.
+const unfolded = !html.classList.contains('one-sec');
 // Tells the CSS fallbacks that JS is alive and in control of reveals.
 html.classList.add('js-ok');
+// Taking over a page the fallback already showed: apply the final state without fading anything back in.
+if (fellBack || unfolded) html.classList.add('no-fade');
 
 function seeded(seed) {
   return function () {
@@ -67,92 +71,76 @@ const wideMQ = matchMedia('(min-width: 961px)');
 const onWide = e => { if (e.matches) setMenu(false); };
 if (wideMQ.addEventListener) wideMQ.addEventListener('change', onWide); else wideMQ.addListener(onWide);
 
-/* ── Intro: a font roulette that lands on the name, then the profile steps in ── */
+/* ── Intro: the name rises in, then the profile lines one after another ── */
 const hero = $('#hero');
 const heroName = $('#hero-name');
-const typeEl = $('.type', heroName);
 const avatar = $('.avatar', hero);
 const introSteps = $$('.intro-step', hero);
-let introRaf = 0;
-
-// The name flips through pixel typefaces, slot-machine style, before settling on the display face.
-const ROLL_FONTS = ['Silkscreen', 'VT323', 'Jacquard 12', 'Sixtyfour', 'Pixelify Sans', 'Micro 5', 'Workbench', 'DotGothic16', 'Jersey 10', 'Handjet'];
-const ROLL_MS = 110;
-const roll = el('span', { class: 'name-roll', 'aria-hidden': 'true' });
-heroName.append(roll);
+let introTimers = [];
 
 function endIntro() {
-  cancelAnimationFrame(introRaf);
-  typeEl.textContent = typeEl.dataset.text;
-  heroName.classList.remove('rolling');
-  heroName.removeAttribute('aria-label');
-  roll.textContent = '';
-  roll.removeAttribute('style');
-  hero.classList.remove('intro');
+  introTimers.forEach(clearTimeout);
+  introTimers = [];
+  heroName.classList.add('shown');
   introSteps.forEach(s => s.classList.add('shown'));
   avatar.classList.add('in');
+  hero.classList.remove('intro');
 }
 
 function playIntro() {
-  cancelAnimationFrame(introRaf);
+  introTimers.forEach(clearTimeout);
+  introTimers = [];
   if (reduceMotion) { endIntro(); return; }
-  const full = typeEl.dataset.text;
-  const ROLL_END = ROLL_FONTS.length * ROLL_MS;
-  const STEP_MS = 120;
-  const AVATAR_AT = ROLL_END + STEP_MS * 3;
-  const DURATION = ROLL_END + STEP_MS * (introSteps.length + 1);
-  heroName.setAttribute('aria-label', full);
+  // Snap back to the hidden state (no fade out), then fade each part in on its own beat.
+  html.classList.add('no-fade');
   hero.classList.add('intro');
+  heroName.classList.remove('shown');
   introSteps.forEach(s => s.classList.remove('shown'));
   avatar.classList.remove('in');
-  // Every face is scaled toward the width the final name will occupy (line by line where it wraps), without growing much taller than it.
-  const target = Math.min(heroName.clientWidth, typeEl.getBoundingClientRect().width);
-  const wraps = typeEl.getClientRects().length > 1;
-  heroName.classList.add('rolling');
-  roll.textContent = wraps ? full.replace(' ', '\n') : full;
-  let face = -1;
-  const t0 = performance.now();
-  const tick = now => {
-    const t = now - t0;
-    const k = Math.min(ROLL_FONTS.length, Math.floor(t / ROLL_MS));
-    if (k !== face) {
-      face = k;
-      if (k < ROLL_FONTS.length) {
-        // A face that is still downloading is skipped: the roll keeps the previous one.
-        if (!document.fonts || document.fonts.check(`400 64px "${ROLL_FONTS[k]}"`, full)) {
-          roll.style.fontFamily = `"${ROLL_FONTS[k]}", var(--px-d)`;
-          roll.style.transform = `translateX(-50%) scale(${clamp(target / roll.scrollWidth, 0.4, 1.25)})`;
-        }
-      } else {
-        heroName.classList.remove('rolling');
-        roll.textContent = '';
-      }
-    }
-    introSteps.forEach((s, i) => { if (t > ROLL_END + STEP_MS + i * STEP_MS) s.classList.add('shown'); });
-    if (t > AVATAR_AT) avatar.classList.add('in');
-    if (t < DURATION + 300) introRaf = requestAnimationFrame(tick);
-    else endIntro();
-  };
-  introRaf = requestAnimationFrame(tick);
+  void hero.offsetWidth;
+  html.classList.remove('no-fade');
+  const at = (ms, fn) => introTimers.push(setTimeout(fn, ms));
+  at(150, () => heroName.classList.add('shown'));
+  introSteps.forEach((s, i) => at(350 + i * 120, () => s.classList.add('shown')));
+  at(600, () => avatar.classList.add('in'));
+  at(350 + introSteps.length * 120 + 800, endIntro);
 }
 
-if (fellBack) {
+// The CSS sizes the name for Kanit. While another face is showing (the font is late or blocked), shrink it until each
+// line fits, so it neither runs off the column nor wraps and then jumps when Kanit arrives. The name is one line above
+// 520px and a word per line below.
+const typeEl = $('.type', heroName);
+const twoLineMQ = matchMedia('(max-width: 520px)');
+function fitName() {
+  heroName.style.fontSize = '';
+  const cs = getComputedStyle(hero);
+  const room = hero.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const probe = el('span', { 'aria-hidden': 'true', style: 'position:absolute;left:0;top:0;visibility:hidden;white-space:nowrap' });
+  heroName.append(probe);
+  const lines = twoLineMQ.matches ? typeEl.textContent.split(' ') : [typeEl.textContent];
+  const widest = Math.max(...lines.map(t => { probe.textContent = t; return probe.getBoundingClientRect().width; }));
+  probe.remove();
+  if (widest > room) heroName.style.fontSize = `${(parseFloat(getComputedStyle(heroName).fontSize) * room / widest * 0.99).toFixed(1)}px`;
+}
+let fitRaf = 0;
+const refit = () => { if (!fitRaf) fitRaf = requestAnimationFrame(() => { fitRaf = 0; fitName(); }); };
+fitName();
+window.addEventListener('resize', refit);
+if (document.fonts) { document.fonts.addEventListener('loadingdone', refit); document.fonts.ready.then(refit); }
+
+if (fellBack || reduceMotion) {
   endIntro();
 } else {
-  // Wait (briefly) for the display face only; the roulette faces load alongside and late ones are skipped.
-  heroName.style.visibility = 'hidden';
-  const load = f => document.fonts.load(`400 64px "${f}"`, typeEl.dataset.text);
-  if (document.fonts) ROLL_FONTS.forEach(f => load(f).catch(() => {}));
-  const display = document.fonts ? load('Press Start 2P') : Promise.resolve();
-  Promise.race([display, new Promise(r => setTimeout(r, 1200))])
-    .catch(() => {}).then(() => { heroName.style.visibility = ''; playIntro(); });
+  // Wait (briefly) for the display weight, so the name doesn't fade in as a fallback face and then swap.
+  const display = document.fonts ? document.fonts.load('900 64px "Kanit"', heroName.textContent) : Promise.resolve();
+  Promise.race([display, new Promise(r => setTimeout(r, 1200))]).catch(() => {}).then(playIntro);
 }
 
 $('#replay').addEventListener('click', () => {
   heroName.setAttribute('tabindex', '-1');
   heroName.focus({ preventScroll: true });
   if (reduceMotion || window.scrollY < 4) { window.scrollTo(0, 0); playIntro(); return; }
-  // Start once the page is back at the top, so the roulette is actually seen.
+  // Start once the page is back at the top, so the intro is actually seen.
   let started = false;
   const go = () => {
     if (started) return;
@@ -167,55 +155,118 @@ $('#replay').addEventListener('click', () => {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 });
 
-/* ── Reveals + heading scramble ───────────────────────────── */
-const GLYPHS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+=?';
-function scramble(node) {
-  if (reduceMotion) return;
-  const final = node.textContent;
-  node.setAttribute('aria-label', final);
-  node.style.height = node.offsetHeight + 'px';
-  const DURATION = 650;
-  const t0 = performance.now();
-  const tick = now => {
-    const p = clamp((now - t0) / DURATION, 0, 1);
-    const fixed = Math.floor(p * final.length);
-    let out = final.slice(0, fixed);
-    for (let i = fixed; i < final.length; i++) {
-      out += final[i] === ' ' ? ' ' : GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
-    }
-    node.textContent = out;
-    if (p < 1) requestAnimationFrame(tick);
-    else { node.textContent = final; node.style.height = ''; }
+/* ── The avatar leans towards a mouse that comes near it ──── */
+(function magnet() {
+  if (reduceMotion || !matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+  const PAD = 150;    // how far outside the avatar the pull reaches
+  const STRENGTH = 5; // the avatar moves 1/STRENGTH of the way to the pointer
+  const MAX = 40;     // the furthest it moves, where there is room
+  const GAP = 8;      // and it always stops this far short of its neighbours
+  const FLOAT = 8;    // the hover float lifts it this much on top of the pull
+  const sprite = $('.sprite', avatar);
+  const bio = $('.profile-text', hero);
+  const links = $('.hero-links', hero);
+  const toggles = $('#toggles');
+  let raf = 0;
+  let last = null;
+  const set = (x, y) => {
+    avatar.style.setProperty('--mx', `${x.toFixed(1)}px`);
+    avatar.style.setProperty('--my', `${y.toFixed(1)}px`);
   };
-  requestAnimationFrame(tick);
-}
+  // Where the sprite rests, taken from the avatar's own box (never moved), so a pull still in flight, the float
+  // and the entrance scale don't skew it: the sprite sits at the top of the avatar's padding box, full width.
+  const restBox = () => {
+    const a = avatar.getBoundingClientRect();
+    const cs = getComputedStyle(avatar);
+    const t = a.top + parseFloat(cs.paddingTop);
+    return { l: a.left + parseFloat(cs.paddingLeft), r: a.right - parseFloat(cs.paddingRight), t, b: t + parseFloat(getComputedStyle(sprite).height) };
+  };
+  // How far the sprite can move each way without touching the bio, the links above, the toggles below or the
+  // edge of the column.
+  const room = () => {
+    const rest = restBox();
+    const b = bio.getBoundingClientRect();
+    const up = links.getBoundingClientRect().bottom;
+    const down = Math.min(toggles.getBoundingClientRect().top, b.top > rest.b ? b.top : Infinity);
+    const side = b.left > rest.r ? b.left : Infinity;
+    const lim = v => clamp(v - GAP, 0, MAX);
+    return { l: lim(rest.l - hero.getBoundingClientRect().left), r: lim(side - rest.r), u: lim(rest.t - up - FLOAT), d: lim(down - rest.b) };
+  };
+  const update = () => {
+    raf = 0;
+    if (!last) return;
+    const r = avatar.getBoundingClientRect();
+    const dx = last.x - (r.left + r.width / 2);
+    const dy = last.y - (r.top + r.height / 2);
+    const near = Math.abs(dx) < r.width / 2 + PAD && Math.abs(dy) < r.height / 2 + PAD;
+    avatar.classList.toggle('pulled', near);
+    if (!near) { set(0, 0); return; }
+    const k = room();
+    set(clamp(dx / STRENGTH, -k.l, k.r), clamp(dy / STRENGTH, -k.u, k.d));
+  };
+  const schedule = () => { if (!raf) raf = requestAnimationFrame(update); };
+  window.addEventListener('pointermove', e => {
+    if (e.pointerType !== 'mouse') return;
+    last = { x: e.clientX, y: e.clientY };
+    schedule();
+  }, { passive: true });
+  window.addEventListener('scroll', schedule, { passive: true });
+  document.documentElement.addEventListener('mouseleave', () => { last = null; avatar.classList.remove('pulled'); set(0, 0); });
+})();
 
+/* ── Reveals: headings and blocks fade up as they come into view ── */
 const io = new IntersectionObserver(entries => {
   entries.forEach(entry => {
     if (!entry.isIntersecting) return;
-    const t = entry.target;
-    if (t.hasAttribute('data-scramble')) scramble(t);
-    else t.classList.add('in');
-    io.unobserve(t);
+    entry.target.classList.add('in');
+    io.unobserve(entry.target);
   });
 }, { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
-if (fellBack) $$('.rv').forEach(n => n.classList.add('in'));
+if (fellBack || unfolded) $$('.rv, [data-scramble]').forEach(n => n.classList.add('in'));
 $$('.rv, [data-scramble]').forEach(n => io.observe(n));
+// Everything the fallback showed now has its final state; later reveals fade as usual.
+if (fellBack || unfolded) { void html.offsetWidth; html.classList.remove('no-fade'); }
+
+/* ── The stack: two rows of tiles that slide, in opposite directions, with the scroll ── */
+(function marquee() {
+  const sec = $('.marquee');
+  if (!sec) return;
+  const tracks = $$('.marquee-track', sec);
+  // Each row is repeated three times, so there is always more of it on either side while it moves.
+  tracks.forEach(t => {
+    const tiles = [...t.children];
+    for (let k = 0; k < 2; k++) tiles.forEach(n => t.append(n.cloneNode(true)));
+  });
+  if (reduceMotion) return;
+  let raf = 0;
+  const update = () => {
+    raf = 0;
+    const top = sec.getBoundingClientRect().top + window.scrollY;
+    const offset = (window.scrollY - top + window.innerHeight) * 0.3 - 200;
+    tracks.forEach(t => { t.style.transform = `translateX(${t.dataset.dir === '-1' ? -offset : offset}px)`; });
+  };
+  const schedule = () => { if (!raf) raf = requestAnimationFrame(update); };
+  update();
+  window.addEventListener('scroll', schedule, { passive: true });
+  window.addEventListener('resize', schedule);
+  // Sections opening and closing (and fonts arriving) move the marquee without any scroll, so follow the page's height too.
+  if ('ResizeObserver' in window) new ResizeObserver(schedule).observe(document.body);
+})();
 
 /* ── Project previews (generated, illustrative) ───────────── */
 const VW = 320, VH = 180;
 const pts = arr => arr.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
 function windowFrame(bg, bar, title, body) {
-  return `<svg viewBox="0 0 ${VW} ${VH}" shape-rendering="crispEdges" role="img" aria-label="Illustrative preview of ${title}">
+  return `<svg viewBox="0 0 ${VW} ${VH}" shape-rendering="geometricPrecision" role="img" aria-label="Illustrative preview of ${title}">
     <rect width="${VW}" height="${VH}" fill="${bg}"/>
     <rect width="${VW}" height="14" fill="${bar}"/>
     <rect x="6" y="5" width="4" height="4" fill="#e8673f"/><rect x="13" y="5" width="4" height="4" fill="#ffffff" opacity=".25"/><rect x="20" y="5" width="4" height="4" fill="#ffffff" opacity=".25"/>
-    <text x="${VW / 2}" y="10" fill="#ffffff" opacity=".55" font-family="Silkscreen, monospace" font-size="6" text-anchor="middle">${title}</text>
+    <text x="${VW / 2}" y="10" fill="#ffffff" opacity=".55" font-family="Kanit, system-ui, sans-serif" font-size="6" text-anchor="middle">${title}</text>
     ${body}
   </svg>`;
 }
 const txt = (x, y, s, fill = '#ffffff', size = 6, op = 0.6, anchor = 'start') =>
-  `<text x="${x}" y="${y}" fill="${fill}" opacity="${op}" font-family="Silkscreen, monospace" font-size="${size}" text-anchor="${anchor}">${s}</text>`;
+  `<text x="${x}" y="${y}" fill="${fill}" opacity="${op}" font-family="Kanit, system-ui, sans-serif" font-size="${size}" text-anchor="${anchor}">${s}</text>`;
 
 const SHOTS = {
   macro() {
@@ -995,7 +1046,7 @@ renderCommits();
   // boot screen
   print('guest~ $ about', 't-cmd'); COMMANDS.about.run();
   print('guest~ $ hello', 't-cmd'); COMMANDS.hello.run();
-  // Start reading at the top; line heights change once the pixel font arrives, so re-apply then.
+  // Start reading at the top; line heights change once the web font arrives, so re-apply then.
   const bootTop = () => { if (!history.length && !note) out.scrollTop = 0; };
   bootTop();
   if (document.fonts) document.fonts.ready.then(bootTop);
