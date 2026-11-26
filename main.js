@@ -12,10 +12,12 @@ const GH_USER = 'Atharv-Sharma06';
 
 // If main.js arrives late, the CSS fallback may already have revealed the page; don't hide it again.
 const fellBack = !reduceMotion && getComputedStyle($('.intro-step')).opacity === '1';
+// The inline timer may already have unfolded the sections (headings showing) before the hero's own fallback fired.
+const unfolded = !html.classList.contains('one-sec');
 // Tells the CSS fallbacks that JS is alive and in control of reveals.
 html.classList.add('js-ok');
 // Taking over a page the fallback already showed: apply the final state without fading anything back in.
-if (fellBack) html.classList.add('no-fade');
+if (fellBack || unfolded) html.classList.add('no-fade');
 
 function seeded(seed) {
   return function () {
@@ -160,29 +162,35 @@ $('#replay').addEventListener('click', () => {
   const STRENGTH = 5; // the avatar moves 1/STRENGTH of the way to the pointer
   const MAX = 40;     // the furthest it moves, where there is room
   const GAP = 8;      // and it always stops this far short of its neighbours
+  const FLOAT = 8;    // the hover float lifts it this much on top of the pull
   const sprite = $('.sprite', avatar);
   const bio = $('.profile-text', hero);
   const links = $('.hero-links', hero);
   const toggles = $('#toggles');
   let raf = 0;
   let last = null;
-  let cur = { x: 0, y: 0 };
   const set = (x, y) => {
-    cur = { x, y };
     avatar.style.setProperty('--mx', `${x.toFixed(1)}px`);
     avatar.style.setProperty('--my', `${y.toFixed(1)}px`);
   };
-  // How far the sprite can move each way, from where it rests, without touching the bio, the links above,
-  // the toggles below or the edge of the column.
+  // Where the sprite rests, taken from the avatar's own box (never moved), so a pull still in flight, the float
+  // and the entrance scale don't skew it: the sprite sits at the top of the avatar's padding box, full width.
+  const restBox = () => {
+    const a = avatar.getBoundingClientRect();
+    const cs = getComputedStyle(avatar);
+    const t = a.top + parseFloat(cs.paddingTop);
+    return { l: a.left + parseFloat(cs.paddingLeft), r: a.right - parseFloat(cs.paddingRight), t, b: t + parseFloat(getComputedStyle(sprite).height) };
+  };
+  // How far the sprite can move each way without touching the bio, the links above, the toggles below or the
+  // edge of the column.
   const room = () => {
-    const s = sprite.getBoundingClientRect();
-    const rest = { l: s.left - cur.x, r: s.right - cur.x, t: s.top - cur.y, b: s.bottom - cur.y };
+    const rest = restBox();
     const b = bio.getBoundingClientRect();
     const up = links.getBoundingClientRect().bottom;
     const down = Math.min(toggles.getBoundingClientRect().top, b.top > rest.b ? b.top : Infinity);
     const side = b.left > rest.r ? b.left : Infinity;
     const lim = v => clamp(v - GAP, 0, MAX);
-    return { l: lim(rest.l - hero.getBoundingClientRect().left), r: lim(side - rest.r), u: lim(rest.t - up), d: lim(down - rest.b) };
+    return { l: lim(rest.l - hero.getBoundingClientRect().left), r: lim(side - rest.r), u: lim(rest.t - up - FLOAT), d: lim(down - rest.b) };
   };
   const update = () => {
     raf = 0;
@@ -214,10 +222,10 @@ const io = new IntersectionObserver(entries => {
     io.unobserve(entry.target);
   });
 }, { threshold: 0.12, rootMargin: '0px 0px -6% 0px' });
-if (fellBack) $$('.rv, [data-scramble]').forEach(n => n.classList.add('in'));
+if (fellBack || unfolded) $$('.rv, [data-scramble]').forEach(n => n.classList.add('in'));
 $$('.rv, [data-scramble]').forEach(n => io.observe(n));
 // Everything the fallback showed now has its final state; later reveals fade as usual.
-if (fellBack) { void html.offsetWidth; html.classList.remove('no-fade'); }
+if (fellBack || unfolded) { void html.offsetWidth; html.classList.remove('no-fade'); }
 
 /* ── The stack: two rows of tiles that slide, in opposite directions, with the scroll ── */
 (function marquee() {
